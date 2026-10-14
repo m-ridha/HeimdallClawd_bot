@@ -6,7 +6,10 @@
 *.db
 *.db-shm
 *.db-wal
-.railway/
+.railway/*
+!.railway/railway.py
+!.railway/requirements.txt
+!.railway/README.md
 .DS_Store
 
 /prebuilt/

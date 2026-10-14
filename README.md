@@ -12,4 +12,4 @@ For a folder-by-folder explanation and model setup instructions, see the [projec
 
 Heimdall can install named skills from the official registry through restricted `skills__install` and `skills__list` tools. Installed skills persist on the agent volume. Scheduling, SOPs/pipelines, public web access, script-containing skills and bounded Telegram file transfers are configured in the source; see [capabilities](docs/capabilities.md) for activation limits and live tests. Publishing a stable GitHub Release triggers deployment; pushing a tag alone does not.
 
-Railway uses legacy Config as Code today; see [IaC migration notes](docs/railway-iac.md) for the documented December 1, 2026 cutoff and a migration approach that preserves secrets and volumes.
+Railway infrastructure is defined in [.railway/railway.py](.railway/railway.py). See [IaC operations](docs/railway-iac.md) for planning changes while preserving secrets and volumes.

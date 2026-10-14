@@ -41,7 +41,6 @@ shutil.copyfile(executor_binary, executor_out / 'heimdall-executor')
 executor_digest = hashlib.sha256(executor_data).hexdigest()
 (executor_out / 'executor.sha256').write_text(f'{executor_digest}  /usr/local/bin/heimdall-executor\n')
 shutil.copyfile(root / 'executor/entrypoint.sh', executor_out / 'entrypoint.sh')
-shutil.copyfile(root / 'executor/railway.toml', executor_out / 'railway.toml')
 shutil.copyfile(root / 'deploy/executor/Dockerfile.artifact', executor_out / 'Dockerfile')
 lock = json.loads((out / 'deploy/bot/runtime.lock.json').read_text())
 provenance = {
@@ -50,21 +49,13 @@ provenance = {
     'builder': 'rust:1.99-slim-bookworm, native Linux x86_64',
     'binary_sha256': digest, 'launcher_sha256': launcher_digest, 'executor_sha256': executor_digest,
     'features': 'agent-runtime,channel-telegram,gateway,schema-export,plugins-wasm-cranelift',
-    'profile': 'release: opt-level=s, lto=thin, codegen-units=16',
+    'profile': 'release: opt-level=1, lto=off, codegen-units=16',
     'wasm_wit_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/wasm-wit.patch').read_bytes()).hexdigest(),
     'remote_skills_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/remote-skills.patch').read_bytes()).hexdigest(),
     'private_telegram_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest(),
 }
 (out / 'deploy/bot/artifact.lock.json').write_text(json.dumps(provenance, indent=2) + '\n')
 shutil.copyfile(root / 'deploy/bot/Dockerfile.artifact', out / 'Dockerfile')
-(out / 'railway.toml').write_text('''[build]
-builder = "DOCKERFILE"
-[deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 180
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
-''')
 shutil.copyfile(root / '.dockerignore', out / '.dockerignore')
 (out / 'RELEASE_VERSION').write_text(tag + '\n')
 print(f'Packaged {tag} from {commit}; runtime SHA256 {digest}')

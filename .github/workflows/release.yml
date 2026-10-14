@@ -14,62 +14,13 @@ concurrency:
 jobs:
   build:
     if: ${{ !github.event.release.prerelease }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    uses: ./.github/workflows/build.yml
     permissions:
       contents: read
       packages: write
-    env:
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
-    steps:
-      - name: Validate release tag
-        shell: bash
-        run: |
-          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
-            echo 'Expected a stable release tag vX.Y.Z'; exit 1;
-          }
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Verify tag belongs to main
-        run: git merge-base --is-ancestor HEAD origin/main
-      - name: Check release deployment safeguards
-        run: python3 -B -m unittest discover -s tools/tests -v
-      - uses: docker/setup-buildx-action@v4
-      - name: Select repository-scoped build cache
-        shell: bash
-        run: echo "BUILD_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}/build-cache" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Build and test native Linux runtime
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: deploy/bot/Dockerfile
-          target: release-binaries
-          outputs: type=local,dest=${{ runner.temp }}/runtime
-          cache-from: type=registry,ref=${{ env.BUILD_CACHE }}:runtime
-          cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:runtime,mode=max,image-manifest=true,oci-mediatypes=true
-      - name: Package and verify deployable bot
-        run: |
-          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/runtime/heimdall-launcher" "$RUNNER_TEMP/runtime/heimdall-executor" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
-          docker build --tag heimdall-executor "$RUNNER_TEMP/bot/executor"
-          docker build --file "$RUNNER_TEMP/bot/Dockerfile" --tag heimdall-bot "$RUNNER_TEMP/bot"
-          tar -czf "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" -C "$RUNNER_TEMP/bot" .
-          sha256sum "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/SHA256SUMS"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-package
-          path: |
-            ${{ runner.temp }}/heimdallclawd-*.tar.gz
-            ${{ runner.temp }}/SHA256SUMS
-          if-no-files-found: error
-          retention-days: 7
+    with:
+      ref: ${{ github.event.release.tag_name }}
+      release_tag: ${{ github.event.release.tag_name }}
 
   deploy:
     needs: build
@@ -91,6 +42,13 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install pinned Python IaC SDK
+        run: |
+          python -m pip install -r .railway/requirements.txt
+          python -B -m unittest discover -s tools/tests -v
       - name: Install pinned Railway CLI
         run: npm install --global @railway/cli@5.68.0
       - name: Deploy executor then bot and verify both
@@ -106,6 +64,9 @@ jobs:
           : "${RAILWAY_ENVIRONMENT_ID:?Missing production variable RAILWAY_ENVIRONMENT_ID}"
           : "${RAILWAY_AGENT_SERVICE_ID:?Missing production variable RAILWAY_AGENT_SERVICE_ID}"
           : "${RAILWAY_EXECUTOR_SERVICE_ID:?Missing production variable RAILWAY_EXECUTOR_SERVICE_ID}"
+          railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID"
+          railway config plan --file .railway/railway.py --out "$RUNNER_TEMP/railway-plan.json"
+          railway config apply --plan "$RUNNER_TEMP/railway-plan.json" --yes
           cd "$RUNNER_TEMP/release"
           sha256sum -c SHA256SUMS
           mkdir bot

@@ -1,0 +1,144 @@
+name: Build and verify release binaries
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Repository ref to validate (no deployment)'
+        required: true
+        default: main
+        type: string
+      release_tag:
+        description: 'Package version used only for validation'
+        required: true
+        default: v0.0.0
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  compile:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runtime-compile
+            cache: compiled-runtime
+          - target: support-binaries
+            cache: support
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      BUILD_REF: ${{ inputs.ref }}
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo 'Expected a stable release tag vX.Y.Z'; exit 1;
+          }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BUILD_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag belongs to main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - name: Check release deployment safeguards
+        run: python3 -B -m unittest discover -s tools/tests -v
+      - uses: docker/setup-buildx-action@v4
+      - name: Select repository-scoped build cache
+        shell: bash
+        run: echo "BUILD_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}/build-cache" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Compile and cache ${{ matrix.target }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/bot/Dockerfile
+          target: ${{ matrix.target }}
+          outputs: type=cacheonly
+          cache-from: type=registry,ref=${{ env.BUILD_CACHE }}:${{ matrix.cache }}
+          cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:${{ matrix.cache }},mode=max,image-manifest=true,oci-mediatypes=true
+
+  build:
+    needs: compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      BUILD_REF: ${{ inputs.ref }}
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo 'Expected a stable release tag vX.Y.Z'; exit 1;
+          }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BUILD_REF }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag belongs to main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - name: Check release deployment safeguards
+        run: python3 -B -m unittest discover -s tools/tests -v
+      - uses: docker/setup-buildx-action@v4
+      - name: Select repository-scoped build cache
+        shell: bash
+        run: echo "BUILD_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}/build-cache" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Validate cached Linux binaries and export release artifacts
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/bot/Dockerfile
+          target: release-binaries
+          outputs: type=local,dest=${{ runner.temp }}/runtime
+          cache-from: |
+            type=registry,ref=${{ env.BUILD_CACHE }}:compiled-runtime
+            type=registry,ref=${{ env.BUILD_CACHE }}:support
+            type=registry,ref=${{ env.BUILD_CACHE }}:validated
+          cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:validated,mode=max,image-manifest=true,oci-mediatypes=true
+      - name: Package and verify deployable bot
+        run: |
+          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/runtime/heimdall-launcher" "$RUNNER_TEMP/runtime/heimdall-executor" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
+          docker build --tag heimdall-executor "$RUNNER_TEMP/bot/executor"
+          docker build --file "$RUNNER_TEMP/bot/Dockerfile" --tag heimdall-bot "$RUNNER_TEMP/bot"
+          tar -czf "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" -C "$RUNNER_TEMP/bot" .
+          sha256sum "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/SHA256SUMS"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: |
+            ${{ runner.temp }}/heimdallclawd-*.tar.gz
+            ${{ runner.temp }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+

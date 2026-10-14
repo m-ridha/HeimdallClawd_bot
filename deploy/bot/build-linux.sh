@@ -28,7 +28,7 @@ import json,sys
 print(','.join(json.load(open(sys.argv[1]))['features']))
 PYFEATURES
 )
-export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+export CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1
 cargo zigbuild --release --locked --target x86_64-unknown-linux-gnu.2.36 --no-default-features --features "$features" --bin zeroclaw
 target_dir=${CARGO_TARGET_DIR:-target}
 binary="$target_dir/x86_64-unknown-linux-gnu/release/zeroclaw"
