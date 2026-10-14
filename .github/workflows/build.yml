@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: runtime-compile
+          - target: runtime-binary
             cache: compiled-runtime
           - target: support-binaries
             cache: support
@@ -57,6 +57,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Verify tag belongs to main
+        if: github.event_name != 'workflow_dispatch'
         run: git merge-base --is-ancestor HEAD origin/main
       - name: Check release deployment safeguards
         run: python3 -B -m unittest discover -s tools/tests -v
@@ -75,9 +76,16 @@ jobs:
           context: .
           file: deploy/bot/Dockerfile
           target: ${{ matrix.target }}
-          outputs: type=cacheonly
+          outputs: type=local,dest=${{ runner.temp }}/native
           cache-from: type=registry,ref=${{ env.BUILD_CACHE }}:${{ matrix.cache }}
           cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:${{ matrix.cache }},mode=max,image-manifest=true,oci-mediatypes=true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.cache }}
+          path: ${{ runner.temp }}/native/*
+          if-no-files-found: error
+          retention-days: 1
 
   build:
     needs: compile
@@ -102,9 +110,19 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Verify tag belongs to main
+        if: github.event_name != 'workflow_dispatch'
         run: git merge-base --is-ancestor HEAD origin/main
       - name: Check release deployment safeguards
         run: python3 -B -m unittest discover -s tools/tests -v
+      - name: Reclaim unused runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: prebuilt
       - uses: docker/setup-buildx-action@v4
       - name: Select repository-scoped build cache
         shell: bash
@@ -122,7 +140,6 @@ jobs:
           target: release-binaries
           outputs: type=local,dest=${{ runner.temp }}/runtime
           cache-from: |
-            type=registry,ref=${{ env.BUILD_CACHE }}:compiled-runtime
             type=registry,ref=${{ env.BUILD_CACHE }}:support
             type=registry,ref=${{ env.BUILD_CACHE }}:validated
           cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:validated,mode=max,image-manifest=true,oci-mediatypes=true
