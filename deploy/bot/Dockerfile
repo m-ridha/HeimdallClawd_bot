@@ -19,7 +19,7 @@ FROM scratch AS support-binaries
 COPY --from=launcher-build /launcher/target/release/heimdall-launcher /heimdall-launcher
 COPY --from=executor-build /executor/target/release/heimdall-executor /heimdall-executor
 
-FROM rust:1.99-slim-bookworm AS runtime-compile
+FROM rust:1.99-slim-bookworm AS runtime-source
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates patch pkg-config g++ libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /runtime
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=2 \
@@ -31,15 +31,22 @@ COPY deploy/bot/patches/private-telegram.patch /tmp/private-telegram.patch
 COPY deploy/bot/patches/remote-skills.patch /tmp/remote-skills.patch
 COPY deploy/bot/patches/wasm-wit.patch /tmp/wasm-wit.patch
 RUN patch -p1 < /tmp/private-telegram.patch && patch -p1 < /tmp/remote-skills.patch && patch -p1 < /tmp/wasm-wit.patch
+FROM runtime-source AS runtime-compile
 RUN cargo build --release --locked --no-default-features --features agent-runtime,channel-telegram,gateway,schema-export,plugins-wasm-cranelift --bin zeroclaw
 
+FROM scratch AS runtime-binary
+COPY --from=runtime-compile /runtime/target/release/zeroclaw /zeroclaw
+
 FROM launcher-build AS launcher-validation
-COPY --from=runtime-compile /runtime/target/release/zeroclaw /usr/local/bin/zeroclaw
+COPY prebuilt/zeroclaw /usr/local/bin/zeroclaw
+RUN chmod 755 /usr/local/bin/zeroclaw
 ENV HEIMDALL_TEST_RUNTIME=/usr/local/bin/zeroclaw
 RUN cargo test --locked
 
-FROM runtime-compile AS runtime-build
-COPY --from=executor-build /executor/target/release/heimdall-executor /usr/local/bin/heimdall-executor
+FROM runtime-source AS runtime-build
+COPY prebuilt/zeroclaw /runtime/target/release/zeroclaw
+COPY prebuilt/heimdall-executor /usr/local/bin/heimdall-executor
+RUN chmod 755 /runtime/target/release/zeroclaw /usr/local/bin/heimdall-executor
 COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
 COPY executor/entrypoint.sh /tmp/executor-entrypoint.sh
 COPY executor/contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
