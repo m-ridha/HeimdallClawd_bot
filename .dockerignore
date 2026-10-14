@@ -5,3 +5,6 @@ upstream
 **/.env*
 docs
 .DS_Store
+
+.railway
+**/__pycache__

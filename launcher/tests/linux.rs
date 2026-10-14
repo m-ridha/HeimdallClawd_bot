@@ -49,7 +49,9 @@ fn bootstrap_does_not_follow_state_symlinks_and_keeps_secrets_out_of_config() {
     let invalid_auth = launch();
     assert!(!invalid_auth.status.success());
     assert!(
-        String::from_utf8_lossy(&invalid_auth.stderr).contains("authentication validation failed")
+        String::from_utf8_lossy(&invalid_auth.stderr).contains("authentication validation failed"),
+        "launcher failed before validating the fixture profile: {}",
+        String::from_utf8_lossy(&invalid_auth.stderr)
     );
     fs::remove_dir_all("/data/zeroclaw").unwrap();
 }

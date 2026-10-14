@@ -34,6 +34,7 @@ class PackageTests(unittest.TestCase):
             for dockerfile in [output / 'Dockerfile', output / 'executor/Dockerfile']:
                 self.assertNotIn('cargo ', dockerfile.read_text())
                 self.assertIn('sha256sum -c', dockerfile.read_text())
+            self.assertFalse(list(output.rglob('railway.toml')))
             self.assertFalse((output / '.git').exists())
             self.assertFalse((output / 'launcher/target').exists())
 

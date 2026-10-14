@@ -11,13 +11,14 @@ Changing the model keeps the same agent and isolated tool boundary. Conversation
 | Folder | Purpose |
 | --- | --- |
 | `.github/workflows/` | The version-tag release workflow: build/test, deploy the two services, then publish a GitHub release. GitHub environment secrets/variables supply deployment credentials and IDs. |
-| `deploy/bot/` | Docker build recipes, Railway build/health configuration, ZeroClaw configuration template, pinned source/binary checksums, maintained Telegram, remote-skill and WASM interface patches, and required upstream licenses. ZeroClaw source is downloaded and verified during a build; a full checkout is not maintained here. |
+| `deploy/bot/` | Docker build recipes,  ZeroClaw configuration template, pinned source/binary checksums, maintained Telegram, remote-skill and WASM interface patches, and required upstream licenses. ZeroClaw source is downloaded and verified during a build; a full checkout is not maintained here. |
 | `deploy/tests/` | Integration checks against the actual pinned ZeroClaw configuration library, including environment-only keys and secret exclusion from saved config. |
 | `launcher/src/` | The small Rust startup wrapper: requires the Telegram owner ID, validates allowed users and private key settings, writes non-secret config, checks ChatGPT auth, starts ZeroClaw, and exposes restricted skill install/list tools. It does not implement the language model engine. |
 | `launcher/tests/` | Launcher/configuration checks, including root Linux initialization and rejection of missing owner/authentication. |
 | `executor/src/` | The Rust private MCP service and Linux-restricted helpers implementing `bash`, `file_read`, and `file_write`. |
 | `executor/tests/` | Executor API, filesystem, timeout/cancellation, and Linux isolation checks. |
 | `executor/contract/` | A test using ZeroClaw's real MCP client against the executor. |
+| `.railway/` | Python IaC for both services and persistent volumes; pinned Python SDK. Runtime variables remain exclusively on Railway. |
 | `tools/` | Release packaging/deployment scripts and the clean-tree verification script. |
 | `tools/tests/` | Release-helper checks that prevent an unrelated successful deployment from masking a failed release deployment. |
 | `docs/` | Operations, release setup, this walkthrough and observed verification results. |
