@@ -82,22 +82,3 @@ pub fn secret_overrides(
         ),
     ])
 }
-
-pub fn openrouter_override(key: Option<&str>) -> Result<Option<(String, String)>, ConfigError> {
-    let Some(key) = key.filter(|value| !value.trim().is_empty()) else {
-        return Ok(None);
-    };
-    if !key.starts_with("sk-or-")
-        || key.len() < 20
-        || key.len() > 1024
-        || key
-            .bytes()
-            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
-    {
-        return Err("Invalid OPENROUTER_API_KEY");
-    }
-    Ok(Some((
-        "ZEROCLAW_providers__models__openrouter__free__api_key".into(),
-        key.into(),
-    )))
-}

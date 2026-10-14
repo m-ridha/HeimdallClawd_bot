@@ -33,11 +33,27 @@ Conversation history uses `/data/zeroclaw/data/sessions/sessions.db`; the agent'
 
 ## Tool boundary
 
-The primary agent receives only `workspace__bash`, `workspace__file_read`, and `workspace__file_write`. Native host shell/filesystem/git tools, delegation, hooks, scheduling and community plugin discovery are disabled. The remote worker has no Telegram or provider credentials. Helpers run with a cleared environment, separate UID, Linux seccomp restrictions, no networking, a 30-second timeout, 64 KiB output/content bounds, and process-group cleanup. Failed startup isolation checks keep the worker unhealthy. Tool failures have no local-execution fallback.
+The primary agent receives `workspace__bash`, `workspace__file_read`, `workspace__file_write`, and native `web_search_tool` using Tavily. Native host shell/filesystem/git tools, delegation, hooks, scheduling and community plugin discovery are disabled. The remote worker has no Telegram or provider credentials. Helpers run with a cleared environment, separate UID, Linux seccomp restrictions, no networking, a 30-second timeout, 64 KiB output/content bounds, and process-group cleanup. Failed startup isolation checks keep the worker unhealthy. Tool failures have no local-execution fallback.
+
+## Tavily web search
+
+The maintained template enables Tavily basic search with three results and a 15-second timeout. `web_search_tool` is included in the primary agent's allowlist and auto-approval list. Only this specific web tool is added; the workspace executor's networking restrictions stay unchanged. Search does not provide browser interaction or full-page extraction.
+
+Set `ZEROCLAW_web_search__tavily_api_key` privately on the agent service in Railway, then deploy the updated source through the release workflow. The launcher inherits this environment variable and ZeroClaw resolves it natively. Do not put the key in the configuration template or source. The integration test uses a dummy key, asserts its exact in-memory value, calls native `Config::save()`, and asserts the saved TOML contains no dummy key.
+
+Local checks:
+
+```sh
+cargo test --locked --manifest-path launcher/Cargo.toml
+```
+
+The native secret-resolution fixture is `deploy/tests/config-secrets.rs`; the source-build release workflow installs it into the checksum-pinned ZeroClaw configuration crate and runs it. Portable launcher tests check exact tool permissions and settings; the separate native fixture proves secret resolution and non-persistence. Neither test needs your actual key.
+
+After deploying, ask the bot: “Use Tavily to search for the latest stable Rust release. Include source links and the release date.” Confirm a real tool call and response. This tests live credentials/API access, which dummy-key tests cannot establish. Keep Tavily pay-as-you-go disabled if you want usage to stop at the free allowance. Search queries are sent to Tavily; the API key is not a model-visible tool argument.
 
 ## Switching models in Telegram
 
-The ChatGPT subscription model remains the default. Add or replace `OPENROUTER_API_KEY` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. The launcher passes this key to the native provider through an in-memory environment override; it is not written into TOML.
+The ChatGPT subscription model remains the default. Add or replace `ZEROCLAW_providers__models__openrouter__free__api_key` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. ZeroClaw reads the native environment override directly; it is not written into TOML. All API-backed provider credentials use the same `ZEROCLAW_providers__models__PROVIDER__ALIAS__api_key` convention.
 
 Send `/model free` to select OpenRouter's free router for your conversation. Send `/model codex` to return to the configured subscription model. `/model` displays the current selection. Routes change the provider and model together, while retaining the primary agent, its conversation and the same three remote tools. These are session overrides; verify the current selection after a restart. No automatic paid-provider fallback is configured.
 

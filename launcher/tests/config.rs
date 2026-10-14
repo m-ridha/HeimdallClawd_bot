@@ -15,7 +15,7 @@ fn owner_and_optional_comma_list_are_strict() {
     }
 }
 #[test]
-fn config_grants_only_remote_tools_without_secrets_or_fallback() {
+fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
     let ids = parse_allowed_ids("1001", Some("123")).unwrap();
     let text = render_config(&ids, "gpt-6.1-sol").unwrap();
     let cfg: toml::Value = toml::from_str(&text).unwrap();
@@ -32,7 +32,7 @@ fn config_grants_only_remote_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        3
+        4
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -84,7 +84,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     for (property, expected) in [
         (
             "risk_profiles.primary.allowed-tools",
-            "[\"workspace__bash\", \"workspace__file_read\", \"workspace__file_write\"]",
+            "[\"workspace__bash\", \"workspace__file_read\", \"workspace__file_write\", \"web_search_tool\"]",
         ),
         (
             "peer_groups.telegram_home.external-peers",
@@ -143,28 +143,13 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
 }
 
 #[test]
-fn optional_openrouter_key_is_private_and_validated() {
-    use heimdall_launcher::config::openrouter_override;
-    assert_eq!(openrouter_override(None).unwrap(), None);
-    assert_eq!(openrouter_override(Some(" ")).unwrap(), None);
-    let key = concat!("sk-or-v1-", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    let (name, value) = openrouter_override(Some(key)).unwrap().unwrap();
-    assert_eq!(
-        name,
-        "ZEROCLAW_providers__models__openrouter__free__api_key"
-    );
-    assert_eq!(value, key);
+fn codex_route_tracks_the_configured_model() {
     let cfg = render_config(&["1001".into()], "custom-codex-model").unwrap();
-    assert!(!cfg.contains(key));
     let cfg: toml::Value = toml::from_str(&cfg).unwrap();
     assert_eq!(
         cfg["model_routes"][1]["model"].as_str(),
         Some("custom-codex-model")
     );
-    for bad in ["secret-invalid-value", "sk-or-v1-invalid\nsecret"] {
-        let error = openrouter_override(Some(bad)).unwrap_err();
-        assert!(!error.contains(bad));
-    }
 }
 
 #[test]
@@ -179,4 +164,39 @@ fn owner_must_be_configured_explicitly() {
         "A deployment must not silently select a default owner"
     );
     assert!(String::from_utf8_lossy(&result.stderr).contains("TELEGRAM_OWNER_ID is required"));
+}
+
+#[test]
+fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
+    let config = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    let cfg: toml::Value = toml::from_str(&config).unwrap();
+    assert_eq!(cfg["web_search"]["enabled"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["web_search"]["search_provider"].as_str(),
+        Some("tavily")
+    );
+    assert_eq!(cfg["web_search"]["max_results"].as_integer(), Some(3));
+    assert_eq!(cfg["web_search"]["timeout_secs"].as_integer(), Some(15));
+    let expected = [
+        "workspace__bash",
+        "workspace__file_read",
+        "workspace__file_write",
+        "web_search_tool",
+    ];
+    for field in ["allowed_tools", "auto_approve"] {
+        let actual: Vec<_> = cfg["risk_profiles"]["primary"][field]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(actual, expected);
+    }
+    assert!(!config.contains("tavily_api_key"));
+    assert!(
+        cfg["risk_profiles"]["primary"]["allowed_commands"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

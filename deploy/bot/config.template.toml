@@ -48,8 +48,8 @@ external_peers = []
 level = "supervised"
 workspace_only = true
 allowed_commands = []
-allowed_tools = ["workspace__bash", "workspace__file_read", "workspace__file_write"]
-auto_approve = ["workspace__bash", "workspace__file_read", "workspace__file_write"]
+allowed_tools = ["workspace__bash", "workspace__file_read", "workspace__file_write", "web_search_tool"]
+auto_approve = ["workspace__bash", "workspace__file_read", "workspace__file_write", "web_search_tool"]
 excluded_tools = ["shell", "file_read", "file_write", "git_operations", "cron_add", "cron_update", "schedule", "delegate"]
 delegation_policy = { mode = "forbidden" }
 shell_env_passthrough = []
@@ -86,3 +86,8 @@ open_skills_enabled = false
 log_persistence = "none"
 log_tool_io = "off"
 log_llm_request_payload = "off"
+[web_search]
+enabled = true
+search_provider = "tavily"
+max_results = 3
+timeout_secs = 15

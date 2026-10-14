@@ -1,6 +1,4 @@
-use heimdall_launcher::config::{
-    openrouter_override, parse_allowed_ids, render_config, secret_overrides,
-};
+use heimdall_launcher::config::{parse_allowed_ids, render_config, secret_overrides};
 use std::{
     fs,
     io::{self, Write},
@@ -110,11 +108,7 @@ fn main() -> io::Result<()> {
         std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| fail("TELEGRAM_BOT_TOKEN is required"))?;
     let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
         .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
-    let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
-    let openrouter_key = std::env::var("OPENROUTER_API_KEY").ok();
-    if let Some(override_value) = openrouter_override(openrouter_key.as_deref()).map_err(fail)? {
-        vars.push(override_value);
-    }
+    let vars = secret_overrides(&token, &executor).map_err(fail)?;
     if let Ok(url) = std::env::var("HEIMDALL_EXECUTOR_URL")
         && url != "http://heimdall-executor.railway.internal:3889"
     {

@@ -1,6 +1,6 @@
 # HeimdallClawd
 
-A private Telegram assistant running ZeroClaw 0.8.5 and Rust services on Railway. It uses ChatGPT subscription sign-in and three isolated remote workspace tools: command execution, file reads and file writes.
+A private Telegram assistant running ZeroClaw 0.8.5 and Rust services on Railway. It uses ChatGPT subscription sign-in and three isolated remote workspace tools: command execution, file reads and file writes. Tavily supplies optional web search through ZeroClaw’s native search tool; configure its key privately in Railway.
 
 Conversation history and workspace files persist on separate Railway volumes, so the bot works while your Mac is off. Only permitted accounts in private chats can use it. Set `TELEGRAM_ALLOWED_USER_IDS` to a comma-separated list to add users; the owner is always included. Permitted users share the tool workspace.
 
