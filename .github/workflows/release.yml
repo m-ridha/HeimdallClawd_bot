@@ -15,7 +15,10 @@ jobs:
   build:
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
@@ -34,16 +37,28 @@ jobs:
         run: git merge-base --is-ancestor HEAD origin/main
       - name: Check release deployment safeguards
         run: python3 -B -m unittest discover -s tools/tests -v
+      - uses: docker/setup-buildx-action@v4
+      - name: Select repository-scoped build cache
+        shell: bash
+        run: echo "BUILD_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}/build-cache" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
       - name: Build and test native Linux runtime
-        run: |
-          docker build --target runtime-build --file deploy/bot/Dockerfile --tag heimdall-runtime .
-          container_id=$(docker create heimdall-runtime)
-          trap 'docker rm -f "$container_id" >/dev/null' EXIT
-          mkdir -p "$RUNNER_TEMP/runtime"
-          docker cp "$container_id:/runtime/target/release/zeroclaw" "$RUNNER_TEMP/runtime/zeroclaw"
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/bot/Dockerfile
+          target: release-binaries
+          outputs: type=local,dest=${{ runner.temp }}/runtime
+          cache-from: type=registry,ref=${{ env.BUILD_CACHE }}:runtime
+          cache-to: type=registry,ref=${{ env.BUILD_CACHE }}:runtime,mode=max,image-manifest=true,oci-mediatypes=true
       - name: Package and verify deployable bot
         run: |
-          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
+          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/runtime/heimdall-launcher" "$RUNNER_TEMP/runtime/heimdall-executor" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
+          docker build --tag heimdall-executor "$RUNNER_TEMP/bot/executor"
           docker build --file "$RUNNER_TEMP/bot/Dockerfile" --tag heimdall-bot "$RUNNER_TEMP/bot"
           tar -czf "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" -C "$RUNNER_TEMP/bot" .
           sha256sum "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/SHA256SUMS"
@@ -96,7 +111,7 @@ jobs:
           mkdir bot
           tar -xzf "heimdallclawd-$RELEASE_TAG.tar.gz" -C bot
           cd "$GITHUB_WORKSPACE"
-          python3 tools/deploy-release.py executor "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG"
+          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot/executor" "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG"
           python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG"
 
   attach-assets:

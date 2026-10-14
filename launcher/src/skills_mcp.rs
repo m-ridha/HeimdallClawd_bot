@@ -32,7 +32,7 @@ fn handle(
         }
         "ping" => json!({}),
         "tools/list" => json!({"tools":[
-            {"name":"install","description":"Install an audited skill with shell-script files disabled by name from the official ZeroClaw registry into the agent's persistent managed bundle. Does not install OS dependencies or grant tools.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}},
+            {"name":"install","description":"Install an audited skill with script files permitted by name from the official ZeroClaw registry into the agent's persistent managed bundle. Does not install OS dependencies or grant tools.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}},
             {"name":"list","description":"List skills available to the primary agent.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
         ]}),
         "tools/call" => {
@@ -85,7 +85,7 @@ fn configure_command(command: &mut Command) {
             "ZEROCLAW_skills__registry_url",
             "https://github.com/zeroclaw-labs/zeroclaw-skills",
         )
-        .env("ZEROCLAW_skills__allow_scripts", "false")
+        .env("ZEROCLAW_skills__allow_scripts", "true")
         .env("ZEROCLAW_skills__open_skills_enabled", "false")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")

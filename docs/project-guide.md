@@ -11,7 +11,7 @@ Changing the model keeps the same agent and isolated tool boundary. Conversation
 | Folder | Purpose |
 | --- | --- |
 | `.github/workflows/` | The version-tag release workflow: build/test, deploy the two services, then publish a GitHub release. GitHub environment secrets/variables supply deployment credentials and IDs. |
-| `deploy/bot/` | Docker build recipes, Railway build/health configuration, ZeroClaw configuration template, pinned source/binary checksums, the private-Telegram patch, and required upstream licenses. ZeroClaw source is downloaded and verified during a build; a full checkout is not maintained here. |
+| `deploy/bot/` | Docker build recipes, Railway build/health configuration, ZeroClaw configuration template, pinned source/binary checksums, maintained Telegram, remote-skill and WASM interface patches, and required upstream licenses. ZeroClaw source is downloaded and verified during a build; a full checkout is not maintained here. |
 | `deploy/tests/` | Integration checks against the actual pinned ZeroClaw configuration library, including environment-only keys and secret exclusion from saved config. |
 | `launcher/src/` | The small Rust startup wrapper: requires the Telegram owner ID, validates allowed users and private key settings, writes non-secret config, checks ChatGPT auth, starts ZeroClaw, and exposes restricted skill install/list tools. It does not implement the language model engine. |
 | `launcher/tests/` | Launcher/configuration checks, including root Linux initialization and rejection of missing owner/authentication. |
@@ -88,3 +88,5 @@ This example adds an Anthropic provider alias named `custom`. It does not requir
 The pattern is `ZEROCLAW_providers__models__PROVIDER__ALIAS__FIELD`. Keep provider/alias tokens lowercase. `api_key`, `model`, and (when required) `uri` are common fields. Unknown schema paths stop startup, so use a family supported by the pinned ZeroClaw release. Add these settings to the agent service, not the executor. Provider keys belong in Railway variables and are not saved in the repository or TOML. API usage is billed by the provider separately from Railway infrastructure.
 
 For Ollama, use a supported `ollama` alias with an exact local model ID and an always-on reachable endpoint instead of an API key. An Ollama server on your Mac cannot answer while the Mac is off. Its networking needs separate verification.
+
+Expanded features and activation limits are described in [capabilities](capabilities.md). Railway infrastructure migration status is documented in [Railway IaC](railway-iac.md).

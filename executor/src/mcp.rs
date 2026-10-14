@@ -24,6 +24,8 @@ fn tools() -> Value {
     json!([
     {"name":"bash","description":"Run a bounded command in the separate isolated workspace. Networking and control credentials are unavailable.","inputSchema":{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":32768}},"required":["command"],"additionalProperties":false}},
     {"name":"file_read","description":"Read a UTF-8 file relative to the isolated workspace, at most 64 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
+    {"name":"file_read_base64","description":"Read a binary file as base64, at most 48 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
+    {"name":"file_write_base64","description":"Write a base64-encoded binary file, at most 48 KiB decoded.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":65536}},"required":["path","content"],"additionalProperties":false}},
     {"name":"file_write","description":"Write a file relative to the isolated workspace, at most 64 KiB. This remote workspace is writable.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":65536}},"required":["path","content"],"additionalProperties":false}}
     ])
 }
@@ -60,7 +62,7 @@ pub(crate) async fn handle(State(app): State<App>, Json(request): Json<Value>) -
    let params=&request["params"];
    let job=Job{id:key,tool:params["name"].as_str().unwrap_or("").into(),arguments:params["arguments"].clone()};
    if let Err(message)=job.validate() {return error(id,-32602,message);}
-   let allowed=match job.tool.as_str(){"bash"=>&["command"][..],"file_read"=>&["path"][..],_=>&["path","content"][..]};
+   let allowed=match job.tool.as_str(){"bash"=>&["command"][..],"file_read"|"file_read_base64"=>&["path"][..],_=>&["path","content"][..]};
    if job.arguments.as_object().unwrap().keys().any(|k|!allowed.contains(&k.as_str())) {return error(id,-32602,"Unknown tool argument");}
    let response=execute_formatted(app,job,id.clone()).await;
    if !response.status().is_success(){return error(id,-32000,"Workspace executor is busy or unavailable");}

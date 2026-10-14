@@ -29,3 +29,14 @@ fn symlinks_are_rejected_without_touching_targets() {
         "protected"
     );
 }
+
+#[test]
+fn binary_transfer_preserves_bytes_without_weakening_text_validation() {
+    let root = tempfile::tempdir().unwrap();
+    let fs = Workspace::open(root.path()).unwrap();
+    let bytes = [0, 255, 128, 1];
+    fs.write_binary("binary.dat", &bytes).unwrap();
+    assert_eq!(fs.read_binary("binary.dat").unwrap(), bytes);
+    assert!(fs.read("binary.dat").is_err());
+    assert!(fs.write_binary("binary.dat", &vec![0; 65537]).is_err());
+}

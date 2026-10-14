@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-project_dir=$(cd -- "$(dirname -- "$0")/../.." && pwd)
+project_dir=$(cd -- "$(dirname -- "$0")/../../.." && pwd)
 output_dir=${1:?Usage: build-linux.sh OUTPUT_DIRECTORY}
 mkdir -p -- "$output_dir"
 output_dir=$(cd -- "$output_dir" && pwd)
@@ -19,9 +19,16 @@ assert hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest()==sys.argv[2], '
 PY
 mkdir "$build_dir/source"
 tar -xzf "$build_dir/source.tar.gz" --strip-components=1 -C "$build_dir/source"
-patch -d "$build_dir/source" -p1 < "$project_dir/deploy/bot/patches/private-telegram.patch"
+for patch_file in "$project_dir"/deploy/bot/patches/*.patch; do
+  patch -d "$build_dir/source" -p1 < "$patch_file"
+done
 cd "$build_dir/source"
-features=agent-runtime,channel-telegram,gateway,schema-export
+features=$(python3 - "$project_dir/deploy/bot/runtime.lock.json" <<'PYFEATURES'
+import json,sys
+print(','.join(json.load(open(sys.argv[1]))['features']))
+PYFEATURES
+)
+export CARGO_PROFILE_RELEASE_LTO=thin CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=s
 cargo zigbuild --release --locked --target x86_64-unknown-linux-gnu.2.36 --no-default-features --features "$features" --bin zeroclaw
 target_dir=${CARGO_TARGET_DIR:-target}
 binary="$target_dir/x86_64-unknown-linux-gnu/release/zeroclaw"

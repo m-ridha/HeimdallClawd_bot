@@ -97,6 +97,9 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--skills-mcp") {
         return heimdall_launcher::skills_mcp::serve();
     }
+    if std::env::args().nth(1).as_deref() == Some("--transfer-mcp") {
+        return heimdall_launcher::transfer_mcp::serve();
+    }
     let owner =
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
     let allowed = std::env::var("TELEGRAM_ALLOWED_USER_IDS").ok();
@@ -130,6 +133,13 @@ fn main() -> io::Result<()> {
     atomic_write(Path::new(STATE).join("config.toml").as_path(), &config)?;
     let workspace = Path::new(STATE).join("agents/primary/workspace");
     fs::create_dir_all(&workspace)?;
+    for directory in ["shared/sops", "shared/plugins", "shared/skills/managed"] {
+        fs::create_dir_all(Path::new(STATE).join(directory))?;
+    }
+    let tools = workspace.join("TOOLS.md");
+    if !tools.exists() {
+        atomic_write(&tools, include_str!("../../deploy/bot/TOOLS.md"))?;
+    }
     let identity = workspace.join("IDENTITY.md");
     if !identity.exists() {
         atomic_write(

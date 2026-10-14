@@ -34,6 +34,32 @@ fn helper() -> io::Result<()> {
                 ])
                 .exec())
         }
+        "file_read_base64" => {
+            use base64::Engine;
+            let bytes = Workspace::open(Path::new("/data/workspace"))?
+                .read_binary(job.arguments["path"].as_str().unwrap())?;
+            if bytes.len() > 49152 {
+                return Err(io::Error::other("Transfer exceeds 48 KiB"));
+            }
+            io::stdout().write_all(
+                base64::engine::general_purpose::STANDARD
+                    .encode(bytes)
+                    .as_bytes(),
+            )
+        }
+        "file_write_base64" => {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(job.arguments["content"].as_str().unwrap())
+                .map_err(io::Error::other)?;
+            if bytes.len() > 49152 {
+                return Err(io::Error::other("Transfer exceeds 48 KiB"));
+            }
+            Workspace::open(Path::new("/data/workspace"))?
+                .write_binary(job.arguments["path"].as_str().unwrap(), &bytes)?;
+            println!("file written");
+            Ok(())
+        }
         "file_read" => io::stdout().write_all(
             &Workspace::open(Path::new("/data/workspace"))?
                 .read(job.arguments["path"].as_str().unwrap())?,

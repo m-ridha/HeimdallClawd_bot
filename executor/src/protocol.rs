@@ -26,12 +26,12 @@ impl Job {
                 Some(s) if !s.is_empty() && s.len() <= 32768 => Ok(()),
                 _ => Err("Command must contain 1–32768 bytes"),
             },
-            "file_read" | "file_write" => {
+            "file_read" | "file_write" | "file_read_base64" | "file_write_base64" => {
                 crate::files::validate_path(
                     self.arguments["path"].as_str().ok_or("path is required")?,
                 )
                 .map_err(|_| "Invalid workspace path")?;
-                if self.tool == "file_write" {
+                if self.tool == "file_write" || self.tool == "file_write_base64" {
                     let content = self.arguments["content"]
                         .as_str()
                         .ok_or("content is required")?;

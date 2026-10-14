@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        6
+        35
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -82,10 +82,6 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     let secret = "e".repeat(64);
     let vars = secret_overrides(token, &secret).unwrap();
     for (property, expected) in [
-        (
-            "risk_profiles.primary.allowed-tools",
-            "[\"workspace__bash\", \"workspace__file_read\", \"workspace__file_write\", \"web_search_tool\", \"skills__install\", \"skills__list\"]",
-        ),
         (
             "peer_groups.telegram_home.external-peers",
             "[\"1001\", \"1002\"]",
@@ -192,7 +188,12 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
             .iter()
             .map(|value| value.as_str().unwrap())
             .collect();
-        assert_eq!(actual, expected);
+        for name in expected {
+            assert!(actual.contains(&name), "missing {name}");
+        }
+        for blocked in ["shell", "file_read", "file_write", "delegate", "schedule"] {
+            assert!(!actual.contains(&blocked), "unexpected host tool {blocked}");
+        }
     }
     assert!(!config.contains("tavily_api_key"));
     assert!(
@@ -201,4 +202,50 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[test]
+fn requested_capabilities_are_enabled_and_heartbeat_stays_optional() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    for section in [
+        "scheduler",
+        "pipeline",
+        "hooks",
+        "plugins",
+        "web_fetch",
+        "http_request",
+        "text_browser",
+        "link_enricher",
+    ] {
+        assert_eq!(cfg[section]["enabled"].as_bool(), Some(true), "{section}");
+    }
+    assert_eq!(cfg["skills"]["open_skills_enabled"].as_bool(), Some(true));
+    assert_eq!(cfg["skills"]["allow_scripts"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["parallel_tools"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(cfg["heartbeat"]["enabled"].as_bool(), Some(false));
+    assert_eq!(
+        cfg["http_request"]["allow_private_hosts"].as_bool(),
+        Some(false)
+    );
+    let tools = cfg["risk_profiles"]["primary"]["allowed_tools"]
+        .as_array()
+        .unwrap();
+    for tool in [
+        "cron_add",
+        "cron_update",
+        "execute_pipeline",
+        "sop_execute",
+        "web_fetch",
+        "http_request",
+        "text_browser",
+        "poll",
+        "reaction",
+        "send_via",
+    ] {
+        assert!(tools.iter().any(|t| t.as_str() == Some(tool)), "{tool}");
+    }
 }

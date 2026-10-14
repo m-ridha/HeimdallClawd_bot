@@ -10,4 +10,6 @@ The current deployment uses `gpt-6.1-sol`. OpenRouter’s `openrouter/free` is a
 
 For a folder-by-folder explanation and model setup instructions, see the [project walkthrough](docs/project-guide.md).
 
-Heimdall can install named skills from the official registry through restricted `skills__install` and `skills__list` tools. Installed skills persist on the agent volume. Publishing a stable GitHub Release triggers deployment; pushing a tag alone does not.
+Heimdall can install named skills from the official registry through restricted `skills__install` and `skills__list` tools. Installed skills persist on the agent volume. Scheduling, SOPs/pipelines, public web access, script-containing skills and bounded Telegram file transfers are configured in the source; see [capabilities](docs/capabilities.md) for activation limits and live tests. Publishing a stable GitHub Release triggers deployment; pushing a tag alone does not.
+
+Railway uses legacy Config as Code today; see [IaC migration notes](docs/railway-iac.md) for the documented December 1, 2026 cutoff and a migration approach that preserves secrets and volumes.
