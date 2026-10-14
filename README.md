@@ -9,3 +9,5 @@ See [operations](docs/operations.md) for configuration, authentication, persiste
 The current deployment uses `gpt-6.1-sol`. OpenRouter’s `openrouter/free` is an optional route: use `/model free` and `/model codex` to switch. Other API and Ollama providers require configuration and verification. The account's $5 hard spending limit remains in place.
 
 For a folder-by-folder explanation and model setup instructions, see the [project walkthrough](docs/project-guide.md).
+
+Heimdall can install named skills from the official registry through restricted `skills__install` and `skills__list` tools. Installed skills persist on the agent volume. Publishing a stable GitHub Release triggers deployment; pushing a tag alone does not.

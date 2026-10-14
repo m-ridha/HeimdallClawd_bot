@@ -1,14 +1,8 @@
 name: Release to Railway
 
 on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing release tag (vX.Y.Z)
-        required: true
-        type: string
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -19,10 +13,11 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - name: Validate release tag
         shell: bash
@@ -67,7 +62,7 @@ jobs:
     timeout-minutes: 40
     environment: production
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -104,26 +99,22 @@ jobs:
           python3 tools/deploy-release.py executor "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG"
           python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG"
 
-  publish:
+  attach-assets:
     needs: deploy
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/download-artifact@v8
         with:
           name: release-package
           path: release
-      - name: Publish verified release
+      - name: Attach verified deployment assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "release/heimdallclawd-$RELEASE_TAG.tar.gz" release/SHA256SUMS --clobber
-          else
-            gh release create "$RELEASE_TAG" "release/heimdallclawd-$RELEASE_TAG.tar.gz" release/SHA256SUMS --verify-tag --title "HeimdallClawd $RELEASE_TAG" --generate-notes
-          fi
+          gh release upload "$RELEASE_TAG" "release/heimdallclawd-$RELEASE_TAG.tar.gz" release/SHA256SUMS --clobber

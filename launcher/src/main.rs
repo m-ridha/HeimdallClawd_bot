@@ -94,6 +94,9 @@ fn runtime(vars: &[(String, String)]) -> Command {
     command
 }
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--skills-mcp") {
+        return heimdall_launcher::skills_mcp::serve();
+    }
     let owner =
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
     let allowed = std::env::var("TELEGRAM_ALLOWED_USER_IDS").ok();

@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        6
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -84,7 +84,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     for (property, expected) in [
         (
             "risk_profiles.primary.allowed-tools",
-            "[\"workspace__bash\", \"workspace__file_read\", \"workspace__file_write\", \"web_search_tool\"]",
+            "[\"workspace__bash\", \"workspace__file_read\", \"workspace__file_write\", \"web_search_tool\", \"skills__install\", \"skills__list\"]",
         ),
         (
             "peer_groups.telegram_home.external-peers",
@@ -182,6 +182,8 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
         "workspace__file_read",
         "workspace__file_write",
         "web_search_tool",
+        "skills__install",
+        "skills__list",
     ];
     for field in ["allowed_tools", "auto_approve"] {
         let actual: Vec<_> = cfg["risk_profiles"]["primary"][field]

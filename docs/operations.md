@@ -33,7 +33,7 @@ Conversation history uses `/data/zeroclaw/data/sessions/sessions.db`; the agent'
 
 ## Tool boundary
 
-The primary agent receives `workspace__bash`, `workspace__file_read`, `workspace__file_write`, and native `web_search_tool` using Tavily. Native host shell/filesystem/git tools, delegation, hooks, scheduling and community plugin discovery are disabled. The remote worker has no Telegram or provider credentials. Helpers run with a cleared environment, separate UID, Linux seccomp restrictions, no networking, a 30-second timeout, 64 KiB output/content bounds, and process-group cleanup. Failed startup isolation checks keep the worker unhealthy. Tool failures have no local-execution fallback.
+The primary agent receives `workspace__bash`, `workspace__file_read`, `workspace__file_write`, native `web_search_tool` using Tavily, and the narrow `skills__install`/`skills__list` MCP tools. Native host shell/filesystem/git tools, delegation, hooks, scheduling and community plugin discovery are disabled. The remote worker has no Telegram or provider credentials. Helpers run with a cleared environment, separate UID, Linux seccomp restrictions, no networking, a 30-second timeout, 64 KiB output/content bounds, and process-group cleanup. Failed startup isolation checks keep the worker unhealthy. Tool failures have no local-execution fallback.
 
 ## Tavily web search
 
@@ -85,3 +85,13 @@ After deployment succeeds, send `/models anthropic.custom`, then `/model YOUR_MO
 `deploy/bot/Dockerfile` builds everything from the checksum-pinned source on a native Linux x86_64 builder. For Railway's shorter build window, `deploy/bot/Dockerfile.artifact` packages the prebuilt Linux executable and runs native launcher tests. The expected executable hash is in `deploy/bot/runtime.sha256`, with build provenance in `deploy/bot/artifact.lock.json`. Executables are not stored in Git.
 
 `deploy/bot/build-linux.sh OUTPUT_DIRECTORY` builds the Linux executable using Rust 1.99 and cargo-zigbuild. Install the Linux Rust target and the build tools first. The helper verifies the source archive and applies the maintained Telegram patch. Review the new hash after rebuilding; never bypass the packaging checksum check. Place the reviewed executable in the upload context's `prebuilt/` directory and use the artifact Dockerfile as its root Dockerfile. Keep credentials, runtime state, Git data and build caches out of uploads.
+
+## Skill installation
+
+Git is installed in both agent image recipes. The agent has a dedicated stdio MCP server implemented by `heimdall-launcher --skills-mcp`, exposing only `skills__install` and `skills__list`. Ask Heimdall to install a named skill from the official ZeroClaw registry, or to list its installed skills. The model may also select these tools when a task needs a skill.
+
+The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. It invokes ZeroClaw's native install/audit implementation without a shell, forces the official registry, disables shell-script files and open-skills syncing, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. This does not give the model a general shell on the agent container. The network-disabled workspace executor is unchanged.
+
+Skills are assigned through the primary agent's `managed` bundle and persist under `/data/zeroclaw/shared/skills/managed`. `open_skills_enabled` stays false: installation from the official registry is separate from bulk open-skills syncing. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
+
+Other registries, arbitrary source URLs, and script execution are not exposed by this installer. Install requests that need these features fail instead of falling back to host execution. Verify a named skill's installation, visibility to the agent and behavior after deploying this version. CLI/stdio and configuration tests run locally; an actual registry installation through the deployed bot remains a live verification step.

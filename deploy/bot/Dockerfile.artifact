@@ -11,7 +11,7 @@ ENV HEIMDALL_TEST_RUNTIME=/usr/local/bin/zeroclaw
 RUN cargo test --locked && cargo build --release --locked
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 heimdall && useradd --uid 1000 --gid 1000 --no-create-home heimdall
 COPY --from=launcher-build /usr/local/bin/zeroclaw /usr/local/bin/zeroclaw
 COPY --from=launcher-build /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
