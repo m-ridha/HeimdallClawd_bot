@@ -1,0 +1,129 @@
+name: Release to Railway
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (vX.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: railway-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+            echo 'Expected a stable release tag vX.Y.Z'; exit 1;
+          }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify tag belongs to main
+        run: git merge-base --is-ancestor HEAD origin/main
+      - name: Check release deployment safeguards
+        run: python3 -B -m unittest discover -s tools/tests -v
+      - name: Build and test native Linux runtime
+        run: |
+          docker build --target runtime-build --file deploy/bot/Dockerfile --tag heimdall-runtime .
+          container_id=$(docker create heimdall-runtime)
+          trap 'docker rm -f "$container_id" >/dev/null' EXIT
+          mkdir -p "$RUNNER_TEMP/runtime"
+          docker cp "$container_id:/runtime/target/release/zeroclaw" "$RUNNER_TEMP/runtime/zeroclaw"
+      - name: Package and verify deployable bot
+        run: |
+          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
+          docker build --file "$RUNNER_TEMP/bot/Dockerfile" --tag heimdall-bot "$RUNNER_TEMP/bot"
+          tar -czf "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" -C "$RUNNER_TEMP/bot" .
+          sha256sum "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/SHA256SUMS"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package
+          path: |
+            ${{ runner.temp }}/heimdallclawd-*.tar.gz
+            ${{ runner.temp }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: production
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-package
+          path: ${{ runner.temp }}/release
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install pinned Railway CLI
+        run: npm install --global @railway/cli@5.68.0
+      - name: Deploy executor then bot and verify both
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+          RAILWAY_AGENT_SERVICE_ID: ${{ vars.RAILWAY_AGENT_SERVICE_ID }}
+          RAILWAY_EXECUTOR_SERVICE_ID: ${{ vars.RAILWAY_EXECUTOR_SERVICE_ID }}
+        run: |
+          : "${RAILWAY_TOKEN:?Missing production secret RAILWAY_TOKEN}"
+          : "${RAILWAY_PROJECT_ID:?Missing production variable RAILWAY_PROJECT_ID}"
+          : "${RAILWAY_ENVIRONMENT_ID:?Missing production variable RAILWAY_ENVIRONMENT_ID}"
+          : "${RAILWAY_AGENT_SERVICE_ID:?Missing production variable RAILWAY_AGENT_SERVICE_ID}"
+          : "${RAILWAY_EXECUTOR_SERVICE_ID:?Missing production variable RAILWAY_EXECUTOR_SERVICE_ID}"
+          cd "$RUNNER_TEMP/release"
+          sha256sum -c SHA256SUMS
+          mkdir bot
+          tar -xzf "heimdallclawd-$RELEASE_TAG.tar.gz" -C bot
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/deploy-release.py executor "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG"
+          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG"
+
+  publish:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-package
+          path: release
+      - name: Publish verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "release/heimdallclawd-$RELEASE_TAG.tar.gz" release/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" "release/heimdallclawd-$RELEASE_TAG.tar.gz" release/SHA256SUMS --verify-tag --title "HeimdallClawd $RELEASE_TAG" --generate-notes
+          fi

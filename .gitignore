@@ -1,0 +1,14 @@
+**/target/
+**/.env*
+**/auth.json
+**/auth-profiles.json
+**/.secret_key
+*.db
+*.db-shm
+*.db-wal
+.railway/
+.DS_Store
+
+/prebuilt/
+
+**/__pycache__/

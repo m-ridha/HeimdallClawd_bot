@@ -1,0 +1,12 @@
+{
+  "version": "0.8.5",
+  "revision": "cb2b20a9fe59004b7ef03e123942d31f29236d15",
+  "source_url": "https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/cb2b20a9fe59004b7ef03e123942d31f29236d15",
+  "source_sha256": "81c5a9dd51ab4738d3e1d71dd93b191de15935f4b0d6e83f6a7a28f2a3fdf8a4",
+  "features": [
+    "agent-runtime",
+    "channel-telegram",
+    "gateway",
+    "schema-export"
+  ]
+}

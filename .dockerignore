@@ -1,0 +1,7 @@
+.git
+upstream
+**/target
+**/.git
+**/.env*
+docs
+.DS_Store

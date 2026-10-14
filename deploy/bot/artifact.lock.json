@@ -1,0 +1,10 @@
+{
+  "runtime_revision": "cb2b20a9fe59004b7ef03e123942d31f29236d15",
+  "target": "x86_64-unknown-linux-gnu",
+  "glibc_minimum": "2.36",
+  "rustc": "1.99.0",
+  "cargo_zigbuild": "0.23.4",
+  "zig": "0.17.0",
+  "binary_sha256": "3a43f5df1815f0849d5fac4a5da449ccf9de72fdc789adaae58e7ab1248f7eb7",
+  "private_telegram_patch_sha256": "4df146fdc2611f2568bdc2a2d31b517635eb7eeb488f347b5bb33ad9b871584d"
+}
