@@ -1,0 +1,162 @@
+--- a/crates/zeroclaw-runtime/src/tools/skill_tool.rs
++++ b/crates/zeroclaw-runtime/src/tools/skill_tool.rs
+@@ -83,6 +83,9 @@
+     /// Resolved per-command timeout in seconds (manifest `timeout_secs`, or the
+     /// `SKILL_SHELL_TIMEOUT_SECS` default), clamped to a minimum of 1.
+     timeout_secs: u64,
++    remote: Option<Arc<dyn Tool>>,
++    remote_write: Option<Arc<dyn Tool>>,
++    source_dir: Option<std::path::PathBuf>,
+ }
+ 
+ impl SkillShellTool {
+@@ -104,6 +107,9 @@
+         runtime: Arc<dyn RuntimeAdapter>,
+     ) -> Self {
+         Self {
++            remote: None,
++            remote_write: None,
++            source_dir: None,
+             tool_name: composed_tool_name(skill_name, &tool.name),
+             tool_description: tool.description.clone(),
+             command_template: tool.command.clone(),
+@@ -112,6 +118,14 @@
+             runtime,
+             timeout_secs: tool.timeout_secs.unwrap_or(SKILL_SHELL_TIMEOUT_SECS).max(1),
+         }
++    }
++
++    /// Heimdall never executes skill commands beside provider credentials.
++    pub fn with_remote(mut self, remote: Arc<dyn Tool>, writer: Option<Arc<dyn Tool>>, source: Option<std::path::PathBuf>) -> Self {
++        self.remote = Some(remote);
++        self.remote_write = writer;
++        self.source_dir = source;
++        self
+     }
+ 
+     fn build_parameters_schema(&self) -> serde_json::Value {
+@@ -151,6 +165,40 @@
+     }
+ }
+ 
++/// Copy only bounded regular text files; never follow a skill's symlinks into control state.
++fn heimdall_skill_files(root: &std::path::Path) -> anyhow::Result<Vec<(String, String)>> {
++    anyhow::ensure!(!std::fs::symlink_metadata(root)?.file_type().is_symlink(), "Skill root must not be a symlink");
++    let mut directories = vec![(root.to_path_buf(), 0usize)];
++    let mut files = Vec::new();
++    let mut bytes = 0usize;
++    while let Some((directory, depth)) = directories.pop() {
++        anyhow::ensure!(depth <= 8, "Skill directory nesting exceeds limit");
++        for entry in std::fs::read_dir(directory)? {
++            let entry = entry?;
++            if entry.file_name() == ".git" { continue; }
++            let kind = entry.file_type()?;
++            anyhow::ensure!(!kind.is_symlink(), "Skill symlinks cannot be copied");
++            if kind.is_dir() {
++                directories.push((entry.path(), depth + 1));
++                anyhow::ensure!(directories.len() <= 64, "Too many skill directories");
++            } else {
++                anyhow::ensure!(kind.is_file() && entry.metadata()?.len() <= 65536, "Skill copy accepts regular text files up to 64 KiB");
++                use std::io::Read;
++                use std::os::unix::fs::OpenOptionsExt;
++                let file = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(entry.path())?;
++                anyhow::ensure!(file.metadata()?.is_file(), "Skill copy requires regular files");
++                let mut content = String::new();
++                file.take(65537).read_to_string(&mut content)?;
++                bytes += content.len();
++                anyhow::ensure!(content.len() <= 65536 && bytes <= 262144 && files.len() < 32, "Skill copy exceeds file or total size limit");
++                let relative = entry.path().strip_prefix(root)?.to_string_lossy().to_string();
++                files.push((relative, content));
++            }
++        }
++    }
++    Ok(files)
++}
++
+ #[async_trait]
+ impl Tool for SkillShellTool {
+     fn name(&self) -> &str {
+@@ -167,6 +215,21 @@
+ 
+     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+         let command = self.substitute_args(&args);
++        if let Some(remote) = &self.remote {
++            let mut command = command;
++            if let Some(source) = &self.source_dir {
++                let writer = self.remote_write.as_ref().ok_or_else(|| anyhow::anyhow!("Remote skill file writer unavailable"))?;
++                let directory = format!(".skills/{}", self.tool_name);
++                for (relative, content) in heimdall_skill_files(source)? {
++                    let result = writer.execute(serde_json::json!({"path":format!("{directory}/{relative}"),"content":content})).await?;
++                    if !result.success { return Ok(result); }
++                }
++                // Source paths refer only to this audited skill directory, never control state.
++                command = command.replace(&source.to_string_lossy().to_string(), &format!("/data/workspace/{directory}"));
++                command = format!("chmod -R u+rx -- '{directory}' && cd '{directory}' && {command}");
++            }
++            return remote.execute(serde_json::json!({"command": command})).await;
++        }
+ 
+         // Security validation — always requires explicit approval (approved=true)
+         // since skill tools are user-defined and should be treated as medium-risk.
+@@ -460,6 +523,43 @@
+             locked_args: HashMap::new(),
+             timeout_secs: None,
+         }
++    }
++
++    #[tokio::test]
++    async fn heimdall_skill_scripts_use_remote_executor_even_with_host_commands_denied() {
++        struct Remote;
++        impl zeroclaw_api::attribution::Attributable for Remote {
++            fn role(&self) -> zeroclaw_api::attribution::Role {
++                zeroclaw_api::attribution::Role::Tool(zeroclaw_api::attribution::ToolKind::Plugin)
++            }
++            fn alias(&self) -> &str { "remote" }
++        }
++        #[async_trait]
++        impl Tool for Remote {
++            fn name(&self) -> &str { "workspace__bash" }
++            fn description(&self) -> &str { "test executor" }
++            fn parameters_schema(&self) -> serde_json::Value { serde_json::json!({}) }
++            async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
++                assert_eq!(args["command"], "lint --file example --format json");
++                Ok(ToolResult { success: true, output: "remote-only".into(), error: None })
++            }
++        }
++        let policy = Arc::new(SecurityPolicy { allowed_commands: vec![], ..SecurityPolicy::default() });
++        let tool = SkillShellTool::new("test", &sample_skill_tool(), policy).with_remote(Arc::new(Remote), None, None);
++        let result = tool.execute(serde_json::json!({"file":"example", "format":"json"})).await.unwrap();
++        assert!(result.success);
++    }
++
++    #[test]
++    fn heimdall_skill_copy_rejects_symlinks_and_oversized_files() {
++        let root = tempfile::tempdir().unwrap();
++        std::fs::write(root.path().join("run.sh"), "echo ready").unwrap();
++        assert_eq!(heimdall_skill_files(root.path()).unwrap().len(), 1);
++        std::os::unix::fs::symlink("/etc/passwd", root.path().join("escape")).unwrap();
++        assert!(heimdall_skill_files(root.path()).is_err());
++        std::fs::remove_file(root.path().join("escape")).unwrap();
++        std::fs::write(root.path().join("large"), vec![0; 65537]).unwrap();
++        assert!(heimdall_skill_files(root.path()).is_err());
+     }
+ 
+     #[test]
+--- a/crates/zeroclaw-runtime/src/skills/mod.rs
++++ b/crates/zeroclaw-runtime/src/skills/mod.rs
+@@ -1890,6 +1890,15 @@
+                         security.clone(),
+                         runtime.clone(),
+                     );
++                    let inner = if let Some(remote) = unfiltered_registry.iter().find(|t| t.name() == "workspace__bash") {
++                        inner.with_remote(
++                            std::sync::Arc::clone(remote),
++                            unfiltered_registry.iter().find(|t| t.name() == "workspace__file_write").cloned(),
++                            skill.location.as_ref().and_then(|p| p.parent()).map(std::path::Path::to_path_buf),
++                        )
++                    } else {
++                        inner
++                    };
+                     tools.push(Box::new(zeroclaw_tools::wrappers::RateLimitedTool::new(
+                         inner,
+                         security.clone(),

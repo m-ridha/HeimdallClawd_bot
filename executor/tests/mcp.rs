@@ -48,7 +48,16 @@ async fn mcp_initializes_and_exposes_only_workspace_tools() {
     .await;
     let tools = list["result"]["tools"].as_array().expect("tools list");
     let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["bash", "file_read", "file_write"]);
+    assert_eq!(
+        names,
+        [
+            "bash",
+            "file_read",
+            "file_read_base64",
+            "file_write_base64",
+            "file_write"
+        ]
+    );
     assert!(
         tools
             .iter()

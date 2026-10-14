@@ -21,7 +21,7 @@ async fn heimdall_native_mcp_client_contract() {
     let cfg=|token:&str|->McpServerConfig {serde_json::from_value(json!({"name":"workspace","transport":"http","url":format!("http://[::1]:{port}/mcp"),"headers":{"Authorization":format!("Bearer {token}")},"tool_timeout_secs":35,"max_response_bytes":524288})).unwrap()};
     assert!(McpServer::connect(cfg("incorrect")).await.is_err());
     let server=McpServer::connect(cfg(&"x".repeat(32))).await.unwrap();
-    assert_eq!(server.tools().await.iter().map(|t|t.name.as_str()).collect::<Vec<_>>(),["bash","file_read","file_write"]);
+    assert_eq!(server.tools().await.iter().map(|t|t.name.as_str()).collect::<Vec<_>>(),["bash","file_read","file_read_base64","file_write_base64","file_write"]);
     let suffix=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let path=format!(".client-contract-{suffix}");
     let write=server.call_tool("file_write",json!({"path":path,"content":"native-client-ok"})).await.unwrap();

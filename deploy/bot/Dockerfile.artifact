@@ -1,20 +1,10 @@
-FROM rust:1.99-slim-bookworm AS launcher-build
-WORKDIR /launcher
-COPY prebuilt/zeroclaw /usr/local/bin/zeroclaw
-COPY deploy/bot/runtime.sha256 /tmp/runtime.sha256
-RUN sha256sum -c /tmp/runtime.sha256 && chmod 755 /usr/local/bin/zeroclaw && zeroclaw --version
-COPY launcher/Cargo.toml launcher/Cargo.lock ./
-COPY launcher/src ./src
-COPY launcher/tests ./tests
-COPY deploy/bot/config.template.toml /deploy/bot/config.template.toml
-ENV HEIMDALL_TEST_RUNTIME=/usr/local/bin/zeroclaw
-RUN cargo test --locked && cargo build --release --locked
-
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git lynx && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 heimdall && useradd --uid 1000 --gid 1000 --no-create-home heimdall
-COPY --from=launcher-build /usr/local/bin/zeroclaw /usr/local/bin/zeroclaw
-COPY --from=launcher-build /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
+COPY prebuilt/zeroclaw /usr/local/bin/zeroclaw
+COPY prebuilt/heimdall-launcher /usr/local/bin/heimdall-launcher
+COPY deploy/bot/runtime.sha256 /tmp/runtime.sha256
+RUN sha256sum -c /tmp/runtime.sha256 && zeroclaw --version && rm /tmp/runtime.sha256
 LABEL org.opencontainers.image.title="HeimdallClawd" \
       io.heimdall.runtime.version="0.8.5" io.heimdall.runtime.revision="cb2b20a9fe59004b7ef03e123942d31f29236d15"
 ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888

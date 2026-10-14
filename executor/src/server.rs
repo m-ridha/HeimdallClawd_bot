@@ -39,7 +39,7 @@ impl App {
         Self {
             token: Arc::new(token),
             ready,
-            gate: Arc::new(Semaphore::new(1)),
+            gate: Arc::new(Semaphore::new(2)),
             active: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -143,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn active_duplicate_and_capacity_have_distinct_statuses() {
         let app = App::new("x".repeat(32), true);
-        let _permit = app.gate.clone().acquire_owned().await.unwrap();
+        let _permit = app.gate.clone().acquire_many_owned(2).await.unwrap();
         app.active
             .lock()
             .unwrap()

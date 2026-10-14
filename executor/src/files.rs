@@ -57,6 +57,13 @@ impl Workspace {
         ))
     }
     pub fn read(&self, path: &str) -> io::Result<Vec<u8>> {
+        let bytes = self.read_binary(path)?;
+        if std::str::from_utf8(&bytes).is_err() && bytes.len() <= LIMIT {
+            return Err(io::Error::other("File is not UTF-8 text"));
+        }
+        Ok(bytes)
+    }
+    pub fn read_binary(&self, path: &str) -> io::Result<Vec<u8>> {
         let (dir, name) = self.parent(path, false)?;
         let file = open_at(&dir, &name, libc::O_RDONLY | libc::O_NONBLOCK, 0)?;
         if !file.metadata()?.is_file() {
@@ -64,13 +71,13 @@ impl Workspace {
         }
         let mut bytes = Vec::new();
         file.take((LIMIT + 1) as u64).read_to_end(&mut bytes)?;
-        if std::str::from_utf8(&bytes).is_err() && bytes.len() <= LIMIT {
-            return Err(io::Error::other("File is not UTF-8 text"));
-        }
         Ok(bytes)
     }
     pub fn write(&self, path: &str, text: &str) -> io::Result<()> {
-        if text.len() > LIMIT {
+        self.write_binary(path, text.as_bytes())
+    }
+    pub fn write_binary(&self, path: &str, bytes: &[u8]) -> io::Result<()> {
+        if bytes.len() > LIMIT {
             return Err(io::Error::other("Write exceeds 64 KiB"));
         }
         let (dir, name) = self.parent(path, true)?;
@@ -100,7 +107,7 @@ impl Workspace {
                 libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
                 0o600,
             )?;
-            file.write_all(text.as_bytes())?;
+            file.write_all(bytes)?;
             file.sync_all()?;
             // Atomic replacement never follows a concurrently substituted destination symlink.
             if unsafe {

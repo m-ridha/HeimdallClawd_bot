@@ -1,0 +1,10 @@
+FROM debian:bookworm-slim
+RUN useradd --uid 64173 --user-group --no-create-home executor
+COPY heimdall-executor /usr/local/bin/heimdall-executor
+COPY executor.sha256 /tmp/executor.sha256
+RUN sha256sum -c /tmp/executor.sha256 && rm /tmp/executor.sha256
+COPY entrypoint.sh /usr/local/bin/entrypoint
+RUN chmod 755 /usr/local/bin/entrypoint
+ENV PORT=3889
+EXPOSE 3889
+ENTRYPOINT ["/usr/local/bin/entrypoint"]
