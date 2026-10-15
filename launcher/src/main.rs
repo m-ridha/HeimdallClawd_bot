@@ -1,4 +1,6 @@
-use heimdall_launcher::config::{parse_allowed_ids, render_config, secret_overrides};
+use heimdall_launcher::config::{
+    github_authorization, parse_allowed_ids, render_config, secret_overrides,
+};
 use std::{
     fs,
     io::{self, Write},
@@ -90,6 +92,7 @@ fn runtime(vars: &[(String, String)]) -> Command {
         .env("HOME", STATE)
         .env("ZEROCLAW_CONFIG_DIR", STATE)
         .env_remove("ZEROCLAW_DATA_DIR")
+        .env_remove("HEIMDALL_GITHUB_AUTHORIZATION")
         .envs(vars.iter().cloned());
     command
 }
@@ -99,6 +102,9 @@ fn main() -> io::Result<()> {
     }
     if std::env::args().nth(1).as_deref() == Some("--transfer-mcp") {
         return heimdall_launcher::transfer_mcp::serve();
+    }
+    if std::env::args().nth(1).as_deref() == Some("--codespace-mcp") {
+        return heimdall_launcher::codespace_mcp::serve();
     }
     let owner =
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
@@ -114,7 +120,15 @@ fn main() -> io::Result<()> {
         std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| fail("TELEGRAM_BOT_TOKEN is required"))?;
     let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
         .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
-    let vars = secret_overrides(&token, &executor).map_err(fail)?;
+    let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(token) => vars.push((
+            "HEIMDALL_GITHUB_AUTHORIZATION".into(),
+            github_authorization(&token).map_err(fail)?,
+        )),
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => return Err(fail("Invalid GITHUB_TOKEN")),
+    }
     if let Ok(url) = std::env::var("HEIMDALL_EXECUTOR_URL")
         && url != "http://heimdall-executor.railway.internal:3889"
     {
