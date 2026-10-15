@@ -53,6 +53,7 @@ RUN cargo test --locked
 FROM runtime-source AS native-test-compile
 COPY executor/contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
 COPY deploy/tests/remote-skills.rs crates/zeroclaw-runtime/tests/heimdall_remote_skills.rs
+COPY deploy/tests/tool-inventory.rs crates/zeroclaw-runtime/tests/heimdall_inventory.rs
 COPY deploy/tests/skills-mcp.rs crates/zeroclaw-tools/tests/heimdall_skills_stdio.rs
 COPY deploy/tests/codespace-mcp.rs crates/zeroclaw-tools/tests/heimdall_codespace_stdio.rs
 COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secrets.rs
@@ -61,7 +62,7 @@ COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secret
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets --no-run \
-    && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills --no-run
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills --test heimdall_inventory --no-run
 
 FROM native-test-compile AS runtime-build
 COPY executor/entrypoint.sh /tmp/executor-entrypoint.sh
@@ -75,7 +76,7 @@ ENV HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/t
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
     && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
-    && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills --test heimdall_inventory \
     && /runtime/target/release/zeroclaw eval run --suite /tmp/heimdall-evals --mode replay \
     && touch /contract-passed
 

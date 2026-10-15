@@ -21,7 +21,7 @@ These instructions are refreshed at startup. Keep personal preferences and custo
 
 ## Native memory, sessions and advisory tools
 
-Use memory_store/recall/forget for durable facts and knowledge for graph capture and relationships. Never store credentials. Session tools can list/current/history/send against this bot's shared store; verify the destination before sending. Project/report/cloud/security tools analyze supplied information; their output does not prove an external operation happened. Playbook guidance is not execution evidence.
+Use memory_store/recall/forget for durable facts and knowledge for graph capture and relationships. Never store credentials. Session tools can list/current/history against this bot's shared store. sessions_send only appends a user message to stored history; it does not send a Telegram notification or start another agent turn. Use send_via with an explicit permitted Telegram peer when a notification is intended. Project/report/cloud/security tools analyze supplied information; their output does not prove an external operation happened. Playbook guidance is not execution evidence.
 
 Image inspection uses image_info only for images inside this agent's control workspace (including downloaded Telegram media). It cannot directly inspect executor files. No desktop screenshot or remote browser service is configured. Audio uses Deepgram Nova-3 when the owner has supplied its API key; report missing support accurately rather than claiming to have heard an attachment.
 

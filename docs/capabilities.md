@@ -20,7 +20,7 @@ These changes describe the next release, not a verified live deployment. Heartbe
 
 ## Extended native capabilities (not live-verified)
 
-The primary profile grants 55 exact tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
+The primary profile contains 55 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
 
 | Capability | Status and limits |
 | --- | --- |
@@ -28,7 +28,7 @@ The primary profile grants 55 exact tools. The additions below preserve the sepa
 | Heartbeat | Enabled for `primary`, hourly, two-phase, two-minute task timeout, 24 run records. Delivery is explicitly to `TELEGRAM_OWNER_ID`. Empty task instructions do no work. See [operations](operations.md#heartbeat). |
 | Automatic media processing | Enabled for images and audio. Audio requires the Deepgram key; visual understanding depends on the selected model. Video summarization remains off because this revision documents it as a placeholder. |
 | Image inspection / screenshots | `image_info` is granted with native workspace path guards for agent-side images. Executor files must be transferred first. Native screenshot is not granted: it starts an agent-container shell and needs a desktop. Remote capture requires an external service. |
-| Session management | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` granted. These inspect the shared bot session store; permitted accounts should be trusted to share that visibility. Reset/delete tools are not registered by this runtime's tool factory. |
+| Session management | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` granted. sessions_send appends a user message to history only; it does not notify Telegram or start a turn. Use send_via for delivery. These inspect the shared bot session store; permitted accounts should be trusted to share that visibility. Reset/delete tools are not registered by this runtime's tool factory. |
 | Knowledge graph / bundles | Persistent graph enabled at `/data/zeroclaw/data/knowledge.db`, capped at 10,000 nodes, with `knowledge` granted. Named bundles exist in the schema but no bundle ingestion implementation was found in this pinned runtime; use graph capture instead. |
 | Semantic memory | Hybrid retrieval configured with Cohere `embed-v5.0-fast` through its OpenAI-compatible endpoint, 2,048 dimensions and a 1,024-entry embedding cache. The separate Railway key is required; ChatGPT sign-in is not used for embeddings. |
 | Memory enhancements | SQLite fact extraction and hygiene snapshots enabled. Reranking remains off: the pinned runtime reports its stage as unimplemented. Bounded response cache: 128 disk / 16 hot entries, 15-minute TTL. Upstream bypasses response caching when tools are available. Memory store/recall/forget tools granted. Snapshots on the same volume are not backups. |
