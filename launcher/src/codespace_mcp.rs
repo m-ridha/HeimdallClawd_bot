@@ -148,6 +148,76 @@ fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
     }
     Ok(saved)
 }
+/// Classifies bounded CLI stderr without returning any of its text. Patterns are
+/// hints, not authoritative causes: remote commands can produce similar messages.
+fn command_failure(exit_code: Option<i32>, diagnostics: &[u8]) -> String {
+    let diagnostics = String::from_utf8_lossy(diagnostics).to_ascii_lowercase();
+    let (category, hint) = if exit_code == Some(4)
+        || diagnostics.contains("http 401")
+        || diagnostics.contains("bad credentials")
+    {
+        ("authentication", "Check GITHUB_TOKEN validity and expiry")
+    } else if diagnostics.contains("rate limit") || diagnostics.contains("http 429") {
+        (
+            "rate_limit",
+            "Check GitHub quotas; inspect state before retrying a mutation",
+        )
+    } else if diagnostics.contains("http 403")
+        || diagnostics.contains("resource not accessible by")
+        || diagnostics.contains("insufficient scope")
+    {
+        (
+            "permission_or_policy",
+            "Check token permissions, repository access and GitHub or network policies; 403 alone does not distinguish them",
+        )
+    } else if diagnostics.contains("http 404") {
+        (
+            "not_found_or_inaccessible",
+            "Check the resource name and token access; private resources can return 404",
+        )
+    } else if diagnostics.contains("x509:")
+        || diagnostics.contains("certificate verify failed")
+        || diagnostics.contains("tls handshake")
+    {
+        (
+            "tls",
+            "Check certificate trust and the network path; do not disable TLS verification",
+        )
+    } else if [
+        "dial tcp",
+        "no such host",
+        "network is unreachable",
+        "connection refused",
+        "connection reset",
+        "i/o timeout",
+        "could not resolve hostname",
+    ]
+    .iter()
+    .any(|pattern| diagnostics.contains(pattern))
+    {
+        (
+            "network",
+            "Check DNS, egress restrictions and GitHub reachability; inspect state before retrying a mutation",
+        )
+    } else if ["http 500", "http 502", "http 503", "http 504"]
+        .iter()
+        .any(|pattern| diagnostics.contains(pattern))
+    {
+        (
+            "service_unavailable",
+            "Check GitHub service status; inspect state before retrying a mutation",
+        )
+    } else {
+        (
+            "unknown",
+            "Check token permissions and codespace state; for exec, the remote command may have failed",
+        )
+    };
+    json!({"code":"github_command_failed", "category":category,
+        "exit_code":exit_code, "classification":"heuristic", "hint":hint})
+    .to_string()
+}
+
 /// The GitHub CLI receives only its own token; Telegram, executor and provider credentials are never inherited.
 fn configure_command(command: &mut Command, token: &str) {
     command
@@ -227,7 +297,7 @@ impl Codespaces {
         }
         // CLI diagnostics may contain remote user content or credentials. Never return
         // them on failure; successful output redacts the local GitHub credential.
-        let _diagnostics = stderr
+        let diagnostics = stderr
             .join()
             .map_err(|_| "GitHub diagnostic capture failed".to_string())?
             .map_err(str::to_owned)?;
@@ -239,9 +309,7 @@ impl Codespaces {
             Some(status) if status.success() => {
                 Ok(String::from_utf8_lossy(&output).replace(&self.token, "[redacted]"))
             }
-            Some(_) => {
-                Err("GitHub command failed; check token permissions and codespace state".into())
-            }
+            Some(status) => Err(command_failure(status.code(), &diagnostics)),
             None => Err("GitHub command timed out; run list to check the current state".into()),
         }
     }
@@ -460,6 +528,74 @@ mod tests {
         let failed = handle(request("list", json!({})), &mut |_, _| Err("boom".into())).unwrap();
         assert_eq!(failed["result"]["isError"], true);
     }
+    #[test]
+    fn failures_have_safe_categories_without_repeating_diagnostics() {
+        let cases = [
+            (Some(4), "", "authentication"),
+            (Some(1), "HTTP 401: Bad credentials", "authentication"),
+            (Some(1), "HTTP 403: rate limit exceeded", "rate_limit"),
+            (Some(1), "HTTP 429", "rate_limit"),
+            (
+                Some(1),
+                "HTTP 403: blocked by network policy",
+                "permission_or_policy",
+            ),
+            (
+                Some(1),
+                "Resource not accessible by personal access token",
+                "permission_or_policy",
+            ),
+            (Some(1), "HTTP 404: Not Found", "not_found_or_inaccessible"),
+            (
+                Some(1),
+                "x509: certificate signed by unknown authority",
+                "tls",
+            ),
+            (
+                Some(1),
+                "dial tcp: lookup example.invalid: no such host",
+                "network",
+            ),
+            (Some(1), "HTTP 503: unavailable", "service_unavailable"),
+            (Some(2), "remote program failed", "unknown"),
+            (None, "terminated by signal", "unknown"),
+        ];
+        for (exit_code, message, category) in cases {
+            let diagnostic = format!(
+                "{message} Authorization: Bearer TEST_private_credential user-content-fixture https://private.invalid/path"
+            );
+            let text = command_failure(exit_code, diagnostic.as_bytes());
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["code"], "github_command_failed");
+            assert_eq!(value["category"], category, "{message}");
+            assert_eq!(value["classification"], "heuristic");
+            assert_eq!(value["exit_code"], json!(exit_code));
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            for private in [
+                "TEST_private_credential",
+                "user-content-fixture",
+                "private.invalid",
+                "Authorization",
+                "Bearer",
+            ] {
+                assert!(!text.contains(private));
+            }
+        }
+    }
+
+    #[test]
+    fn structured_failure_is_preserved_as_an_mcp_tool_error() {
+        let response = handle(request("list", json!({})), &mut |_, _| {
+            Err(command_failure(Some(1), b"dial tcp: no such host"))
+        })
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let error: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(error["category"], "network");
+        assert!(!text.contains("dial tcp"));
+    }
+
     #[test]
     fn subprocess_receives_only_the_github_token() {
         let mut command = Command::new("/usr/bin/env");
