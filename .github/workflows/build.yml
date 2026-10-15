@@ -138,6 +138,8 @@ jobs:
           context: .
           file: deploy/bot/Dockerfile
           target: release-binaries
+          # Re-run contracts against current artifacts; keep native-test-compile cached.
+          no-cache-filters: runtime-build
           outputs: type=local,dest=${{ runner.temp }}/runtime
           cache-from: |
             type=registry,ref=${{ env.BUILD_CACHE }}:support

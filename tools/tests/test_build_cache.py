@@ -19,3 +19,6 @@ class NativeTestCacheTests(unittest.TestCase):
         self.assertTrue(all(command.endswith(' --no-run') for command in compile_commands))
         self.assertEqual([command.removesuffix(' --no-run') for command in compile_commands], run_commands)
         self.assertIn('&& touch /contract-passed', executed)
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        self.assertIn('no-cache-filters: runtime-build', workflow)
+        self.assertNotIn('no-cache: true', workflow)
