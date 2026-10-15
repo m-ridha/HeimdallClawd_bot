@@ -97,3 +97,22 @@ The installer accepts only bare lowercase registry names, not URLs, paths, comma
 Skills are assigned through the primary agent's `managed` bundle and persist under `/data/zeroclaw/shared/skills/managed`. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
 
 Other registries and arbitrary source URLs are not exposed by this installer. Skill shell/script commands run through the remote executor. Bounded regular text files from the audited skill directory are copied into `.skills/TOOL_NAME` before execution; symlinks, oversized files and excessive trees are rejected. System dependencies must already exist in the executor. Verify a named skill's installation, visibility to the agent and behavior after deploying this version. CLI/stdio and configuration tests run locally; an actual registry installation through the deployed bot remains a live verification step.
+
+## AgentMail API authentication
+
+Keep `AGENTMAIL_API_KEY` in the **heimdallclawd** Railway service. Add `AGENTMAIL_AUTHORIZATION` in the same service with the Railway reference value:
+
+```text
+Bearer ${{AGENTMAIL_API_KEY}}
+```
+
+Deploy the variable change and the release containing this template. The launcher-generated configuration contains only:
+
+```toml
+[http_request.secrets]
+AGENTMAIL_API_KEY = "${AGENTMAIL_AUTHORIZATION}"
+```
+
+ZeroClaw resolves the reference from its inherited Railway environment when `http_request` uses `auth_secret="AGENTMAIL_API_KEY"`. This tool expects the complete Authorization header value; it does not prepend `Bearer` or interpolate a prefix inside the reference. Do not replace the reference with the real key or commit either variable's resolved value. The isolated executor does not need these variables.
+
+For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes` using that named auth secret and report success or a sanitized error. Use the secret only at `https://api.agentmail.to`. If the reference variable is absent, unrelated features can still start; AgentMail calls fail until it is configured. The template is regenerated at startup, so manual edits to the deployed TOML are not persistent.
