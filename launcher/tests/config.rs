@@ -270,7 +270,7 @@ fn tool_names<'a>(profile: &'a toml::Value, field: &str) -> Vec<&'a str> {
 }
 
 #[test]
-fn codespace_tools_are_allowed_but_mutations_need_owner_approval() {
+fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
     let cfg: toml::Value =
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     let profile = &cfg["risk_profiles"]["primary"];
@@ -285,11 +285,29 @@ fn codespace_tools_are_allowed_but_mutations_need_owner_approval() {
     ] {
         assert!(allowed.contains(&tool), "missing {tool}");
     }
-    for tool in ["codespace__list", "codespace__stop"] {
+    for tool in [
+        "codespace__list",
+        "codespace__create",
+        "codespace__stop",
+        "codespace__delete",
+        "codespace__exec",
+    ] {
         assert!(approved.contains(&tool), "{tool} should be auto-approved");
     }
-    for tool in ["codespace__create", "codespace__delete", "codespace__exec"] {
-        assert!(!approved.contains(&tool), "{tool} must require approval");
+    assert_eq!(
+        cfg["http_request"]["secrets"]["github"].as_str(),
+        Some("${HEIMDALL_GITHUB_AUTHORIZATION}")
+    );
+    let excluded = tool_names(profile, "excluded_tools");
+    for tool in [
+        "shell",
+        "file_read",
+        "file_write",
+        "git_operations",
+        "schedule",
+        "delegate",
+    ] {
+        assert!(excluded.contains(&tool));
     }
     assert_eq!(
         cfg["agents"]["primary"]["mcp_bundles"]
@@ -298,4 +316,30 @@ fn codespace_tools_are_allowed_but_mutations_need_owner_approval() {
             .len(),
         4
     );
+}
+
+#[test]
+fn github_token_is_formatted_only_in_memory_and_never_rendered() {
+    use heimdall_launcher::config::github_authorization;
+    let token = "TEST_github_token_0123456789";
+    assert_eq!(
+        github_authorization(token).unwrap(),
+        format!("Bearer {token}")
+    );
+    let rendered = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    assert!(!rendered.contains(token));
+    assert!(!rendered.contains(&format!("Bearer {token}")));
+    for invalid in [
+        "",
+        "short",
+        "Bearer TEST_github_token_0123456789",
+        "TEST_github_token_0123456789\n",
+        "TEST_github_token_0123456789\r",
+    ] {
+        let error = github_authorization(invalid).unwrap_err();
+        assert!(error.starts_with("Invalid GITHUB_TOKEN"));
+        if !invalid.is_empty() {
+            assert!(!error.contains(invalid));
+        }
+    }
 }

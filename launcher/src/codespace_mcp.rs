@@ -128,17 +128,25 @@ fn handle(
     };
     Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
 }
-fn capture(mut reader: impl Read) -> Vec<u8> {
+fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
     let mut saved = Vec::new();
     let mut block = [0; 4096];
-    while let Ok(size) = reader.read(&mut block) {
+    let mut overflowed = false;
+    loop {
+        let size = reader
+            .read(&mut block)
+            .map_err(|_| "GitHub output read failed")?;
         if size == 0 {
             break;
         }
         let keep = size.min(LIMIT.saturating_sub(saved.len()));
+        overflowed |= keep < size;
         saved.extend_from_slice(&block[..keep]);
     }
-    saved
+    if overflowed {
+        return Err("GitHub output exceeded 32 KiB; run a narrower command or list to check state");
+    }
+    Ok(saved)
 }
 /// The GitHub CLI receives only its own token; Telegram, executor and provider credentials are never inherited.
 fn configure_command(command: &mut Command, token: &str) {
@@ -158,11 +166,9 @@ struct Codespaces {
 }
 impl Codespaces {
     fn from_env() -> Result<Self, String> {
-        let token = std::env::var("GITHUB_CODESPACES_TOKEN")
-            .map_err(|_| "GITHUB_CODESPACES_TOKEN is required".to_string())?;
-        if token.len() < 20 || !token.bytes().all(|b| b.is_ascii_graphic()) {
-            return Err("Invalid GITHUB_CODESPACES_TOKEN".into());
-        }
+        let token =
+            std::env::var("GITHUB_TOKEN").map_err(|_| "GITHUB_TOKEN is required".to_string())?;
+        crate::config::github_authorization(&token).map_err(str::to_owned)?;
         let repos = std::env::var("HEIMDALL_CODESPACE_REPOS")
             .map_err(|_| "HEIMDALL_CODESPACE_REPOS is required".to_string())?;
         Ok(Self {
@@ -176,6 +182,8 @@ impl Codespaces {
         configure_command(&mut command, &self.token);
         command.args(args);
         // Separate process group lets timeout cleanup terminate ssh descendants.
+        // SAFETY: setsid is async-signal-safe; the child invokes no Rust allocation
+        // or synchronization before exec and reports OS failure directly.
         unsafe {
             command.pre_exec(|| {
                 if libc::setsid() < 0 {
@@ -202,6 +210,8 @@ impl Codespaces {
                     std::thread::sleep(Duration::from_millis(100))
                 }
                 _ => {
+                    // SAFETY: group is the PID of our child session; a negative PID
+                    // addresses only that child's process group.
                     unsafe {
                         libc::kill(-group, libc::SIGKILL);
                     }
@@ -211,27 +221,42 @@ impl Codespaces {
             }
         };
         // Reap descendants even if the direct CLI child exited first.
+        // SAFETY: group identifies the session created for this child.
         unsafe {
             libc::kill(-group, libc::SIGKILL);
         }
-        let output = stdout.join().unwrap_or_default();
-        let diagnostics = stderr.join().unwrap_or_default();
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output),
-            String::from_utf8_lossy(&diagnostics)
-        )
-        .replace(&self.token, "[redacted]");
+        // CLI diagnostics may contain remote user content or credentials. Never return
+        // them on failure; successful output redacts the local GitHub credential.
+        let _diagnostics = stderr
+            .join()
+            .map_err(|_| "GitHub diagnostic capture failed".to_string())?
+            .map_err(str::to_owned)?;
+        let output = stdout
+            .join()
+            .map_err(|_| "GitHub output capture failed".to_string())?
+            .map_err(str::to_owned)?;
         match status {
-            Some(status) if status.success() => Ok(text),
-            Some(_) => Err(format!("GitHub command failed: {text}")),
+            Some(status) if status.success() => {
+                Ok(String::from_utf8_lossy(&output).replace(&self.token, "[redacted]"))
+            }
+            Some(_) => {
+                Err("GitHub command failed; check token permissions and codespace state".into())
+            }
             None => Err("GitHub command timed out; run list to check the current state".into()),
         }
     }
+
     /// Every mutation and command is checked against the account's real listing, not model claims.
     fn owned(&self, name: &str, deadline: Instant) -> Result<(), String> {
         let listing = self.gh(
-            &["codespace", "list", "--json", "name,repository", "--limit", "100"],
+            &[
+                "codespace",
+                "list",
+                "--json",
+                "name,repository",
+                "--limit",
+                "100",
+            ],
             deadline,
         )?;
         match repo_of(&listing, name) {
@@ -279,6 +304,7 @@ impl Codespaces {
                         IDLE_TIMEOUT,
                         "--retention-period",
                         RETENTION,
+                        "--default-permissions",
                     ],
                     deadline,
                 )
@@ -297,7 +323,9 @@ impl Codespaces {
                     ),
                     _ => {
                         let command = args["command"].as_str().unwrap_or("");
-                        if command.is_empty() || command.len() > MAX_COMMAND || command.contains('\0')
+                        if command.is_empty()
+                            || command.len() > MAX_COMMAND
+                            || command.contains('\0')
                         {
                             return Err("Command must contain 1-8192 bytes".into());
                         }
@@ -360,14 +388,15 @@ mod tests {
             parse_repos(" Octo/Sandbox,octo/sandbox,octo/other.repo ").unwrap(),
             ["octo/sandbox", "octo/other.repo"]
         );
-        for bad in ["", ",", "octo", "octo/", "/x", "a/b/c", "a/..", "a b/c", "octo/x,"] {
+        for bad in [
+            "", ",", "octo", "octo/", "/x", "a/b/c", "a/..", "a b/c", "octo/x,",
+        ] {
             assert!(parse_repos(bad).is_err(), "{bad}");
         }
     }
     #[test]
     fn repository_lookup_uses_the_account_listing() {
-        let listing =
-            r#"[{"name":"a-1","repository":"Octo/Sandbox"},{"name":"b-2","repository":"octo/other"}]"#;
+        let listing = r#"[{"name":"a-1","repository":"Octo/Sandbox"},{"name":"b-2","repository":"octo/other"}]"#;
         assert_eq!(repo_of(listing, "a-1").as_deref(), Some("octo/sandbox"));
         assert_eq!(repo_of(listing, "missing"), None);
         assert_eq!(repo_of("not json", "a-1"), None);
@@ -416,7 +445,10 @@ mod tests {
             .is_none()
         );
         let ok = handle(
-            request("exec", json!({"name": "octo-box-1", "command": "git status"})),
+            request(
+                "exec",
+                json!({"name": "octo-box-1", "command": "git status"}),
+            ),
             &mut |tool, args| {
                 assert_eq!(tool, "exec");
                 assert_eq!(args["command"], "git status");
@@ -441,6 +473,7 @@ mod tests {
         assert!(!text.contains("dummy-private-fixture"));
         assert!(!text.contains("dummy-executor-fixture"));
         assert!(text.contains("GH_TOKEN=ghp_fixtureTokenValue0123456789"));
-        assert_eq!(capture(&vec![b'x'; LIMIT + 100][..]).len(), LIMIT);
+        assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().len(), LIMIT);
+        assert!(capture(&vec![b'x'; LIMIT + 100][..]).is_err());
     }
 }

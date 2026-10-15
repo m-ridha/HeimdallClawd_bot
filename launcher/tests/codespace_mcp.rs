@@ -25,7 +25,10 @@ fn real_stdio_server_lists_tools_and_fails_closed_without_credentials() {
         let response: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(response["id"], request["id"]);
         match request["id"].as_u64().unwrap() {
-            1 => assert_eq!(response["result"]["serverInfo"]["name"], "heimdall-codespace"),
+            1 => assert_eq!(
+                response["result"]["serverInfo"]["name"],
+                "heimdall-codespace"
+            ),
             2 => assert_eq!(response["result"]["tools"].as_array().unwrap().len(), 5),
             // Extra arguments are rejected before any credential or process is touched.
             3 => assert_eq!(response["error"]["code"], -32602),
@@ -36,7 +39,7 @@ fn real_stdio_server_lists_tools_and_fails_closed_without_credentials() {
                     response["result"]["content"][0]["text"]
                         .as_str()
                         .unwrap()
-                        .contains("GITHUB_CODESPACES_TOKEN")
+                        .contains("GITHUB_TOKEN")
                 );
             }
             _ => unreachable!(),

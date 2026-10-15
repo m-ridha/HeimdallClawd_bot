@@ -1,6 +1,6 @@
 # HeimdallClawd
 
-A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) and two small Rust services on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on persistent volumes, and runs every file or command operation in a separate, network-disabled executor. It keeps working while your own computer is off.
+A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) and two small Rust services on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on persistent volumes, and runs workspace file and command operations in a separate, network-disabled executor. Optional GitHub Codespaces commands run remotely in allowlisted repositories. It keeps working while your own computer is off.
 
 Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/operations.md) for configuration, authentication, persistence and limits; [verification](docs/verification.md) for observed checks and what is not yet live-verified; and [capabilities](docs/capabilities.md) for activation limits and live tests.
 
@@ -27,7 +27,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 
 | Path | Responsibility |
 | --- | --- |
-| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the `--skills-mcp` and `--transfer-mcp` stdio servers |
+| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the `--skills-mcp`, `--transfer-mcp` and `--codespace-mcp` stdio servers |
 | `executor/` | Rust private MCP service and Linux-restricted helpers (`src/`), API/filesystem/isolation tests (`tests/`), and a real ZeroClaw MCP client contract (`contract/`) |
 | `deploy/bot/` | Dockerfiles, ZeroClaw config template, pinned runtime lock and checksums, maintained patches, agent instructions (`TOOLS.md`), licenses |
 | `deploy/executor/`, `deploy/tests/` | Executor artifact Dockerfile; integration tests installed into the pinned ZeroClaw source during the build |
@@ -84,6 +84,8 @@ Runtime values live in Railway variables only. Never put them in Git, GitHub, re
 | heimdallclawd | `PORT` | Set explicitly (3888); Railway's injected port overrides Docker's default |
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
 | heimdallclawd | `ZEROCLAW_providers__models__openrouter__free__api_key` | Optional key for the `openrouter/free` route |
+| heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token shared by HTTP requests and restricted Codespaces tools; no `Bearer ` prefix |
+| heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` allowlist for Codespaces operations |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
 | heimdall-executor | `EXECUTOR_TOKEN` | Required secret, at least 32 characters |
 | heimdall-executor | `PORT` | Set explicitly (3889) |
@@ -105,3 +107,5 @@ Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a pro
 Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with Railway CLI 5.68.0 and Python SDK 0.7.0. Service variables are unmanaged by IaC and volumes are preserved. See [IaC operations](docs/railway-iac.md) and [.railway/README.md](.railway/README.md).
 
 Keep one replica per service, sleeping disabled and the account's $5 hard spending limit. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
+
+See [GitHub access setup](docs/operations.md#github-access) for token permissions, Codespaces limits and verification.

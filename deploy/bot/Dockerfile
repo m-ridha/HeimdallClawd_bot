@@ -67,9 +67,18 @@ COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /heim
 COPY --from=runtime-build /usr/local/bin/heimdall-executor /heimdall-executor
 COPY --from=runtime-build /contract-passed /contract-passed
 
+FROM debian:bookworm-slim AS gh-download
+ARG GH_VERSION=2.102.0
+ARG GH_SHA256=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/* \
+    && curl --fail --location --retry 3 -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+    && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/gh.tar.gz --strip-components=2 -C /usr/local/bin "gh_${GH_VERSION}_linux_amd64/bin/gh"
+
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git lynx && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git lynx openssh-client && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 heimdall && useradd --uid 1000 --gid 1000 --no-create-home heimdall
+COPY --from=gh-download /usr/local/bin/gh /usr/local/bin/gh
 COPY --from=runtime-build /runtime/target/release/zeroclaw /usr/local/bin/zeroclaw
 COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
 LABEL org.opencontainers.image.title="HeimdallClawd" \
