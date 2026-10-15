@@ -84,7 +84,7 @@ Runtime values live in Railway variables only. Never put them in Git, GitHub, re
 | heimdallclawd | `PORT` | Set explicitly (3888); Railway's injected port overrides Docker's default |
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
 | heimdallclawd | `ZEROCLAW_providers__models__openrouter__free__api_key` | Optional key for the `openrouter/free` route |
-| heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token shared by HTTP requests and restricted Codespaces tools; no `Bearer ` prefix |
+| heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token shared by HTTP requests and restricted Codespaces tools; no `Bearer` prefix |
 | heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` allowlist for Codespaces operations |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
 | heimdall-executor | `EXECUTOR_TOKEN` | Required secret, at least 32 characters |

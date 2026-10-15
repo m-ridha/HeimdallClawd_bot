@@ -49,7 +49,6 @@ The expanded configuration, Telegram transfer bridge, binary executor file opera
 
 These changes are not yet live-verified. The local Docker engine is ARM64, while the executor seccomp implementation and production release target are Linux x86_64; an ARM64 Docker build cannot compile that architecture-specific syscall list. Native Linux x86_64 isolation/MCP tests remain mandatory in the release workflow. Browser interaction is not configured: the selected Tavily integration is search/content access. Hook/plugin frameworks require actual handlers/packages to exercise them. End-to-end scheduled delivery, Telegram file transfers, skill execution, SOPs and pipeline behavior must be checked after publishing the new release. No live Railway resources or IaC ownership were changed by these local checks.
 
-
 ## Failed-build correction and Python IaC migration
 
 The failing release completed its cold WASM runtime compilation in 18m32s, then failed the launcher bootstrap assertion because the executable was absent from its fixed production path. The corrected launcher validation stage copies it to `/usr/local/bin/zeroclaw` first. The full launcher suite, including that bootstrap case, passes in local Linux x86_64 Docker using the existing checksum-pinned executable. The remote-skill integration contract passes locally, along with Python packaging/IaC guards, actionlint and strict launcher Clippy.

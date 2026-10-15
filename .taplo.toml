@@ -1,3 +1,4 @@
+# reference: https://taplo.tamasfe.dev/configuration/formatter-options.html
 [formatting]
 # Indent nested table headers
 indent_tables = true
