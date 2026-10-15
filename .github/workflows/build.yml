@@ -12,12 +12,12 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Repository ref to validate (no deployment)'
+        description: "Repository ref to validate (no deployment)"
         required: true
         default: main
         type: string
       release_tag:
-        description: 'Package version used only for validation'
+        description: "Package version used only for validation"
         required: true
         default: v0.0.0
         type: string
@@ -160,4 +160,3 @@ jobs:
             ${{ runner.temp }}/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
-

@@ -121,7 +121,7 @@ For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes`
 
 Use a dedicated GitHub account and keep its token only in the **heimdallclawd** Railway service. Never add it to the executor, Git, GitHub Actions variables or chat.
 
-Set `GITHUB_TOKEN` to the raw personal access token, without `Bearer ` or whitespace. This single variable serves both GitHub REST requests and Codespaces. The launcher validates it and derives `HEIMDALL_GITHUB_AUTHORIZATION=Bearer <token>` only in ZeroClaw's process environment. Do not configure that internal variable in Railway. The template stores only `github = "${HEIMDALL_GITHUB_AUTHORIZATION}"` in `[http_request.secrets]`; the resolved token is never written into TOML. Remove the older separate authorization/Codespaces token variables if present.
+Set `GITHUB_TOKEN` to the raw personal access token, without `Bearer` or whitespace. This single variable serves both GitHub REST requests and Codespaces. The launcher validates it and derives `HEIMDALL_GITHUB_AUTHORIZATION=Bearer <token>` only in ZeroClaw's process environment. Do not configure that internal variable in Railway. The template stores only `github = "${HEIMDALL_GITHUB_AUTHORIZATION}"` in `[http_request.secrets]`; the resolved token is never written into TOML. Remove the older separate authorization/Codespaces token variables if present.
 
 Ask Heimdall to call `https://api.github.com/user` with `auth_secret="github"`; the tool supplies the header without exposing the token in model arguments. Use that secret only at `https://api.github.com`. Grant only the repository permissions needed for the requested operations; token permissions govern reads and writes.
 

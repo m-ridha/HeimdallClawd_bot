@@ -91,7 +91,7 @@ COPY --from=gh-download /usr/local/bin/gh /usr/local/bin/gh
 COPY --from=runtime-build /runtime/target/release/zeroclaw /usr/local/bin/zeroclaw
 COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
 LABEL org.opencontainers.image.title="HeimdallClawd" \
-      io.heimdall.runtime.version="0.8.5" io.heimdall.runtime.revision="cb2b20a9fe59004b7ef03e123942d31f29236d15"
+    io.heimdall.runtime.version="0.8.5" io.heimdall.runtime.revision="cb2b20a9fe59004b7ef03e123942d31f29236d15"
 ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888
 EXPOSE 3888
 ENTRYPOINT ["/usr/local/bin/heimdall-launcher"]
