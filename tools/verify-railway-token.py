@@ -23,13 +23,21 @@ def main():
     request = urllib.request.Request(
         'https://backboard.railway.com/graphql/v2',
         data=json.dumps({'query': 'query { projectToken { project { id } environment { id } } }'}).encode(),
-        headers={'Content-Type': 'application/json', 'project-access-token': os.environ['RAILWAY_TOKEN']},
+        headers={
+            'Content-Type': 'application/json',
+            'User-Agent': 'HeimdallClawd-CI',
+            'project-access-token': os.environ['RAILWAY_TOKEN'],
+        },
     )
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=45) as response:
             result = json.load(response)
-    except (urllib.error.URLError, ValueError):
-        raise RuntimeError('Railway token scope check failed; API response suppressed') from None
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f'Railway token scope check received HTTP {error.code}; API response suppressed') from None
+    except urllib.error.URLError:
+        raise RuntimeError('Railway token scope check could not reach the API; connection details suppressed') from None
+    except ValueError:
+        raise RuntimeError('Railway token scope check received invalid JSON; API response suppressed') from None
     validate_scope(result, os.environ['RAILWAY_PROJECT_ID'], os.environ['RAILWAY_ENVIRONMENT_ID'])
     print('Railway project token matches the production project and environment')
 
