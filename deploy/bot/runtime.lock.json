@@ -8,6 +8,9 @@
     "channel-telegram",
     "gateway",
     "schema-export",
-    "plugins-wasm-cranelift"
+    "plugins-wasm-cranelift",
+    "embedded-web",
+    "webauthn",
+    "channel-acp-server"
   ]
 }

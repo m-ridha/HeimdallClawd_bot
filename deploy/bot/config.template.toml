@@ -12,6 +12,9 @@ model = "gpt-6.1-sol"
 wire_api = "responses"
 requires_openai_auth = true
 
+[providers.transcription.deepgram.voice]
+model = "nova-3"
+
 [providers.models.openrouter.free]
 model = "openrouter/free"
 wire_api = "chat_completions"
@@ -30,11 +33,13 @@ model = "gpt-6.1-sol"
 enabled = true
 channels = ["telegram.home"]
 model_provider = "openai.codex"
+transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
 mcp_bundles = ["workspace", "skills", "transfer", "codespace"]
 skill_bundles = ["managed"]
 cron_jobs = []
+acp_enable_mcp = true
 
 	[agents.primary.workspace]
 	path = "/data/zeroclaw/agents/primary/workspace"
@@ -102,6 +107,20 @@ allowed_tools = [
 	"codespace__stop",
 	"codespace__delete",
 	"codespace__exec",
+	"image_info",
+	"sessions_current",
+	"sessions_list",
+	"sessions_history",
+	"sessions_send",
+	"knowledge",
+	"project_intel",
+	"report_template",
+	"cloud_ops",
+	"cloud_patterns",
+	"security_ops",
+	"memory_store",
+	"memory_recall",
+	"memory_forget",
 ]
 auto_approve = [
 	"workspace__bash",
@@ -145,6 +164,20 @@ auto_approve = [
 	"codespace__stop",
 	"codespace__delete",
 	"codespace__exec",
+	"image_info",
+	"sessions_current",
+	"sessions_list",
+	"sessions_history",
+	"sessions_send",
+	"knowledge",
+	"project_intel",
+	"report_template",
+	"cloud_ops",
+	"cloud_patterns",
+	"security_ops",
+	"memory_store",
+	"memory_recall",
+	"memory_forget",
 ]
 excluded_tools = [
 	"shell",
@@ -220,7 +253,16 @@ servers = ["codespace"]
 directory = "shared/skills/managed"
 
 [heartbeat]
-enabled = false
+enabled = true
+agent = "primary"
+interval_minutes = 60
+two_phase = true
+target = "telegram"
+# The launcher fills `to` with TELEGRAM_OWNER_ID.
+to = ""
+max_run_history = 24
+task_timeout_secs = 120
+load_session_context = true
 
 [hooks]
 enabled = true
@@ -244,7 +286,12 @@ allow_scripts = true
 prompt_injection_mode = "compact"
 
 [observability]
-log_persistence = "none"
+log_persistence = "rotating"
+log_persistence_path = "/data/zeroclaw/data/diagnostics.jsonl"
+log_persistence_max_bytes = 1_048_576
+log_persistence_rotate_daily = true
+log_persistence_retention_max_files = 3
+log_persistence_retention_max_age_days = 3
 log_tool_io = "off"
 log_llm_request_payload = "off"
 
@@ -318,3 +365,76 @@ timeout_secs = 20
 enabled = true
 max_links = 2
 timeout_secs = 10
+
+# Optional providers are supplied through native ZEROCLAW_... environment overrides.
+[transcription]
+enabled = true
+max_audio_bytes = 8_388_608
+max_duration_secs = 120
+transcribe_non_ptt_audio = true
+
+[media_pipeline]
+enabled = true
+transcribe_audio = true
+describe_images = true
+# This runtime documents video summarization as a placeholder.
+summarize_video = false
+
+[memory]
+backend = "sqlite"
+consolidation_extract_facts = true
+snapshot_enabled = true
+snapshot_on_hygiene = true
+response_cache_enabled = true
+response_cache_ttl_minutes = 15
+response_cache_max_entries = 128
+response_cache_hot_entries = 16
+# The pinned runtime reports reranking as unimplemented.
+rerank_enabled = false
+embedding_provider = "custom:https://api.cohere.ai/compatibility/v1"
+embedding_model = "embed-v5.0-fast"
+embedding_dimensions = 2048
+embedding_cache_size = 1024
+search_mode = "hybrid"
+
+[knowledge]
+enabled = true
+db_path = "/data/zeroclaw/data/knowledge.db"
+max_nodes = 10_000
+auto_capture = false
+suggest_on_query = true
+
+[project_intel]
+enabled = true
+report_output_dir = "/data/zeroclaw/data/project-reports"
+
+[cloud_ops]
+enabled = true
+
+[security_ops]
+enabled = true
+playbooks_dir = "/data/zeroclaw/shared/playbooks"
+report_output_dir = "/data/zeroclaw/data/security-reports"
+require_approval_for_actions = true
+
+[eval]
+suite_dir = "/usr/share/heimdall/evals"
+mode = "replay"
+
+# Gateway ACP sessions select the same primary agent and MCP bundles.
+[acp]
+default_agent = "primary"
+max_sessions = 4
+session_timeout_secs = 1800
+
+# Activation requires an owner-configured shared token and remote client.
+[nodes]
+enabled = false
+max_nodes = 2
+
+	[nodes.mdns]
+	enabled = false
+
+# Requires the actual HTTPS relying-party domain/origin before activation.
+[webauthn]
+enabled = false

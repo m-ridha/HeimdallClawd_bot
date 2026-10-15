@@ -1,0 +1,40 @@
+{
+  "model_name": "heimdall-replay-smoke",
+  "turns": [
+    {
+      "user_input": "Echo a synthetic test marker using the echo tool.",
+      "steps": [
+        {
+          "response": {
+            "type": "tool_calls",
+            "tool_calls": [
+              {
+                "id": "echo-1",
+                "name": "echo",
+                "arguments": {
+                  "message": "replay-ready"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "response": {
+            "type": "text",
+            "content": "replay-ready"
+          }
+        }
+      ]
+    }
+  ],
+  "expects": {
+    "response_contains": [
+      "replay-ready"
+    ],
+    "tools_used": [
+      "echo"
+    ],
+    "max_tool_calls": 1,
+    "all_tools_succeeded": true
+  }
+}

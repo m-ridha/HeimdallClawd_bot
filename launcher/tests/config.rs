@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        41
+        55
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -80,13 +80,43 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     std::fs::write(dir.path().join("config.toml"), &config).unwrap();
     let token = "123456:TEST_token_abcdefghijklmnop";
     let secret = "e".repeat(64);
-    let vars = secret_overrides(token, &secret).unwrap();
+    let mut vars = secret_overrides(token, &secret).unwrap();
+    let deepgram_key = "fixture_deepgram_private_value";
+    let cohere_key = "fixture_cohere_private_value";
+    vars.push((
+        "ZEROCLAW_providers__transcription__deepgram__voice__api_key".into(),
+        deepgram_key.into(),
+    ));
+    vars.push((
+        "ZEROCLAW_memory__embedding_api_key".into(),
+        cohere_key.into(),
+    ));
     for (property, expected) in [
         (
             "peer_groups.telegram_home.external-peers",
             "[\"1001\", \"1002\"]",
         ),
         ("providers.models.openai.codex.requires-openai-auth", "true"),
+        ("heartbeat.enabled", "true"),
+        ("heartbeat.to", "1001"),
+        ("media_pipeline.enabled", "true"),
+        ("transcription.enabled", "true"),
+        ("providers.transcription.deepgram.voice.model", "nova-3"),
+        ("agents.primary.transcription-provider", "deepgram.voice"),
+        (
+            "memory.embedding-provider",
+            "custom:https://api.cohere.ai/compatibility/v1",
+        ),
+        ("memory.embedding-model", "embed-v5.0-fast"),
+        ("memory.embedding-dimensions", "2048"),
+        ("knowledge.enabled", "true"),
+        ("memory.consolidation-extract-facts", "true"),
+        ("memory.snapshot-enabled", "true"),
+        ("memory.rerank-enabled", "false"),
+        ("agents.primary.acp-enable-mcp", "true"),
+        ("observability.log-persistence", "rotating"),
+        ("observability.log-tool-io", "off"),
+        ("observability.log-llm-request-payload", "off"),
     ] {
         let result = std::process::Command::new(&binary)
             .args(["config", "get", property])
@@ -117,6 +147,8 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     let saved = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
     assert!(!saved.contains(token));
     assert!(!saved.contains(&secret));
+    assert!(!saved.contains(deepgram_key));
+    assert!(!saved.contains(cohere_key));
 }
 
 #[test]
@@ -205,7 +237,7 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
 }
 
 #[test]
-fn requested_capabilities_are_enabled_and_heartbeat_stays_optional() {
+fn requested_capabilities_are_enabled_with_owner_scoped_heartbeat() {
     let cfg: toml::Value =
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     for section in [
@@ -226,7 +258,10 @@ fn requested_capabilities_are_enabled_and_heartbeat_stays_optional() {
         cfg["runtime_profiles"]["primary"]["parallel_tools"].as_bool(),
         Some(true)
     );
-    assert_eq!(cfg["heartbeat"]["enabled"].as_bool(), Some(false));
+    assert_eq!(cfg["heartbeat"]["enabled"].as_bool(), Some(true));
+    assert_eq!(cfg["heartbeat"]["agent"].as_str(), Some("primary"));
+    assert_eq!(cfg["heartbeat"]["target"].as_str(), Some("telegram"));
+    assert_eq!(cfg["heartbeat"]["to"].as_str(), Some("1001"));
     assert_eq!(
         cfg["http_request"]["allow_private_hosts"].as_bool(),
         Some(false)
@@ -344,4 +379,91 @@ fn github_token_is_formatted_only_in_memory_and_never_rendered() {
             assert!(!error.contains(invalid));
         }
     }
+}
+
+#[test]
+fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into(), "1002".into()], "gpt-6.1-sol").unwrap())
+            .unwrap();
+    let profile = &cfg["risk_profiles"]["primary"];
+    let allowed = tool_names(profile, "allowed_tools");
+    let approved = tool_names(profile, "auto_approve");
+    assert_eq!(allowed, approved);
+    for name in [
+        "image_info",
+        "sessions_current",
+        "sessions_list",
+        "sessions_history",
+        "sessions_send",
+        "knowledge",
+        "project_intel",
+        "report_template",
+        "cloud_ops",
+        "cloud_patterns",
+        "security_ops",
+        "memory_store",
+        "memory_recall",
+        "memory_forget",
+    ] {
+        assert!(allowed.contains(&name), "{name}");
+    }
+    assert!(!allowed.contains(&"screenshot"));
+    assert_eq!(cfg["heartbeat"]["to"].as_str(), Some("1001"));
+    assert_eq!(
+        cfg["heartbeat"]["task_timeout_secs"].as_integer(),
+        Some(120)
+    );
+    assert_eq!(cfg["knowledge"]["max_nodes"].as_integer(), Some(10_000));
+    assert_eq!(
+        cfg["observability"]["log_persistence_retention_max_files"].as_integer(),
+        Some(3)
+    );
+    assert_eq!(
+        cfg["observability"]["log_persistence_retention_max_age_days"].as_integer(),
+        Some(3)
+    );
+    assert_eq!(cfg["observability"]["log_tool_io"].as_str(), Some("off"));
+    assert_eq!(
+        cfg["observability"]["log_llm_request_payload"].as_str(),
+        Some("off")
+    );
+    assert_eq!(cfg["gateway"]["require_pairing"].as_bool(), Some(true));
+    assert_eq!(cfg["gateway"]["allow_remote_admin"].as_bool(), Some(false));
+    for section in ["nodes", "webauthn"] {
+        assert_eq!(cfg[section]["enabled"].as_bool(), Some(false));
+    }
+    assert_eq!(
+        cfg["memory"]["embedding_provider"].as_str(),
+        Some("custom:https://api.cohere.ai/compatibility/v1")
+    );
+}
+
+#[test]
+fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials() {
+    let text = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    let cfg: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(cfg["transcription"]["enabled"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["agents"]["primary"]["transcription_provider"].as_str(),
+        Some("deepgram.voice")
+    );
+    assert_eq!(
+        cfg["providers"]["transcription"]["deepgram"]["voice"]["model"].as_str(),
+        Some("nova-3")
+    );
+    assert_eq!(
+        cfg["memory"]["embedding_model"].as_str(),
+        Some("embed-v5.0-fast")
+    );
+    assert_eq!(
+        cfg["memory"]["embedding_dimensions"].as_integer(),
+        Some(2048)
+    );
+    assert_eq!(
+        cfg["memory"]["embedding_cache_size"].as_integer(),
+        Some(1024)
+    );
+    assert_eq!(cfg["memory"]["search_mode"].as_str(), Some("hybrid"));
+    assert!(!text.contains("api_key"));
 }
