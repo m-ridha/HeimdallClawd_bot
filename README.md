@@ -29,7 +29,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 | --- | --- |
 | `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the `--skills-mcp`, `--transfer-mcp` and `--codespace-mcp` stdio servers |
 | `executor/` | Rust private MCP service and Linux-restricted helpers (`src/`), API/filesystem/isolation tests (`tests/`), and a real ZeroClaw MCP client contract (`contract/`) |
-| `deploy/bot/` | Dockerfiles, ZeroClaw config template, pinned runtime lock and checksums, maintained patches, agent instructions (`TOOLS.md`), licenses |
+| `deploy/bot/` | Dockerfiles, ZeroClaw config template, pinned runtime lock and checksums, maintained patches, managed agent instructions (`TOOLS.md`, `IDENTITY.md`), licenses |
 | `deploy/executor/`, `deploy/tests/` | Executor artifact Dockerfile; integration tests installed into the pinned ZeroClaw source during the build |
 | `.railway/` | Python infrastructure definition for both services and volumes |
 | `.github/workflows/` | Reusable build/verify workflow and the published-release deployment workflow |
@@ -109,3 +109,5 @@ Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with R
 Keep one replica per service, sleeping disabled and the account's $5 hard spending limit. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
 
 See [GitHub access setup](docs/operations.md#github-access) for token permissions, Codespaces limits and verification.
+
+Agent tool and identity instructions refresh on startup; personal notes belong in `USER.md`. See [instruction updates](docs/operations.md#managed-agent-instructions) and [tool recovery](docs/operations.md#tool-discovery-and-recovery).

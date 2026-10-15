@@ -1,0 +1,18 @@
+[formatting]
+# Indent nested table headers
+indent_tables = true
+
+# Use tab for each indentation level
+indent_string = "\t"
+
+# Avoid extra alignment spaces around =
+align_entries = false
+
+# Allow one blank line between blocks
+allowed_blank_lines = 1
+
+# Preserve the original key order
+reorder_keys = false
+
+# End the file with a newline
+trailing_newline = true

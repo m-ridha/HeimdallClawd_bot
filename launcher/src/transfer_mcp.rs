@@ -70,9 +70,35 @@ fn read_attachment(source: &str) -> Result<Vec<u8>, &'static str> {
     }
     Ok(bytes)
 }
+fn status_error(status: u16) -> Option<&'static str> {
+    match status {
+        200..=299 => None,
+        401 => Some("transfer_authentication: check the service credential"),
+        403 => {
+            Some("transfer_permission_or_policy: check recipient/service access and network policy")
+        }
+        404 => Some("transfer_not_found: check the file or service resource"),
+        409 => Some("transfer_duplicate_request: inspect the original operation before retrying"),
+        423 => Some("executor_busy: wait before retrying this unstarted transfer request"),
+        429 => Some("transfer_rate_limit: wait and check delivery state before resending"),
+        500..=599 => Some(
+            "transfer_service_unavailable: check service health and operation state before retrying",
+        ),
+        _ => Some("transfer_rejected: check request parameters and service configuration"),
+    }
+}
+fn transport_error(error: reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "transfer_timeout: completion is unknown; check delivery or file state before retrying"
+    } else if error.is_connect() {
+        "transfer_network: check DNS, egress and service reachability"
+    } else {
+        "transfer_transport: request failed; check service health and operation state"
+    }
+}
 fn value(response: Response) -> Result<Value, &'static str> {
-    if !response.status().is_success() {
-        return Err("Transfer service rejected the request");
+    if let Some(error) = status_error(response.status().as_u16()) {
+        return Err(error);
     }
     let mut bytes = Vec::new();
     response
@@ -82,7 +108,18 @@ fn value(response: Response) -> Result<Value, &'static str> {
     if bytes.len() > 131072 {
         return Err("Transfer response exceeded the limit");
     }
-    serde_json::from_slice(&bytes).map_err(|_| "Invalid transfer service response")
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "Invalid transfer service response")?;
+    if value["ok"] == false {
+        let code = value["error_code"]
+            .as_u64()
+            .and_then(|v| u16::try_from(v).ok())
+            .unwrap_or(0);
+        return Err(
+            status_error(code).unwrap_or("transfer_rejected: service rejected the operation")
+        );
+    }
+    Ok(value)
 }
 struct Bridge {
     client: Client,
@@ -118,10 +155,21 @@ impl Bridge {
             .timeout(Duration::from_secs(35))
             .bearer_auth(&self.executor)
             .json(&json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}}))
-            .send().map_err(|_| "Private executor connection failed")?;
+            .send().map_err(transport_error)?;
         let result = value(response)?;
-        if result.get("error").is_some() || result["result"]["isError"] == true {
-            return Err("Private executor transfer failed");
+        if result.get("error").is_some() {
+            return Err(match result["error"]["code"].as_i64() {
+                Some(-32001) => {
+                    "executor_busy: wait before retrying this unstarted transfer request"
+                }
+                Some(-32002) => {
+                    "transfer_duplicate_request: inspect the original operation before retrying"
+                }
+                _ => "executor_transfer_failed: check path, size and executor health",
+            });
+        }
+        if result["result"]["isError"] == true {
+            return Err("executor_transfer_failed: check path, size and executor health");
         }
         result["result"]["content"][0]["text"]
             .as_str()
@@ -138,7 +186,9 @@ impl Bridge {
             .ok_or("Use a relative workspace path without traversal")?;
         match tool {
             "send" => {
-                let recipient = args["recipient"].as_str().unwrap_or(&self.peers[0]);
+                let recipient = args["recipient"]
+                    .as_str()
+                    .ok_or("An explicit Telegram recipient is required")?;
                 if !self.peers.iter().any(|p| p == recipient) {
                     return Err("Recipient is outside the Telegram allowlist");
                 }
@@ -162,7 +212,7 @@ impl Bridge {
                         .post(self.api("sendDocument"))
                         .multipart(form)
                         .send()
-                        .map_err(|_| "Telegram upload failed")?,
+                        .map_err(transport_error)?,
                 )?;
                 if result["ok"] != true {
                     return Err("Telegram rejected the upload");
@@ -190,7 +240,7 @@ impl Bridge {
                         .post(self.api("getFile"))
                         .json(&json!({"file_id":file_id}))
                         .send()
-                        .map_err(|_| "Telegram file lookup failed")?,
+                        .map_err(transport_error)?,
                 )?;
                 if result["ok"] != true {
                     return Err("Telegram rejected the file lookup");
@@ -212,15 +262,15 @@ impl Bridge {
                         self.token, remote
                     ))
                     .send()
-                    .map_err(|_| "Telegram download failed")?;
-                if !response.status().is_success() {
-                    return Err("Telegram rejected the download");
+                    .map_err(transport_error)?;
+                if let Some(error) = status_error(response.status().as_u16()) {
+                    return Err(error);
                 }
                 let mut bytes = Vec::new();
                 response
                     .take((LIMIT + 1) as u64)
                     .read_to_end(&mut bytes)
-                    .map_err(|_| "Telegram download failed")?;
+                    .map_err(|_| "transfer_read_failed: response body could not be read")?;
                 if bytes.len() > LIMIT {
                     return Err("Transfer exceeds 48 KiB");
                 }
@@ -250,7 +300,7 @@ fn handle(
         }
         "ping" => json!({}),
         "tools/list" => json!({"tools":[
-            {"name":"send","description":"Send an isolated workspace file (up to 48 KiB) as a Telegram document to an allowed user. Defaults to the owner.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"recipient":{"type":"string"}},"required":["path"],"additionalProperties":false}},
+            {"name":"send","description":"Send an isolated workspace file (up to 48 KiB) as a Telegram document to an allowed user. An explicit allowed recipient is required; use the requesting private chat identity. Paths are relative to /data/workspace.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"recipient":{"type":"string"}},"required":["path","recipient"],"additionalProperties":false}},
             {"name":"import","description":"Copy a Telegram attachment already downloaded under the agent workspace telegram_files directory into the isolated workspace (up to 48 KiB). Use the source path shown in the incoming Telegram message.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"source":{"type":"string"}},"required":["path","source"],"additionalProperties":false}},
             {"name":"receive","description":"Download a Telegram file_id into the isolated workspace (up to 48 KiB).","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"file_id":{"type":"string"}},"required":["path","file_id"],"additionalProperties":false}}
         ]}),
@@ -264,13 +314,27 @@ fn handle(
                 _ => &[],
             };
             let valid = !allowed.is_empty()
-                && args
-                    .as_object()
-                    .is_some_and(|a| a.keys().all(|k| allowed.contains(&k.as_str())));
+                && args.as_object().is_some_and(|a| {
+                    a.len() == allowed.len()
+                        && allowed
+                            .iter()
+                            .all(|key| a.get(*key).is_some_and(Value::is_string))
+                });
             let (text, failed) = match if valid {
                 run(tool, args)
             } else {
-                Err("Invalid transfer arguments")
+                Err(match tool {
+                    "send" => {
+                        "transfer_invalid_arguments: send requires string path and explicit recipient, with no extra fields"
+                    }
+                    "receive" => {
+                        "transfer_invalid_arguments: receive requires string path and file_id, with no extra fields"
+                    }
+                    "import" => {
+                        "transfer_invalid_arguments: import requires string path and source, with no extra fields"
+                    }
+                    _ => "transfer_unknown_tool: use send, receive or import",
+                })
             } {
                 Ok(text) => (text, false),
                 Err(error) => (error.to_owned(), true),
@@ -314,6 +378,71 @@ pub fn serve() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejected_http_response_never_exposes_body_or_url() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0; 4096];
+            let size = stream.read(&mut request).unwrap();
+            assert!(size > 0);
+            stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 29\r\nConnection: close\r\n\r\nTEST_secret user-private-data").unwrap();
+        });
+        let response = Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/private-fixture"))
+            .send()
+            .unwrap();
+        let error = value(response).unwrap_err();
+        server.join().unwrap();
+        assert!(error.starts_with("transfer_permission_or_policy:"));
+        for private in [
+            "TEST_secret",
+            "user-private-data",
+            "private-fixture",
+            "127.0.0.1",
+        ] {
+            assert!(!error.contains(private));
+        }
+    }
+    #[test]
+    fn transfer_statuses_have_distinct_safe_recovery_messages() {
+        assert_eq!(status_error(200), None);
+        assert!(
+            status_error(401)
+                .unwrap()
+                .starts_with("transfer_authentication:")
+        );
+        assert!(
+            status_error(403)
+                .unwrap()
+                .starts_with("transfer_permission_or_policy:")
+        );
+        assert!(status_error(423).unwrap().starts_with("executor_busy:"));
+        assert!(
+            status_error(429)
+                .unwrap()
+                .starts_with("transfer_rate_limit:")
+        );
+        assert!(
+            status_error(503)
+                .unwrap()
+                .starts_with("transfer_service_unavailable:")
+        );
+    }
+    #[test]
+    fn missing_recipient_never_reaches_the_transfer_runner() {
+        let result = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send","arguments":{"path":"x"}}}), &mut |_, _| panic!("must reject before side effects")).unwrap();
+        assert_eq!(result["result"]["isError"], true);
+    }
     #[test]
     fn transfer_paths_and_notifications_are_restricted() {
         for path in [

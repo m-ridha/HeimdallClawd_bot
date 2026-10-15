@@ -141,6 +141,23 @@ mod tests {
         assert_eq!(address.port(), 3889);
     }
     #[tokio::test]
+    async fn mcp_distinguishes_busy_and_duplicate_without_starting_jobs() {
+        use http_body_util::BodyExt;
+        let app = App::new("x".repeat(32), true);
+        let _permit = app.gate.clone().acquire_many_owned(2).await.unwrap();
+        app.active
+            .lock()
+            .unwrap()
+            .insert("mcp:1".into(), CancellationToken::new());
+        for (id, expected) in [(1, -32002), (2, -32001)] {
+            let response = crate::mcp::handle(State(app.clone()), axum::Json(serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"bash","arguments":{"command":"true"}}}))).await;
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["error"]["code"], expected);
+            assert!(!value.to_string().contains("x".repeat(32).as_str()));
+        }
+    }
+    #[tokio::test]
     async fn active_duplicate_and_capacity_have_distinct_statuses() {
         let app = App::new("x".repeat(32), true);
         let _permit = app.gate.clone().acquire_many_owned(2).await.unwrap();
