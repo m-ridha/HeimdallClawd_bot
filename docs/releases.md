@@ -51,3 +51,9 @@ Run **Build and verify release binaries → Run workflow** to validate main and 
 The first revised build saved both compilation caches, but its validation runner exhausted disk space when release compiler layers and native test artifacts were combined. Validation now starts from the patched source stage and receives only executables from the compile jobs, avoiding the release object layers. It also removes unused Android, .NET and GHC installations from the disposable validation runner. Downloaded executable permissions are restored before tests.
 
 Manual build-only runs accept branch refs for PR verification; published release tags still must belong to `main`. To reproduce the two-phase Docker build locally, export `runtime-binary` and `support-binaries` with Buildx local outputs, combine their executables in `prebuilt/`, then build `release-binaries`.
+
+## Project-token authentication
+
+The production `RAILWAY_TOKEN` secret must be a Railway project token scoped to the configured project and environment. The release workflow verifies this scope without logging the token or API response, then runs IaC directly. Do not add `railway link` to this flow: CLI 5.68.0 queries account workspaces during linking, which a project token cannot authorize. The IaC CLI resolves the project and environment from `RAILWAY_TOKEN` itself. Application uploads continue to pass explicit project, environment and service IDs.
+
+An `Unauthorized` failure from `railway link` does not establish that the deployment token expired. If the separate token scope check fails, check the secret and its scope in Railway. Rerunning a published release uses its original workflow commit; merge workflow fixes and publish a new version to use them.
