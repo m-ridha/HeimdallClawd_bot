@@ -100,19 +100,19 @@ Other registries and arbitrary source URLs are not exposed by this installer. Sk
 
 ## AgentMail API authentication
 
-Keep `AGENTMAIL_API_KEY` in the **heimdallclawd** Railway service. Add `AGENTMAIL_AUTHORIZATION` in the same service with the Railway reference value:
+Set only `AGENTMAIL_AUTHORIZATION` in the **heimdallclawd** Railway service to the complete authorization value (replace the placeholder with your actual key):
 
 ```text
-Bearer ${{AGENTMAIL_API_KEY}}
+Bearer <your actual API key>
 ```
 
-Deploy the variable change and the release containing this template. The launcher-generated configuration contains only:
+No separate `AGENTMAIL_API_KEY` variable is required. Deploy the variable change and the release containing this template. The launcher-generated configuration contains only:
 
 ```toml
 [http_request.secrets]
-AGENTMAIL_API_KEY = "${AGENTMAIL_AUTHORIZATION}"
+agentmail = "${AGENTMAIL_AUTHORIZATION}"
 ```
 
-ZeroClaw resolves the reference from its inherited Railway environment when `http_request` uses `auth_secret="AGENTMAIL_API_KEY"`. This tool expects the complete Authorization header value; it does not prepend `Bearer` or interpolate a prefix inside the reference. Do not replace the reference with the real key or commit either variable's resolved value. The isolated executor does not need these variables.
+ZeroClaw resolves the reference from its inherited Railway environment when `http_request` uses `auth_secret="agentmail"`. This tool expects the complete Authorization header value; it does not prepend `Bearer` or interpolate a prefix inside the reference. Do not replace the reference with the real key or commit the variable's value. The isolated executor does not need these variables.
 
 For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes` using that named auth secret and report success or a sanitized error. Use the secret only at `https://api.agentmail.to`. If the reference variable is absent, unrelated features can still start; AgentMail calls fail until it is configured. The template is regenerated at startup, so manual edits to the deployed TOML are not persistent.

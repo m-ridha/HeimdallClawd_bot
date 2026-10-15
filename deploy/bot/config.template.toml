@@ -148,7 +148,7 @@ allow_private_hosts = false
 max_response_size = 500000
 timeout_secs = 20
 [http_request.secrets]
-AGENTMAIL_API_KEY = "${AGENTMAIL_AUTHORIZATION}"
+agentmail = "${AGENTMAIL_AUTHORIZATION}"
 [text_browser]
 enabled = true
 preferred_browser = "lynx"

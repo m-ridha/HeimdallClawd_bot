@@ -255,7 +255,7 @@ fn agentmail_auth_is_an_environment_reference_not_a_persisted_key() {
     let text = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
     let config: toml::Value = toml::from_str(&text).unwrap();
     assert_eq!(
-        config["http_request"]["secrets"]["AGENTMAIL_API_KEY"].as_str(),
+        config["http_request"]["secrets"]["agentmail"].as_str(),
         Some("${AGENTMAIL_AUTHORIZATION}")
     );
 }
