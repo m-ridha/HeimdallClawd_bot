@@ -100,6 +100,9 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--transfer-mcp") {
         return heimdall_launcher::transfer_mcp::serve();
     }
+    if std::env::args().nth(1).as_deref() == Some("--codespace-mcp") {
+       return heimdall_launcher::codespace_mcp::serve();
+   }
     let owner =
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
     let allowed = std::env::var("TELEGRAM_ALLOWED_USER_IDS").ok();

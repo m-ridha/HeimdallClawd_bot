@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        35
+        40
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -257,5 +257,45 @@ fn agentmail_auth_is_an_environment_reference_not_a_persisted_key() {
     assert_eq!(
         config["http_request"]["secrets"]["agentmail"].as_str(),
         Some("${AGENTMAIL_AUTHORIZATION}")
+    );
+}
+
+fn tool_names<'a>(profile: &'a toml::Value, field: &str) -> Vec<&'a str> {
+    profile[field]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn codespace_tools_are_allowed_but_mutations_need_owner_approval() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    let profile = &cfg["risk_profiles"]["primary"];
+    let allowed = tool_names(profile, "allowed_tools");
+    let approved = tool_names(profile, "auto_approve");
+    for tool in [
+        "codespace__list",
+        "codespace__create",
+        "codespace__stop",
+        "codespace__delete",
+        "codespace__exec",
+    ] {
+        assert!(allowed.contains(&tool), "missing {tool}");
+    }
+    for tool in ["codespace__list", "codespace__stop"] {
+        assert!(approved.contains(&tool), "{tool} should be auto-approved");
+    }
+    for tool in ["codespace__create", "codespace__delete", "codespace__exec"] {
+        assert!(!approved.contains(&tool), "{tool} must require approval");
+    }
+    assert_eq!(
+        cfg["agents"]["primary"]["mcp_bundles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
     );
 }

@@ -23,7 +23,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert_eq!(config.data_dir,temp.path().join("data"));
     assert_eq!(config.channels.telegram["home"].bot_token,token);
     assert_eq!(config.mcp.servers[0].headers.get("authorization"),Some(&authorization));
-    assert_eq!(config.mcp_servers_for_agent("primary").len(),3);
+    assert_eq!(config.mcp_servers_for_agent("primary").len(),4);
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(config.providers.models.find("openrouter","free").unwrap().api_key.as_deref(),Some(openrouter_key));
     assert_eq!(config.model_routes.iter().find(|r| r.hint == "free").unwrap().model_provider,"openrouter.free");
