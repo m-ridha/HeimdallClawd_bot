@@ -15,3 +15,5 @@
 /prebuilt/
 
 **/__pycache__/
+
+.vscode/
