@@ -1,112 +1,251 @@
 schema_version = 3
+
 [gateway]
 host = "0.0.0.0"
 port = 3888
 require_pairing = true
 allow_public_bind = true
 allow_remote_admin = false
+
 [providers.models.openai.codex]
 model = "gpt-6.1-sol"
 wire_api = "responses"
 requires_openai_auth = true
+
 [providers.models.openrouter.free]
 model = "openrouter/free"
 wire_api = "chat_completions"
+
 [[model_routes]]
 hint = "free"
 model_provider = "openrouter.free"
 model = "openrouter/free"
+
 [[model_routes]]
 hint = "codex"
 model_provider = "openai.codex"
 model = "gpt-6.1-sol"
+
 [agents.primary]
 enabled = true
-channels = ["telegram.home"]
+channels = [ "telegram.home" ]
 model_provider = "openai.codex"
 risk_profile = "primary"
 runtime_profile = "primary"
-mcp_bundles = ["workspace", "skills", "transfer"]
-skill_bundles = ["managed"]
-cron_jobs = []
-[agents.primary.workspace]
-path = "/data/zeroclaw/agents/primary/workspace"
-[agents.primary.memory]
-backend = "sqlite"
+mcp_bundles = [ "workspace", "skills", "transfer", "codespace" ]
+skill_bundles = [ "managed" ]
+cron_jobs = [ ]
+
+  [agents.primary.workspace]
+  path = "/data/zeroclaw/agents/primary/workspace"
+
+  [agents.primary.memory]
+  backend = "sqlite"
+
 [channels]
 session_persistence = true
 session_backend = "sqlite"
+
 [channels.telegram.home]
 enabled = true
 mention_only = true
 ack_reactions = false
+
 [peer_groups.telegram_home]
 channel = "telegram.home"
-agents = ["primary"]
-external_peers = []
+agents = [ "primary" ]
+external_peers = [ ]
+
 [risk_profiles.primary]
 level = "supervised"
 workspace_only = true
-allowed_commands = []
-allowed_tools = ["workspace__bash", "workspace__file_read", "workspace__file_write", "web_search_tool", "skills__install", "skills__list", "cron_add", "cron_list", "cron_update", "cron_remove", "cron_run", "cron_runs", "execute_pipeline", "sop_list", "sop_execute", "sop_advance", "sop_status", "sop_approve", "sop_workshop", "transfer__send", "transfer__receive", "transfer__import", "read_skill", "text_browser", "web_fetch", "http_request", "deliver_file", "file_upload", "file_upload_bundle", "file_download", "poll", "reaction", "channel_room", "ask_user", "send_via"]
-auto_approve = ["workspace__bash", "workspace__file_read", "workspace__file_write", "web_search_tool", "skills__install", "skills__list", "cron_add", "cron_list", "cron_update", "cron_remove", "cron_run", "cron_runs", "execute_pipeline", "sop_list", "sop_execute", "sop_advance", "sop_status", "sop_approve", "sop_workshop", "transfer__send", "transfer__receive", "transfer__import", "read_skill", "text_browser", "web_fetch", "http_request", "deliver_file", "file_upload", "file_upload_bundle", "file_download", "poll", "reaction", "channel_room", "ask_user", "send_via"]
-excluded_tools = ["shell", "file_read", "file_write", "git_operations", "schedule", "delegate"]
-delegation_policy = { mode = "forbidden" }
-shell_env_passthrough = []
+allowed_commands = [ ]
+allowed_tools = [
+  "workspace__bash",
+  "workspace__file_read",
+  "workspace__file_write",
+  "web_search_tool",
+  "skills__install",
+  "skills__list",
+  "cron_add",
+  "cron_list",
+  "cron_update",
+  "cron_remove",
+  "cron_run",
+  "cron_runs",
+  "execute_pipeline",
+  "sop_list",
+  "sop_execute",
+  "sop_advance",
+  "sop_status",
+  "sop_approve",
+  "sop_workshop",
+  "transfer__send",
+  "transfer__receive",
+  "transfer__import",
+  "read_skill",
+  "text_browser",
+  "web_fetch",
+  "http_request",
+  "deliver_file",
+  "file_upload",
+  "file_upload_bundle",
+  "file_download",
+  "poll",
+  "reaction",
+  "channel_room",
+  "ask_user",
+  "send_via",
+  "codespace__list",
+  "codespace__create",
+  "codespace__stop",
+  "codespace__delete",
+  "codespace__exec"
+]
+auto_approve = [
+  "workspace__bash",
+  "workspace__file_read",
+  "workspace__file_write",
+  "web_search_tool",
+  "skills__install",
+  "skills__list",
+  "cron_add",
+  "cron_list",
+  "cron_update",
+  "cron_remove",
+  "cron_run",
+  "cron_runs",
+  "execute_pipeline",
+  "sop_list",
+  "sop_execute",
+  "sop_advance",
+  "sop_status",
+  "sop_approve",
+  "sop_workshop",
+  "transfer__send",
+  "transfer__receive",
+  "transfer__import",
+  "read_skill",
+  "text_browser",
+  "web_fetch",
+  "http_request",
+  "deliver_file",
+  "file_upload",
+  "file_upload_bundle",
+  "file_download",
+  "poll",
+  "reaction",
+  "channel_room",
+  "ask_user",
+  "send_via",
+  "codespace__list",
+  "codespace__create",
+  "codespace__stop",
+  "codespace__delete",
+  "codespace__exec"
+]
+excluded_tools = [
+  "shell",
+  "file_read",
+  "file_write",
+  "git_operations",
+  "schedule",
+  "delegate"
+]
+shell_env_passthrough = [ ]
 sandbox_enabled = false
 sandbox_backend = "none"
+
+  [risk_profiles.primary.delegation_policy]
+  mode = "forbidden"
+
 [runtime_profiles.primary]
 agentic = true
 max_tool_iterations = 24
 max_actions_per_hour = 120
-max_context_tokens = 32000
+max_context_tokens = 32_000
 parallel_tools = true
-max_tool_result_chars = 70000
+max_tool_result_chars = 70_000
+
 [mcp]
 enabled = true
 deferred_loading = false
-[[mcp.servers]]
-name = "workspace"
-transport = "http"
-url = "http://heimdall-executor.railway.internal:3889/mcp"
-tool_timeout_secs = 35
-max_response_bytes = 524288
-[[mcp.servers]]
-name = "skills"
-transport = "stdio"
-command = "/usr/local/bin/heimdall-launcher"
-args = ["--skills-mcp"]
-tool_timeout_secs = 90
-max_response_bytes = 131072
+
+  [[mcp.servers]]
+  name = "workspace"
+  transport = "http"
+  url = "http://heimdall-executor.railway.internal:3889/mcp"
+  tool_timeout_secs = 35
+  max_response_bytes = 524_288
+
+  [[mcp.servers]]
+  name = "skills"
+  transport = "stdio"
+  command = "/usr/local/bin/heimdall-launcher"
+  args = [ "--skills-mcp" ]
+  tool_timeout_secs = 90
+  max_response_bytes = 131_072
+
+  [[mcp.servers]]
+  name = "transfer"
+  transport = "stdio"
+  command = "/usr/local/bin/heimdall-launcher"
+  args = [ "--transfer-mcp" ]
+  tool_timeout_secs = 80
+  max_response_bytes = 131_072
+
+  [[mcp.servers]]
+  name = "codespace"
+  transport = "stdio"
+  command = "/usr/local/bin/heimdall-launcher"
+  args = [ "--codespace-mcp" ]
+  tool_timeout_secs = 90
+  max_response_bytes = 131_072
+
 [mcp_bundles.skills]
-servers = ["skills"]
+servers = [ "skills" ]
+
+[mcp_bundles.workspace]
+servers = [ "workspace" ]
+
+[mcp_bundles.transfer]
+servers = [ "transfer" ]
+
+[mcp_bundles.codespace]
+servers = [ "codespace" ]
+
 [skill_bundles.managed]
 directory = "shared/skills/managed"
-[mcp_bundles.workspace]
-servers = ["workspace"]
+
 [heartbeat]
 enabled = false
+
 [hooks]
 enabled = true
+
 [plugins]
 enabled = true
 auto_discover = true
 plugins_dir = "/data/zeroclaw/shared/plugins"
 max_active_instances = 4
-[plugins.limits]
-max_memory_mb = 32
-call_timeout_ms = 10000
-max_instances = 16
-max_connections_per_instance = 4
+
+  [plugins.limits]
+  max_memory_mb = 32
+  call_timeout_ms = 10_000
+  max_instances = 16
+  max_connections_per_instance = 4
+
 [skills]
 open_skills_enabled = true
 open_skills_dir = "/data/zeroclaw/shared/open-skills"
 allow_scripts = true
 prompt_injection_mode = "compact"
+
 [observability]
 log_persistence = "none"
 log_tool_io = "off"
 log_llm_request_payload = "off"
+
 [web_search]
 enabled = true
 search_provider = "tavily"
@@ -119,51 +258,61 @@ max_tasks = 32
 max_concurrent = 1
 catch_up_on_startup = true
 max_run_history = 50
+
 [sop]
 sops_dir = "/data/zeroclaw/shared/sops"
 max_concurrent_total = 1
 procedural_memory_enabled = true
+
 [pipeline]
 enabled = true
 max_steps = 12
-allowed_tools = ["workspace__bash", "workspace__file_read", "workspace__file_write", "web_search_tool", "skills__install", "skills__list", "web_fetch", "http_request", "text_browser"]
+allowed_tools = [
+  "workspace__bash",
+  "workspace__file_read",
+  "workspace__file_write",
+  "web_search_tool",
+  "skills__install",
+  "skills__list",
+  "web_fetch",
+  "http_request",
+  "text_browser"
+]
+
 [browser]
 enabled = false
 backend = "rust_native"
 native_headless = true
-allowed_domains = ["*"]
-allowed_private_hosts = []
+allowed_domains = [ "*" ]
+allowed_private_hosts = [ ]
+
 [browser_delegate]
 enabled = false
+
 [web_fetch]
 enabled = true
-max_response_size = 500000
+max_response_size = 500_000
 timeout_secs = 20
-allowed_domains = ["*"]
-allowed_private_hosts = []
+allowed_domains = [ "*" ]
+allowed_private_hosts = [ ]
+
 [http_request]
 enabled = true
-allowed_domains = ["*"]
+allowed_domains = [ "*" ]
 allow_private_hosts = false
-max_response_size = 500000
+max_response_size = 500_000
 timeout_secs = 20
-[http_request.secrets]
-agentmail = "${AGENTMAIL_AUTHORIZATION}"
+
+  [http_request.secrets]
+  agentmail = "${AGENTMAIL_AUTHORIZATION}"
+  github = "${HEIMDALL_GITHUB_AUTHORIZATION}"
+
 [text_browser]
 enabled = true
 preferred_browser = "lynx"
 timeout_secs = 20
+
 [link_enricher]
 enabled = true
 max_links = 2
 timeout_secs = 10
-
-[[mcp.servers]]
-name = "transfer"
-transport = "stdio"
-command = "/usr/local/bin/heimdall-launcher"
-args = ["--transfer-mcp"]
-tool_timeout_secs = 80
-max_response_bytes = 131072
-[mcp_bundles.transfer]
-servers = ["transfer"]

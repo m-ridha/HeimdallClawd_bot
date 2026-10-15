@@ -82,3 +82,12 @@ pub fn secret_overrides(
         ),
     ])
 }
+
+/// Builds the HTTP Authorization value without putting credentials in rendered TOML.
+/// The raw GitHub token is shared with the restricted Codespaces CLI.
+pub fn github_authorization(token: &str) -> Result<String, ConfigError> {
+    if token.len() < 20 || !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err("Invalid GITHUB_TOKEN; provide a raw token without Bearer or whitespace");
+    }
+    Ok(format!("Bearer {token}"))
+}
