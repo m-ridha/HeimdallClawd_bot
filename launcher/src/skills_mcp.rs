@@ -32,7 +32,7 @@ fn handle(
         }
         "ping" => json!({}),
         "tools/list" => json!({"tools":[
-            {"name":"install","description":"Install an audited skill with script files permitted by name from the official ZeroClaw registry into the agent's persistent managed bundle. Does not install OS dependencies or grant tools.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}},
+            {"name":"install","description":"Install an audited skill with script files permitted by name from the official ZeroClaw registry into the agent's persistent managed bundle. 80-second local deadline, 32 KiB per output stream. Does not install OS dependencies or grant tools; run list after a timeout before retrying.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":64}},"required":["name"],"additionalProperties":false}},
             {"name":"list","description":"List skills available to the primary agent.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}}
         ]}),
         "tools/call" => {
@@ -63,17 +63,56 @@ fn handle(
     };
     Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
 }
-fn capture(mut reader: impl Read) -> Vec<u8> {
+fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
     let mut saved = Vec::new();
     let mut block = [0; 4096];
-    while let Ok(size) = reader.read(&mut block) {
+    let mut overflowed = false;
+    loop {
+        let size = reader
+            .read(&mut block)
+            .map_err(|_| "Skill output read failed")?;
         if size == 0 {
             break;
         }
         let keep = size.min(LIMIT.saturating_sub(saved.len()));
+        overflowed |= keep < size;
         saved.extend_from_slice(&block[..keep]);
     }
-    saved
+    if overflowed {
+        return Err("skill_output_limit: output exceeded 32 KiB; run list to inspect state");
+    }
+    Ok(saved)
+}
+fn failure(diagnostics: &[u8]) -> String {
+    let text = String::from_utf8_lossy(diagnostics).to_ascii_lowercase();
+    let (category, hint) = if [
+        "could not resolve",
+        "network is unreachable",
+        "connection refused",
+        "failed to connect",
+        "connection timed out",
+    ]
+    .iter()
+    .any(|p| text.contains(p))
+    {
+        (
+            "network",
+            "Check registry reachability and DNS; run list before retrying installation",
+        )
+    } else if text.contains("audit") || text.contains("unsafe") {
+        (
+            "audit_or_policy",
+            "Review registry audit requirements; do not bypass them",
+        )
+    } else if text.contains("not found") || text.contains("404") {
+        ("not_found", "Check the bare official-registry skill name")
+    } else {
+        (
+            "unknown",
+            "Check skill compatibility and registry availability; run list to inspect state",
+        )
+    };
+    json!({"code":"skill_command_failed","category":category,"classification":"heuristic","hint":hint}).to_string()
 }
 fn configure_command(command: &mut Command) {
     command
@@ -152,18 +191,19 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     unsafe {
         libc::kill(-group, libc::SIGKILL);
     }
-    let output = stdout.join().unwrap_or_default();
-    let diagnostics = stderr.join().unwrap_or_default();
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output),
-        String::from_utf8_lossy(&diagnostics)
-    );
+    let output = stdout
+        .join()
+        .map_err(|_| "Skill output capture failed".to_string())?
+        .map_err(str::to_owned)?;
+    let diagnostics = stderr
+        .join()
+        .map_err(|_| "Skill diagnostic capture failed".to_string())?
+        .map_err(str::to_owned)?;
     match status {
-        Some(status) if status.success() => Ok(text),
-        Some(_) => Err(format!("Skill installation/listing failed: {text}")),
+        Some(status) if status.success() => Ok(String::from_utf8_lossy(&output).into_owned()),
+        Some(_) => Err(failure(&diagnostics)),
         None => Err(
-            "Skill operation timed out; retry list to check whether installation completed".into(),
+            "skill_timeout: completion is unknown; run list before retrying installation".into(),
         ),
     }
 }
@@ -194,6 +234,25 @@ pub fn serve() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn skill_failures_classify_without_echoing_registry_text() {
+        for (text, expected) in [
+            ("could not resolve", "network"),
+            ("audit rejected", "audit_or_policy"),
+            ("not found", "not_found"),
+            ("unrecognized", "unknown"),
+        ] {
+            let result = failure(
+                format!("{text} TEST_secret user-private-content https://private.invalid")
+                    .as_bytes(),
+            );
+            let value: Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(value["category"], expected);
+            assert!(!result.contains("TEST_secret"));
+            assert!(!result.contains("user-private-content"));
+            assert!(!result.contains("private.invalid"));
+        }
+    }
     #[test]
     fn rejects_urls_paths_flags_and_extra_arguments_without_execution() {
         let mut called = false;
@@ -244,6 +303,6 @@ mod tests {
             || key.contains("api_key")
             || key.contains("API_KEY")));
         assert!(env.contains(&"ZEROCLAW_skills__allow_scripts".to_string()));
-        assert_eq!(capture(&vec![b'x'; LIMIT + 100][..]).len(), LIMIT);
+        assert!(capture(&vec![b'x'; LIMIT + 100][..]).is_err());
     }
 }

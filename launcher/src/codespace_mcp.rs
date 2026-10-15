@@ -75,11 +75,12 @@ fn error(id: Value, code: i32, message: &str) -> Value {
 }
 fn tools() -> Value {
     json!([
+        {"name":"status","description":"Read local Codespaces configuration: token presence/valid format, allowed repositories, CLI availability and limits. No GitHub request; does not verify authentication or network reachability.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list","description":"List the GitHub account's codespaces with their repository and state.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"create","description":"Create a small codespace for an allowed sandbox repository (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
         {"name":"stop","description":"Stop a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
         {"name":"delete","description":"Permanently delete a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Output is bounded.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
+        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
     ])
 }
 fn shaped(args: &Value, keys: &[&str]) -> bool {
@@ -109,7 +110,7 @@ fn handle(
             let tool = request["params"]["name"].as_str().unwrap_or("");
             let args = &request["params"]["arguments"];
             let keys: &[&str] = match tool {
-                "list" => &[],
+                "list" | "status" => &[],
                 "create" => &["repo"],
                 "stop" | "delete" => &["name"],
                 "exec" => &["name", "command"],
@@ -157,6 +158,11 @@ fn command_failure(exit_code: Option<i32>, diagnostics: &[u8]) -> String {
         || diagnostics.contains("bad credentials")
     {
         ("authentication", "Check GITHUB_TOKEN validity and expiry")
+    } else if diagnostics.contains("cs_net_01") {
+        (
+            "network_policy",
+            "GitHub rejected Codespaces creation from the current network (CS_NET_01); check VPN/proxy settings or test a normal alternative connection, then contact GitHub Support if it persists. Token changes or automatic retries are not a fix",
+        )
     } else if diagnostics.contains("rate limit") || diagnostics.contains("http 429") {
         (
             "rate_limit",
@@ -408,9 +414,37 @@ impl Codespaces {
         }
     }
 }
+fn status(token: Option<&str>, repositories: Option<&str>, cli_available: bool) -> Value {
+    let token_state = match token {
+        None => "missing",
+        Some(value) if crate::config::github_authorization(value).is_ok() => "configured",
+        Some(_) => "invalid",
+    };
+    let (repository_state, allowed_repositories) = match repositories.map(parse_repos) {
+        None => ("missing", Vec::new()),
+        Some(Ok(repos)) => ("configured", repos),
+        Some(Err(_)) => ("invalid", Vec::new()),
+    };
+    json!({"token":token_state,"repository_configuration":repository_state,
+        "allowed_repositories":allowed_repositories,"cli_available":cli_available,
+        "authentication_verified":false,"network_verified":false,
+        "limits":{"deadline_seconds":80,"stream_bytes":32768,"max_account_codespaces":2,
+        "machine":MACHINE,"idle_timeout":IDLE_TIMEOUT,"retention":RETENTION}})
+}
+
 pub fn serve() -> io::Result<()> {
     let mut service: Option<Codespaces> = None;
     let mut run = |tool: &str, args: &Value| -> Result<String, String> {
+        if tool == "status" {
+            let token = std::env::var("GITHUB_TOKEN").ok();
+            let repos = std::env::var("HEIMDALL_CODESPACE_REPOS").ok();
+            return Ok(status(
+                token.as_deref(),
+                repos.as_deref(),
+                std::path::Path::new(GH).is_file(),
+            )
+            .to_string());
+        }
         if service.is_none() {
             service = Some(Codespaces::from_env()?);
         }
@@ -472,7 +506,7 @@ mod tests {
         assert_eq!(count_of("{}"), None);
     }
     #[test]
-    fn exposes_exactly_five_tools_and_rejects_bad_shapes_without_execution() {
+    fn exposes_exactly_six_tools_and_rejects_bad_shapes_without_execution() {
         let list = handle(
             json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
             &mut |_, _| unreachable!(),
@@ -484,7 +518,10 @@ mod tests {
             .iter()
             .map(|v| v["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["list", "create", "stop", "delete", "exec"]);
+        assert_eq!(
+            names,
+            ["status", "list", "create", "stop", "delete", "exec"]
+        );
         let mut called = false;
         for (tool, args) in [
             ("list", json!({"extra": "x"})),
@@ -529,12 +566,32 @@ mod tests {
         assert_eq!(failed["result"]["isError"], true);
     }
     #[test]
+    fn status_discloses_configuration_without_secrets_or_claiming_connectivity() {
+        let value = status(
+            Some("TEST_github_token_0123456789"),
+            Some("Octo/Sandbox"),
+            true,
+        );
+        assert_eq!(value["token"], "configured");
+        assert_eq!(value["allowed_repositories"], json!(["octo/sandbox"]));
+        assert_eq!(value["authentication_verified"], false);
+        assert!(!value.to_string().contains("TEST_github_token"));
+        let value = status(Some("private-invalid"), Some("private-invalid"), false);
+        assert_eq!(value["token"], "invalid");
+        assert_eq!(value["repository_configuration"], "invalid");
+        assert!(!value.to_string().contains("private-invalid"));
+        assert_eq!(status(None, None, false)["token"], "missing");
+    }
+
+    #[test]
     fn failures_have_safe_categories_without_repeating_diagnostics() {
         let cases = [
             (Some(4), "", "authentication"),
             (Some(1), "HTTP 401: Bad credentials", "authentication"),
             (Some(1), "HTTP 403: rate limit exceeded", "rate_limit"),
             (Some(1), "HTTP 429", "rate_limit"),
+            (Some(1), "HTTP 422: CS_NET_01", "network_policy"),
+            (Some(1), "HTTP 422: unrelated validation failure", "unknown"),
             (
                 Some(1),
                 "HTTP 403: blocked by network policy",

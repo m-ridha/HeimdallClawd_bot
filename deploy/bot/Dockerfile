@@ -12,7 +12,7 @@ ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 COPY launcher/Cargo.toml launcher/Cargo.lock ./
 COPY launcher/src ./src
 COPY launcher/tests ./tests
-COPY deploy/bot/config.template.toml deploy/bot/TOOLS.md /deploy/bot/
+COPY deploy/bot/config.template.toml deploy/bot/TOOLS.md deploy/bot/IDENTITY.md /deploy/bot/
 RUN cargo test --locked --lib --test config --test skills_mcp && cargo build --release --locked
 
 FROM scratch AS support-binaries
