@@ -75,11 +75,12 @@ fn error(id: Value, code: i32, message: &str) -> Value {
 }
 fn tools() -> Value {
     json!([
+        {"name":"status","description":"Read local Codespaces configuration: token presence/valid format, allowed repositories, CLI availability and limits. No GitHub request; does not verify authentication or network reachability.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list","description":"List the GitHub account's codespaces with their repository and state.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"create","description":"Create a small codespace for an allowed sandbox repository (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
         {"name":"stop","description":"Stop a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
         {"name":"delete","description":"Permanently delete a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Output is bounded.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
+        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
     ])
 }
 fn shaped(args: &Value, keys: &[&str]) -> bool {
@@ -109,7 +110,7 @@ fn handle(
             let tool = request["params"]["name"].as_str().unwrap_or("");
             let args = &request["params"]["arguments"];
             let keys: &[&str] = match tool {
-                "list" => &[],
+                "list" | "status" => &[],
                 "create" => &["repo"],
                 "stop" | "delete" => &["name"],
                 "exec" => &["name", "command"],
@@ -148,6 +149,81 @@ fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
     }
     Ok(saved)
 }
+/// Classifies bounded CLI stderr without returning any of its text. Patterns are
+/// hints, not authoritative causes: remote commands can produce similar messages.
+fn command_failure(exit_code: Option<i32>, diagnostics: &[u8]) -> String {
+    let diagnostics = String::from_utf8_lossy(diagnostics).to_ascii_lowercase();
+    let (category, hint) = if exit_code == Some(4)
+        || diagnostics.contains("http 401")
+        || diagnostics.contains("bad credentials")
+    {
+        ("authentication", "Check GITHUB_TOKEN validity and expiry")
+    } else if diagnostics.contains("cs_net_01") {
+        (
+            "network_policy",
+            "GitHub rejected Codespaces creation from the current network (CS_NET_01); check VPN/proxy settings or test a normal alternative connection, then contact GitHub Support if it persists. Token changes or automatic retries are not a fix",
+        )
+    } else if diagnostics.contains("rate limit") || diagnostics.contains("http 429") {
+        (
+            "rate_limit",
+            "Check GitHub quotas; inspect state before retrying a mutation",
+        )
+    } else if diagnostics.contains("http 403")
+        || diagnostics.contains("resource not accessible by")
+        || diagnostics.contains("insufficient scope")
+    {
+        (
+            "permission_or_policy",
+            "Check token permissions, repository access and GitHub or network policies; 403 alone does not distinguish them",
+        )
+    } else if diagnostics.contains("http 404") {
+        (
+            "not_found_or_inaccessible",
+            "Check the resource name and token access; private resources can return 404",
+        )
+    } else if diagnostics.contains("x509:")
+        || diagnostics.contains("certificate verify failed")
+        || diagnostics.contains("tls handshake")
+    {
+        (
+            "tls",
+            "Check certificate trust and the network path; do not disable TLS verification",
+        )
+    } else if [
+        "dial tcp",
+        "no such host",
+        "network is unreachable",
+        "connection refused",
+        "connection reset",
+        "i/o timeout",
+        "could not resolve hostname",
+    ]
+    .iter()
+    .any(|pattern| diagnostics.contains(pattern))
+    {
+        (
+            "network",
+            "Check DNS, egress restrictions and GitHub reachability; inspect state before retrying a mutation",
+        )
+    } else if ["http 500", "http 502", "http 503", "http 504"]
+        .iter()
+        .any(|pattern| diagnostics.contains(pattern))
+    {
+        (
+            "service_unavailable",
+            "Check GitHub service status; inspect state before retrying a mutation",
+        )
+    } else {
+        (
+            "unknown",
+            "Check token permissions and codespace state; for exec, the remote command may have failed",
+        )
+    };
+    json!({"code":"github_command_failed", "category":category,
+        "exit_code":exit_code, "classification":"heuristic", "hint":hint})
+    .to_string()
+}
+
 /// The GitHub CLI receives only its own token; Telegram, executor and provider credentials are never inherited.
 fn configure_command(command: &mut Command, token: &str) {
     command
@@ -227,7 +303,7 @@ impl Codespaces {
         }
         // CLI diagnostics may contain remote user content or credentials. Never return
         // them on failure; successful output redacts the local GitHub credential.
-        let _diagnostics = stderr
+        let diagnostics = stderr
             .join()
             .map_err(|_| "GitHub diagnostic capture failed".to_string())?
             .map_err(str::to_owned)?;
@@ -239,9 +315,7 @@ impl Codespaces {
             Some(status) if status.success() => {
                 Ok(String::from_utf8_lossy(&output).replace(&self.token, "[redacted]"))
             }
-            Some(_) => {
-                Err("GitHub command failed; check token permissions and codespace state".into())
-            }
+            Some(status) => Err(command_failure(status.code(), &diagnostics)),
             None => Err("GitHub command timed out; run list to check the current state".into()),
         }
     }
@@ -340,9 +414,37 @@ impl Codespaces {
         }
     }
 }
+fn status(token: Option<&str>, repositories: Option<&str>, cli_available: bool) -> Value {
+    let token_state = match token {
+        None => "missing",
+        Some(value) if crate::config::github_authorization(value).is_ok() => "configured",
+        Some(_) => "invalid",
+    };
+    let (repository_state, allowed_repositories) = match repositories.map(parse_repos) {
+        None => ("missing", Vec::new()),
+        Some(Ok(repos)) => ("configured", repos),
+        Some(Err(_)) => ("invalid", Vec::new()),
+    };
+    json!({"token":token_state,"repository_configuration":repository_state,
+        "allowed_repositories":allowed_repositories,"cli_available":cli_available,
+        "authentication_verified":false,"network_verified":false,
+        "limits":{"deadline_seconds":80,"stream_bytes":32768,"max_account_codespaces":2,
+        "machine":MACHINE,"idle_timeout":IDLE_TIMEOUT,"retention":RETENTION}})
+}
+
 pub fn serve() -> io::Result<()> {
     let mut service: Option<Codespaces> = None;
     let mut run = |tool: &str, args: &Value| -> Result<String, String> {
+        if tool == "status" {
+            let token = std::env::var("GITHUB_TOKEN").ok();
+            let repos = std::env::var("HEIMDALL_CODESPACE_REPOS").ok();
+            return Ok(status(
+                token.as_deref(),
+                repos.as_deref(),
+                std::path::Path::new(GH).is_file(),
+            )
+            .to_string());
+        }
         if service.is_none() {
             service = Some(Codespaces::from_env()?);
         }
@@ -404,7 +506,7 @@ mod tests {
         assert_eq!(count_of("{}"), None);
     }
     #[test]
-    fn exposes_exactly_five_tools_and_rejects_bad_shapes_without_execution() {
+    fn exposes_exactly_six_tools_and_rejects_bad_shapes_without_execution() {
         let list = handle(
             json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
             &mut |_, _| unreachable!(),
@@ -416,7 +518,10 @@ mod tests {
             .iter()
             .map(|v| v["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["list", "create", "stop", "delete", "exec"]);
+        assert_eq!(
+            names,
+            ["status", "list", "create", "stop", "delete", "exec"]
+        );
         let mut called = false;
         for (tool, args) in [
             ("list", json!({"extra": "x"})),
@@ -460,6 +565,94 @@ mod tests {
         let failed = handle(request("list", json!({})), &mut |_, _| Err("boom".into())).unwrap();
         assert_eq!(failed["result"]["isError"], true);
     }
+    #[test]
+    fn status_discloses_configuration_without_secrets_or_claiming_connectivity() {
+        let value = status(
+            Some("TEST_github_token_0123456789"),
+            Some("Octo/Sandbox"),
+            true,
+        );
+        assert_eq!(value["token"], "configured");
+        assert_eq!(value["allowed_repositories"], json!(["octo/sandbox"]));
+        assert_eq!(value["authentication_verified"], false);
+        assert!(!value.to_string().contains("TEST_github_token"));
+        let value = status(Some("private-invalid"), Some("private-invalid"), false);
+        assert_eq!(value["token"], "invalid");
+        assert_eq!(value["repository_configuration"], "invalid");
+        assert!(!value.to_string().contains("private-invalid"));
+        assert_eq!(status(None, None, false)["token"], "missing");
+    }
+
+    #[test]
+    fn failures_have_safe_categories_without_repeating_diagnostics() {
+        let cases = [
+            (Some(4), "", "authentication"),
+            (Some(1), "HTTP 401: Bad credentials", "authentication"),
+            (Some(1), "HTTP 403: rate limit exceeded", "rate_limit"),
+            (Some(1), "HTTP 429", "rate_limit"),
+            (Some(1), "HTTP 422: CS_NET_01", "network_policy"),
+            (Some(1), "HTTP 422: unrelated validation failure", "unknown"),
+            (
+                Some(1),
+                "HTTP 403: blocked by network policy",
+                "permission_or_policy",
+            ),
+            (
+                Some(1),
+                "Resource not accessible by personal access token",
+                "permission_or_policy",
+            ),
+            (Some(1), "HTTP 404: Not Found", "not_found_or_inaccessible"),
+            (
+                Some(1),
+                "x509: certificate signed by unknown authority",
+                "tls",
+            ),
+            (
+                Some(1),
+                "dial tcp: lookup example.invalid: no such host",
+                "network",
+            ),
+            (Some(1), "HTTP 503: unavailable", "service_unavailable"),
+            (Some(2), "remote program failed", "unknown"),
+            (None, "terminated by signal", "unknown"),
+        ];
+        for (exit_code, message, category) in cases {
+            let diagnostic = format!(
+                "{message} Authorization: Bearer TEST_private_credential user-content-fixture https://private.invalid/path"
+            );
+            let text = command_failure(exit_code, diagnostic.as_bytes());
+            let value: Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(value["code"], "github_command_failed");
+            assert_eq!(value["category"], category, "{message}");
+            assert_eq!(value["classification"], "heuristic");
+            assert_eq!(value["exit_code"], json!(exit_code));
+            assert_eq!(value.as_object().unwrap().len(), 5);
+            for private in [
+                "TEST_private_credential",
+                "user-content-fixture",
+                "private.invalid",
+                "Authorization",
+                "Bearer",
+            ] {
+                assert!(!text.contains(private));
+            }
+        }
+    }
+
+    #[test]
+    fn structured_failure_is_preserved_as_an_mcp_tool_error() {
+        let response = handle(request("list", json!({})), &mut |_, _| {
+            Err(command_failure(Some(1), b"dial tcp: no such host"))
+        })
+        .unwrap();
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let error: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(error["category"], "network");
+        assert!(!text.contains("dial tcp"));
+    }
+
     #[test]
     fn subprocess_receives_only_the_github_token() {
         let mut command = Command::new("/usr/bin/env");

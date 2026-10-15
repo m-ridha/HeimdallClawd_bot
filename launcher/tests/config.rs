@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        40
+        41
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -277,6 +277,7 @@ fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
     let allowed = tool_names(profile, "allowed_tools");
     let approved = tool_names(profile, "auto_approve");
     for tool in [
+        "codespace__status",
         "codespace__list",
         "codespace__create",
         "codespace__stop",
@@ -286,6 +287,7 @@ fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
         assert!(allowed.contains(&tool), "missing {tool}");
     }
     for tool in [
+        "codespace__status",
         "codespace__list",
         "codespace__create",
         "codespace__stop",

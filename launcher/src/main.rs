@@ -150,17 +150,7 @@ fn main() -> io::Result<()> {
     for directory in ["shared/sops", "shared/plugins", "shared/skills/managed"] {
         fs::create_dir_all(Path::new(STATE).join(directory))?;
     }
-    let tools = workspace.join("TOOLS.md");
-    if !tools.exists() {
-        atomic_write(&tools, include_str!("../../deploy/bot/TOOLS.md"))?;
-    }
-    let identity = workspace.join("IDENTITY.md");
-    if !identity.exists() {
-        atomic_write(
-            &identity,
-            "# Identity\nYou are HeimdallClawd, a private assistant. Use the supplied workspace__bash, workspace__file_read and workspace__file_write tools for all user file and command requests. They act in a separate writable executor workspace. Your local control filesystem is not the user's tool workspace. Never claim a tool succeeded without its result.\n",
-        )?;
-    }
+    heimdall_launcher::instructions::sync(&workspace)?;
     let profile = Path::new(STATE).join("auth-profiles.json");
     if !profile.is_file() {
         return Err(fail(

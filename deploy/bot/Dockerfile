@@ -12,7 +12,7 @@ ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 COPY launcher/Cargo.toml launcher/Cargo.lock ./
 COPY launcher/src ./src
 COPY launcher/tests ./tests
-COPY deploy/bot/config.template.toml deploy/bot/TOOLS.md /deploy/bot/
+COPY deploy/bot/config.template.toml deploy/bot/TOOLS.md deploy/bot/IDENTITY.md /deploy/bot/
 RUN cargo test --locked --lib --test config --test skills_mcp && cargo build --release --locked
 
 FROM scratch AS support-binaries
@@ -52,11 +52,12 @@ COPY executor/entrypoint.sh /tmp/executor-entrypoint.sh
 COPY executor/contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
 COPY deploy/tests/remote-skills.rs crates/zeroclaw-runtime/tests/heimdall_remote_skills.rs
 COPY deploy/tests/skills-mcp.rs crates/zeroclaw-tools/tests/heimdall_skills_stdio.rs
+COPY deploy/tests/codespace-mcp.rs crates/zeroclaw-tools/tests/heimdall_codespace_stdio.rs
 COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secrets.rs
 COPY deploy/bot/config.template.toml /tmp/heimdall-config.toml
 ENV HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
-    && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio \
+    && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills \
     && touch /contract-passed

@@ -22,7 +22,7 @@ fn job_id(id: &Value) -> Option<String> {
 }
 fn tools() -> Value {
     json!([
-    {"name":"bash","description":"Run a bounded command in the separate isolated workspace. Networking and control credentials are unavailable.","inputSchema":{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":32768}},"required":["command"],"additionalProperties":false}},
+    {"name":"bash","description":"Run a command in the writable isolated /data/workspace executor: 30-second timeout, 64 KiB combined output, two concurrent jobs. Networking and control credentials unavailable. Use relative paths; include cd in the same command because each call is a fresh process.","inputSchema":{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":32768}},"required":["command"],"additionalProperties":false}},
     {"name":"file_read","description":"Read a UTF-8 file relative to the isolated workspace, at most 64 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
     {"name":"file_read_base64","description":"Read a binary file as base64, at most 48 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
     {"name":"file_write_base64","description":"Write a base64-encoded binary file, at most 48 KiB decoded.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":65536}},"required":["path","content"],"additionalProperties":false}},
@@ -65,7 +65,15 @@ pub(crate) async fn handle(State(app): State<App>, Json(request): Json<Value>) -
    let allowed=match job.tool.as_str(){"bash"=>&["command"][..],"file_read"|"file_read_base64"=>&["path"][..],_=>&["path","content"][..]};
    if job.arguments.as_object().unwrap().keys().any(|k|!allowed.contains(&k.as_str())) {return error(id,-32602,"Unknown tool argument");}
    let response=execute_formatted(app,job,id.clone()).await;
-   if !response.status().is_success(){return error(id,-32000,"Workspace executor is busy or unavailable");}
+   if !response.status().is_success(){
+    let (code,message)=match response.status(){
+     StatusCode::LOCKED=>(-32001,"executor_busy: two jobs are active; wait before retrying this unstarted request"),
+     StatusCode::CONFLICT=>(-32002,"duplicate_request: this request ID is active; inspect the original request rather than submitting it twice"),
+     StatusCode::SERVICE_UNAVAILABLE=>(-32003,"executor_unavailable: isolation readiness is not established; ask the operator to check executor health"),
+     _=>(-32000,"executor_failed: request did not start; check executor health")
+    };
+    return error(id,code,message);
+   }
    response
   },
   _=>error(id,-32601,"Unknown method")
