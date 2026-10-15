@@ -64,7 +64,8 @@ jobs:
           : "${RAILWAY_ENVIRONMENT_ID:?Missing production variable RAILWAY_ENVIRONMENT_ID}"
           : "${RAILWAY_AGENT_SERVICE_ID:?Missing production variable RAILWAY_AGENT_SERVICE_ID}"
           : "${RAILWAY_EXECUTOR_SERVICE_ID:?Missing production variable RAILWAY_EXECUTOR_SERVICE_ID}"
-          railway link --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT_ID"
+          python3 tools/verify-railway-token.py
+          # RAILWAY_TOKEN supplies the project/environment; link queries account workspaces.
           railway config plan --file .railway/railway.py --out "$RUNNER_TEMP/railway-plan.json"
           railway config apply --plan "$RUNNER_TEMP/railway-plan.json" --yes
           cd "$RUNNER_TEMP/release"
