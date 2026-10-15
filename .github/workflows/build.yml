@@ -132,7 +132,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Validate cached Linux binaries and export release artifacts
+      - name: Run native Linux contracts and export verified binaries
         uses: docker/build-push-action@v7
         with:
           context: .
