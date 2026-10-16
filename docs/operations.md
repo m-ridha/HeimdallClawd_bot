@@ -213,3 +213,8 @@ For an agent that cannot start because authentication is missing/revoked or `/da
 For full executor storage, keep its isolation readiness gate intact. The supervisor remains running but MCP/health are unready when the startup probe fails. Use the executor dashboard terminal to inspect `df -h /data/workspace`, `df -i /data/workspace` and `du -x -h -d 1 /data/workspace`; remove only confirmed disposable files. Clean up before redeploying, then verify startup isolation passes and a synthetic workspace read/write succeeds. Never copy credentials into the executor or enable host tools as a workaround.
 
 These procedures have local process/health tests, but dashboard-terminal availability and recovery after a deliberately full volume still require a disposable Railway environment test. They are not yet live-verified. No production recovery setting is changed by the implementation.
+
+
+## Trusted Telegram users
+
+Every allowlisted account receives the same primary-agent tool grants and auto-approval policy. Treat additional users as fully trusted operators: they can use configured GitHub/AgentMail credentials through the admitted tools, manage Codespaces and cron tasks, send messages, and access shared workspace data and permitted session/memory tools. The allowlist does not create separate user sandboxes or per-user credential scopes. Keep `TELEGRAM_OWNER_ID` and optional additional IDs limited to trusted accounts. Use a dedicated GitHub identity and the smallest token permissions that support the intended repositories and operations; this does not reduce the configured agent tool inventory.
