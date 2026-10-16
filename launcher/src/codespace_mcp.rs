@@ -165,19 +165,53 @@ fn capture(mut reader: impl Read) -> Result<Captured, &'static str> {
         truncated: overflowed,
     })
 }
-// A truncated capture may end inside the token. Remove any trailing prefix
-// before decoding/replacement so neither a read boundary nor LIMIT leaks it.
+// Identify complete tokens and trailing fragments against the ORIGINAL bytes.
+// Merge overlaps before rendering: trimming first can destroy a complete match.
 fn redacted_output(captured: &Captured, token: &str) -> String {
-    let mut bytes = captured.bytes.as_slice();
-    if captured.truncated && !token.is_empty() && !bytes.ends_with(token.as_bytes()) {
-        for length in (1..token.len()).rev() {
-            if bytes.ends_with(&token.as_bytes()[..length]) {
-                bytes = &bytes[..bytes.len() - length];
+    let bytes = captured.bytes.as_slice();
+    if token.is_empty() {
+        return String::new();
+    }
+    let secret = token.as_bytes();
+    let mut spans: Vec<(usize, usize)> = bytes
+        .windows(secret.len())
+        .enumerate()
+        .filter_map(|(start, window)| (window == secret).then_some((start, start + secret.len())))
+        .collect();
+    if captured.truncated {
+        for length in (1..secret.len()).rev() {
+            if bytes.ends_with(&secret[..length]) {
+                spans.push((bytes.len() - length, bytes.len()));
                 break;
             }
         }
     }
-    String::from_utf8_lossy(bytes).replace(token, "[redacted]")
+    spans.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in spans {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1
+        {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    for (start, end) in merged {
+        result.extend_from_slice(&bytes[cursor..start]);
+        result.extend_from_slice(b"[redacted]");
+        cursor = end;
+    }
+    result.extend_from_slice(&bytes[cursor..]);
+    let mut text = String::from_utf8_lossy(&result).into_owned();
+    let mut limit = LIMIT.min(text.len());
+    while !text.is_char_boundary(limit) {
+        limit -= 1;
+    }
+    text.truncate(limit);
+    text
 }
 // Command output is data, never instructions. Nonzero gh/SSH status does not
 // establish whether a remote program ran, so report CLI status without guessing.
@@ -750,11 +784,30 @@ mod remote_output_tests {
                 assert!(!text.contains(token));
                 assert!(!text.contains("ghp_"));
                 if start == LIMIT - 1 {
-                    assert_eq!(text, "x".repeat(start));
+                    assert!(text.starts_with(&"x".repeat(start)));
                 }
                 assert!(text.len() <= LIMIT);
             }
         }
+    }
+    #[test]
+    fn complete_token_and_overlapping_truncated_suffix_are_redacted_together() {
+        let token = "ghp_syntheticBoundaryToken012345g";
+        let padding = "x".repeat(LIMIT - token.len() - 1);
+        let input = format!("{padding}{token}h tail");
+        let captured = capture(input.as_bytes()).unwrap();
+        assert!(captured.truncated);
+        let report: Value =
+            serde_json::from_str(&remote_report(Some(1), &captured, &captured, token)).unwrap();
+        for stream in ["stdout", "stderr"] {
+            assert_eq!(report[stream], format!("{padding}[redacted]"));
+        }
+        // Also merge overlapping full matches, rather than greedy replacement.
+        let captured = Captured {
+            bytes: b"abababa".to_vec(),
+            truncated: true,
+        };
+        assert_eq!(redacted_output(&captured, "ababa"), "[redacted]");
     }
     #[test]
     fn failed_remote_commands_keep_bounded_diagnostics_and_redact_local_token() {
