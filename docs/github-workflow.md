@@ -49,3 +49,11 @@ An owner-installed `/data/zeroclaw/.ssh/id_ed25519` persists while the same `/da
 Current REST operations authenticate with GITHUB_TOKEN. The Codespaces CLI uses HOME=/data/zeroclaw/codespace, not /data/zeroclaw, so it does not automatically select that key. The executor has neither the agent volume/key nor network access. No private key is copied into it. Adding an SSH key does not fix REST token permissions, API rate limits or Codespaces creation policy failures.
 
 For a Codespace, check `git`, `gh`, `curl`, `jq`, `python3` and `ssh` before choosing commands. This project does not control other repositories' devcontainers or guarantee their installed tools. Configure/install required dependencies in that remote environment for the requested task; installing them in the executor does not enable networking there.
+
+## Diagnosing interrupted PR creation
+
+The primary runtime allows 48 tool-loop rounds per turn; the hourly action limit and loop detector remain enabled. Seven identical results from the same tool with differing arguments can trip the no-progress circuit breaker. This is not proof of a GitHub permissions failure. Missing Cargo in the offline executor does not block API-based PR creation.
+
+Send JSON request bodies as serialized strings with `Content-Type: application/json`. For multi-file text edits, use inline `content` entries in one Git Trees request with `base_tree` to reduce round trips. Verify remote state before retrying a mutation after an ambiguous failure or resuming an interrupted turn.
+
+HTTP diagnostics persist only a response status or local category (invalid body, timeout, connection, transport); they omit URLs, payloads and credentials. They do not cover failures in runtime wrappers before HTTP execution. Rate-limit and retry header values are exposed to the agent; other response-header values are redacted. The agent should immediately report a sanitized failure summary to the requesting user, including method/path without query parameters and status/category, without copying private API payloads. Historical task-level failure notices cannot recover an omitted underlying response. Payload tracing stays disabled.
