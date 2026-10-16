@@ -16,7 +16,7 @@ class NativeTestCacheTests(unittest.TestCase):
         compile_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in compiled.splitlines() if 'cargo test ' in line]
         run_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in executed.splitlines() if 'cargo test ' in line]
         self.assertEqual(len(compile_commands), 5)
-        self.assertIn('cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --no-run', compile_commands)
+        self.assertIn('cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run', compile_commands)
         self.assertTrue(all(command.endswith(' --no-run') for command in compile_commands))
         self.assertEqual([command.removesuffix(' --no-run') for command in compile_commands], run_commands)
         self.assertIn('&& touch /contract-passed', executed)
