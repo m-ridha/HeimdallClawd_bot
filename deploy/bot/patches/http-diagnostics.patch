@@ -30,10 +30,10 @@
  
  /// HTTP request tool for API interactions.
  /// Supports GET, POST, PUT, DELETE methods with configurable security.
-@@ -542,7 +565,18 @@
-             },
-             None => None,
-         };
+@@ -566,7 +589,18 @@
+                 return Ok(ToolResult { success: false, output: ToolOutput::default(), error: Some(error.to_string()) });
+             }
+         }
 -        let body = args.get("body").and_then(|v| v.as_str());
 +        let body = match args.get("body") {
 +            None => None,
@@ -50,7 +50,7 @@
  
          if !self.security.can_act() {
              return Ok(ToolResult {
-@@ -631,18 +665,8 @@
+@@ -655,18 +689,8 @@
                  let status_code = status.as_u16();
  
                  // Get response headers (redact sensitive ones)
@@ -71,7 +71,7 @@
  
                  // Get response body with size limit
                  let response_text = match self.read_response_text(response).await {
-@@ -680,12 +704,11 @@
+@@ -704,12 +728,11 @@
                  })
              }
              Err(e) => {
