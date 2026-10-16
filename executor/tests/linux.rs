@@ -51,6 +51,7 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     let malicious = Path::new("/data/workspace/.tmp");
     let _ = std::fs::remove_file(malicious);
     std::os::unix::fs::symlink("/run/heimdall-control", malicious).unwrap();
+    assert!(include_str!("../entrypoint.sh").contains("exec /usr/local/bin/heimdall-executor"));
     let startup =
         include_str!("../entrypoint.sh").replace("exec /usr/local/bin/heimdall-executor", "exit 0");
     assert!(
@@ -80,6 +81,56 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     let command = execute("bash", json!({"command":"printf 'command-ok'"}), t).await;
     assert!(!command.is_error, "{}", command.content);
     assert_eq!(command.content, "command-ok");
+    for (operation, command) in [
+        (
+            "timestamp-preserving copy",
+            r#"printf compatibility > compat.txt && chmod 640 compat.txt && touch -t 202001020304 compat.txt && cp -p compat.txt compat-copy.txt && test "$(cat compat-copy.txt)" = compatibility && test "$(stat -c %a compat-copy.txt)" = 640 && test "$(stat -c %Y compat.txt)" = "$(stat -c %Y compat-copy.txt)""#,
+        ),
+        (
+            "archive creation",
+            "tar -cf compat.tar compat.txt && test -s compat.tar",
+        ),
+        (
+            "archive extraction",
+            r#"rm compat.txt && tar -xf compat.tar && test "$(cat compat.txt)" = compatibility && rm compat.txt compat-copy.txt compat.tar"#,
+        ),
+    ] {
+        let compatibility = execute("bash", json!({"command":command}), t).await;
+        assert!(
+            !compatibility.is_error,
+            "{operation}: {}",
+            compatibility.content
+        );
+    }
+    let git = execute(
+        "bash",
+        json!({"command":"mkdir -p git-fixture && cd git-fixture && git init -q && printf 'initial\\n' > example.txt && git add example.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial && git checkout -qb feature && printf 'changed\\n' > example.txt && git diff --exit-code -- example.txt >/dev/null; result=$?; test \"$result\" -eq 1 && git add example.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm change && test \"$(git log --format=%s -1)\" = change && git status --porcelain && cd .. && rm -rf git-fixture && printf git-offline-ready"}),
+        t,
+    ).await;
+    assert!(!git.is_error, "{}", git.content);
+    assert_eq!(git.content, "git-offline-ready");
+    let allocation = execute(
+        "bash",
+        json!({"command":"tail /dev/zero"}),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(allocation.is_error);
+    assert!(
+        !allocation.content.contains("Execution timed out"),
+        "allocation cap did not stop job"
+    );
+    let temporary = execute(
+        "bash",
+        json!({"command":"printf '%s' \"$TMPDIR\"; touch \"$TMPDIR/probe\""}),
+        t,
+    )
+    .await;
+    assert!(!temporary.is_error, "{}", temporary.content);
+    assert!(
+        !Path::new(&temporary.content).exists(),
+        "per-job temp directory survived"
+    );
     let combined = execute(
         "bash",
         json!({"command":"rm -- note.txt; printf command-probe"}),

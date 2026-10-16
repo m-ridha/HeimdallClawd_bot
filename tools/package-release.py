@@ -50,6 +50,7 @@ provenance = {
     'binary_sha256': digest, 'launcher_sha256': launcher_digest, 'executor_sha256': executor_digest,
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
+    'http_secret_origins_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
     'wasm_wit_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/wasm-wit.patch').read_bytes()).hexdigest(),
     'remote_skills_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/remote-skills.patch').read_bytes()).hexdigest(),
     'private_telegram_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest(),

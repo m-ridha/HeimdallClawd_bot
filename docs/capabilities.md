@@ -13,7 +13,7 @@ These changes describe the next release, not a verified live deployment. Heartbe
 | Open Skills | Bulk community collection sync enabled in `/data/zeroclaw/shared/open-skills`. Compact prompting reads individual skill instructions with read_skill. First synchronization consumes disk/network and can slow startup. |
 | Skill scripts | Script-containing skills allowed. Shell/script manifest tools copy up to 32 regular UTF-8 files, 64 KiB each / 256 KiB total, into the executor and run there. Symlinks are rejected. Operating-system dependencies and interpreter availability still matter; arbitrary downloaded packages are not installed automatically. |
 | Web access | Tavily search, bounded web_fetch and http_request, Lynx text_browser, and automatic enrichment of up to two incoming links. Public hosts allowed; private-host access remains restricted. |
-| GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN` and sandbox repository allowlist; separate GitHub billing. See [setup](operations.md#github-access). Not live-verified. |
+| GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN`; Codespaces supports an explicit repository list or standalone `*` for GitHub-authorized repositories; separate GitHub billing. See [setup](operations.md#github-access). Not live-verified. |
 | Telegram messaging | Poll, reaction, channel_room, ask_user and send_via tools allowed. Actual operations depend on Telegram support, bot permissions and configured peers. No other chat channel is installed. |
 | File transfer | transfer__send delivers executor files to an explicitly specified allowlisted Telegram recipient. transfer__import imports incoming files from the primary agent's telegram_files directory. transfer__receive accepts a Telegram file_id. Binary transfers are capped at 48 KiB; larger files are rejected. Native deliver_file is ACP-oriented, and native file_upload/file_download tools still need owner-configured endpoints. |
 | Extra MCP servers | MCP remains enabled and supports owner-configured additional servers/bundles. No unknown external service is connected automatically. |
@@ -59,3 +59,5 @@ Do not edit `/data/zeroclaw/config.toml` expecting changes to survive startup: t
 6. Create a simple SOP and a short permitted pipeline. Verify state persists after a restart. Install and test a specific WASM plugin separately before depending on it.
 
 Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. The Railway hard spending cap remains separate from those quotas.
+
+GitHub repository edits do not depend on Codespaces. See the [repository workflow](github-workflow.md) for API commits/PRs, updated offline Git support and build/test paths.

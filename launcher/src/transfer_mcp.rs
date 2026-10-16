@@ -359,22 +359,45 @@ pub fn serve() -> io::Result<()> {
     };
     let mut reader = io::stdin().lock();
     let mut out = io::stdout().lock();
+    serve_stream(&mut reader, &mut out, &mut run)
+}
+fn error(id: Value, code: i32, message: &str) -> Value {
+    json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
+}
+fn serve_stream(
+    reader: &mut impl BufRead,
+    out: &mut impl Write,
+    run: &mut impl FnMut(&str, &Value) -> Result<String, &'static str>,
+) -> io::Result<()> {
+    const REQUEST_LIMIT: usize = 8192;
     loop {
-        let mut line = String::new();
-        if reader.by_ref().take(8193).read_line(&mut line)? == 0 {
-            break;
+        let mut line = Vec::new();
+        if reader
+            .by_ref()
+            .take((REQUEST_LIMIT + 1) as u64)
+            .read_until(b'\n', &mut line)?
+            == 0
+        {
+            return Ok(());
         }
-        if line.len() > 8192 {
-            return Err(io::Error::other("Transfer request too large"));
-        }
-        let request = serde_json::from_str(&line).map_err(io::Error::other)?;
-        if let Some(response) = handle(request, &mut run) {
+        let response = if line.len() > REQUEST_LIMIT {
+            if !line.ends_with(b"\n") {
+                reader.skip_until(b'\n')?;
+            }
+            Some(error(Value::Null, -32700, "Transfer request exceeds 8 KiB"))
+        } else {
+            match serde_json::from_slice(&line) {
+                Ok(request) => handle(request, run),
+                Err(_) => Some(error(Value::Null, -32700, "Invalid JSON")),
+            }
+        };
+        if let Some(response) = response {
             writeln!(out, "{response}")?;
             out.flush()?;
         }
     }
-    Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,5 +492,31 @@ mod tests {
         let result = handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"send","arguments":{"path":"x","url":"https://example.com"}}}), &mut run).unwrap();
         assert_eq!(result["result"]["isError"], true);
         assert!(!called);
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    #[test]
+    fn malformed_and_oversized_lines_do_not_drop_the_server() {
+        let mut input = b"not-json\n".to_vec();
+        input.extend(vec![b'x'; 9000]);
+        input.extend_from_slice(b"\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"initialize\"}\n");
+        let mut output = Vec::new();
+        serve_stream(&mut io::Cursor::new(input), &mut output, &mut |_, _| {
+            panic!("must not execute")
+        })
+        .unwrap();
+        let replies: Vec<Value> = String::from_utf8(output)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(replies.len(), 3);
+        assert_eq!(replies[0]["error"]["code"], -32700);
+        assert_eq!(replies[1]["error"]["code"], -32700);
+        assert_eq!(replies[2]["id"], 3);
+        assert!(replies[2].get("result").is_some());
     }
 }
