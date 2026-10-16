@@ -34,6 +34,10 @@ class PackageTests(unittest.TestCase):
             for dockerfile in [output / 'Dockerfile', output / 'executor/Dockerfile']:
                 self.assertNotIn('cargo ', dockerfile.read_text())
                 self.assertIn('sha256sum -c', dockerfile.read_text())
+            self.assertEqual(lock['features'], 'agent-runtime,channel-telegram,gateway,schema-export,plugins-wasm-cranelift,embedded-web,webauthn,channel-acp-server')
+            self.assertIn('--features ' + lock['features'] + ' --bin zeroclaw', (ROOT / 'deploy/bot/Dockerfile').read_text())
+            self.assertTrue((output / 'deploy/bot/evals/smoke.json').is_file())
+            self.assertIn('COPY deploy/bot/evals /usr/share/heimdall/evals', (output / 'Dockerfile').read_text())
             self.assertFalse(list(output.rglob('railway.toml')))
             self.assertFalse((output / '.git').exists())
             self.assertFalse((output / 'launcher/target').exists())

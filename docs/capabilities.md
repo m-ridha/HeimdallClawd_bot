@@ -1,6 +1,6 @@
 # Enabled capabilities
 
-These changes describe the next release, not a verified live deployment. Heartbeat is still disabled; headless browser automation and browser delegation are not configured because Tavily provides search/content access rather than a WebDriver or browser-agent service.
+These changes describe the next release, not a verified live deployment. Heartbeat is enabled for the owner; headless browser automation and browser delegation are not configured because Tavily provides search/content access rather than a WebDriver or browser-agent service.
 
 | Capability | Configuration / use |
 | --- | --- |
@@ -17,6 +17,29 @@ These changes describe the next release, not a verified live deployment. Heartbe
 | Telegram messaging | Poll, reaction, channel_room, ask_user and send_via tools allowed. Actual operations depend on Telegram support, bot permissions and configured peers. No other chat channel is installed. |
 | File transfer | transfer__send delivers executor files to an explicitly specified allowlisted Telegram recipient. transfer__import imports incoming files from the primary agent's telegram_files directory. transfer__receive accepts a Telegram file_id. Binary transfers are capped at 48 KiB; larger files are rejected. Native deliver_file is ACP-oriented, and native file_upload/file_download tools still need owner-configured endpoints. |
 | Extra MCP servers | MCP remains enabled and supports owner-configured additional servers/bundles. No unknown external service is connected automatically. |
+
+## Extended native capabilities (not live-verified)
+
+The primary profile contains 55 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
+
+| Capability | Status and limits |
+| --- | --- |
+| Voice transcription | Enabled with Deepgram `nova-3`, automatic language detection and an 8 MiB / 120-second input limit. The primary agent selects `deepgram.voice`; its Railway API key is required. ChatGPT sign-in does not supply a transcription or embedding API key. |
+| Heartbeat | Enabled for `primary`, hourly, two-phase, two-minute task timeout, 24 run records. Delivery is explicitly to `TELEGRAM_OWNER_ID`. Empty task instructions do no work. See [operations](operations.md#heartbeat). |
+| Automatic media processing | Enabled for images and audio. Audio requires the Deepgram key; visual understanding depends on the selected model. Video summarization remains off because this revision documents it as a placeholder. |
+| Image inspection / screenshots | `image_info` is granted with native workspace path guards for agent-side images. Executor files must be transferred first. Native screenshot is not granted: it starts an agent-container shell and needs a desktop. Remote capture requires an external service. |
+| Session management | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` granted. sessions_send appends a user message to history only; it does not notify Telegram or start a turn. Use send_via for delivery. These inspect the shared bot session store; permitted accounts should be trusted to share that visibility. Reset/delete tools are not registered by this runtime's tool factory. |
+| Knowledge graph / bundles | Persistent graph enabled at `/data/zeroclaw/data/knowledge.db`, capped at 10,000 nodes, with `knowledge` granted. Named bundles exist in the schema but no bundle ingestion implementation was found in this pinned runtime; use graph capture instead. |
+| Semantic memory | Hybrid retrieval configured with Cohere `embed-v5.0-fast` through its OpenAI-compatible endpoint, 2,048 dimensions and a 1,024-entry embedding cache. The separate Railway key is required; ChatGPT sign-in is not used for embeddings. |
+| Memory enhancements | SQLite fact extraction and hygiene snapshots enabled. Reranking remains off: the pinned runtime reports its stage as unimplemented. Bounded response cache: 128 disk / 16 hot entries, 15-minute TTL. Upstream bypasses response caching when tools are available. Memory store/recall/forget tools granted. Snapshots on the same volume are not backups. |
+| Project intelligence | `project_intel` and `report_template` granted. Analyze supplied Git/issue summaries and produce reports; they do not automatically connect a project or tracker. |
+| Cloud / security | `cloud_ops`, `cloud_patterns`, `security_ops` granted. Advisory analysis, vulnerability parsing and playbook guidance; no cloud credentials or automatic infrastructure remediation added. Approval gates retained. |
+| ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Client and private connectivity still need setup. |
+| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. No public domain or remote-admin access is added. |
+| Remote nodes | Configuration prepared for two nodes; disabled until a shared authentication token and remote client are configured. LAN mDNS stays off on Railway. No tunnel service is installed. |
+| Diagnostics | Rotating diagnostics: 1 MiB rotation threshold, three archives, three-day archive retention. Tool I/O and LLM payload capture remain off, per owner preference. The threshold is a rotation trigger, not a strict per-event/disk quota. |
+| WebAuthn | Compiled support included; inactive until the actual HTTPS relying-party domain/origin and client access are configured. Existing subscription sign-in remains the model authentication. |
+| Evaluation harness | Bundled synthetic replay fixture, run during native validation. It tests harness wiring with a deterministic echo tool, not live model quality or the production executor. This runtime does not implement live evaluation mode. |
 
 ## Additional MCP servers and plugins
 

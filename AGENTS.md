@@ -83,7 +83,7 @@ Preserve these accepted behaviors; each has a regression test that must keep pas
 - Control files (`/run/heimdall-control`, `EXECUTOR_TOKEN`) must stay unreadable to helpers.
 - The skills installer accepts only bare lowercase registry names; no URLs, paths, flags or extra arguments. It forces the official registry, clears the environment (no Telegram or provider credentials), disables Git hooks and local/ext protocols, and bounds time and output.
 - Telegram transfers are capped at 48 KiB, recipients must be in the allowlist, imports read only below the agent's `telegram_files` directory with symlink-safe traversal, and executor credentials never reach workspace jobs.
-- Error messages and logs never echo tokens, authorization values, auth files or user content. Observability keeps log persistence and tool/prompt payload capture off. Keep tests asserting that secrets are absent from rendered and saved configuration.
+- Error messages and logs never echo tokens, authorization values, auth files or user content. Observability keeps tool/prompt payload capture off; diagnostic persistence rotates at 1 MiB with three archives and three-day archive retention. Keep tests asserting that secrets are absent from rendered and saved configuration.
 - Reject, do not repair, invalid configuration: invalid allowlist entries, invalid model names, short tokens and a nonstandard `HEIMDALL_EXECUTOR_URL` stop startup.
 
 ## Build, release and infrastructure

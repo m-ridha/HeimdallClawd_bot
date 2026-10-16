@@ -48,7 +48,7 @@ provenance = {
     'runtime_revision': lock['revision'], 'source_sha256': lock['source_sha256'],
     'builder': 'rust:1.99-slim-bookworm, native Linux x86_64',
     'binary_sha256': digest, 'launcher_sha256': launcher_digest, 'executor_sha256': executor_digest,
-    'features': 'agent-runtime,channel-telegram,gateway,schema-export,plugins-wasm-cranelift',
+    'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
     'wasm_wit_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/wasm-wit.patch').read_bytes()).hexdigest(),
     'remote_skills_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/remote-skills.patch').read_bytes()).hexdigest(),

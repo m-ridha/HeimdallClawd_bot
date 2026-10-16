@@ -43,6 +43,7 @@ pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError>
     // These paths are fixed by the embedded template and pinned by configuration tests.
     config["peer_groups"]["telegram_home"]["external_peers"] =
         toml::Value::Array(ids.iter().cloned().map(toml::Value::String).collect());
+    config["heartbeat"]["to"] = toml::Value::String(ids[0].clone());
     config["providers"]["models"]["openai"]["codex"]["model"] = toml::Value::String(model.into());
     if let Some(routes) = config["model_routes"].as_array_mut() {
         for route in routes {
