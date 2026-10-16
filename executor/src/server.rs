@@ -71,7 +71,28 @@ async fn health(State(app): State<App>) -> StatusCode {
         StatusCode::SERVICE_UNAVAILABLE
     }
 }
-pub(crate) async fn execute_formatted(app: App, job: Job, rpc_id: serde_json::Value) -> Response {
+// Owned by the spawned task before its first poll, including abort/unwind paths.
+struct ActiveJob {
+    active: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    key: String,
+    cancel: CancellationToken,
+}
+impl Drop for ActiveJob {
+    fn drop(&mut self) {
+        self.cancel.cancel();
+        // Cleanup must not panic while unwinding if another task poisoned the map.
+        self.active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.key);
+    }
+}
+pub(crate) async fn execute_formatted(
+    app: App,
+    job: Job,
+    rpc_id: serde_json::Value,
+    key: String,
+) -> Response {
     if let Err(error) = job.validate() {
         return (StatusCode::BAD_REQUEST, error).into_response();
     }
@@ -81,14 +102,19 @@ pub(crate) async fn execute_formatted(app: App, job: Job, rpc_id: serde_json::Va
     let cancel = CancellationToken::new();
     let permit = {
         let mut active = app.active.lock().unwrap();
-        if active.contains_key(&job.id) {
+        if active.contains_key(&key) {
             return StatusCode::CONFLICT.into_response();
         }
         let Ok(permit) = app.gate.clone().try_acquire_owned() else {
             return StatusCode::LOCKED.into_response();
         };
-        active.insert(job.id.clone(), cancel.clone());
+        active.insert(key.clone(), cancel.clone());
         permit
+    };
+    let guard = ActiveJob {
+        active: app.active.clone(),
+        key,
+        cancel: cancel.clone(),
     };
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(2);
     tokio::spawn(async move {
@@ -111,7 +137,7 @@ pub(crate) async fn execute_formatted(app: App, job: Job, rpc_id: serde_json::Va
             truncated: false,
         });
         let bytes = serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":[{"type":"text","text":reply.content}],"isError":reply.is_error}})).unwrap();
-        app.active.lock().unwrap().remove(&id);
+        drop(guard);
         drop(permit);
         let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Ok(Bytes::from(bytes)))).await;
     });
@@ -133,6 +159,72 @@ pub fn listen_address(port: &str) -> std::io::Result<std::net::SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn active_guard_cleans_panic_and_abort_and_allows_id_reuse() {
+        let app = App::new("x".repeat(32), true);
+        for panic in [true, false] {
+            let cancel = CancellationToken::new();
+            assert!(
+                app.active
+                    .lock()
+                    .unwrap()
+                    .insert("reusable".into(), cancel.clone())
+                    .is_none()
+            );
+            let guard = ActiveJob {
+                active: app.active.clone(),
+                key: "reusable".into(),
+                cancel: cancel.clone(),
+            };
+            let permit = app.gate.clone().acquire_owned().await.unwrap();
+            let task = tokio::spawn(async move {
+                let (_guard, _permit) = (guard, permit);
+                if panic {
+                    panic!("synthetic task panic");
+                }
+                std::future::pending::<()>().await;
+            });
+            if !panic {
+                task.abort();
+            }
+            let error = task.await.unwrap_err();
+            assert_eq!(error.is_panic(), panic);
+            assert!(cancel.is_cancelled());
+            assert!(!app.active.lock().unwrap().contains_key("reusable"));
+            assert_eq!(app.gate.available_permits(), 2);
+        }
+    }
+    #[tokio::test]
+    async fn cancellation_is_session_scoped_and_sessionless_notifications_are_ignored() {
+        let app = App::new("x".repeat(32), true);
+        let first = CancellationToken::new();
+        let second = CancellationToken::new();
+        app.active.lock().unwrap().insert(
+            "00000000-0000-4000-8000-000000000001:mcp:3".into(),
+            first.clone(),
+        );
+        app.active.lock().unwrap().insert(
+            "00000000-0000-4000-8000-000000000002:mcp:3".into(),
+            second.clone(),
+        );
+        let request = serde_json::json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":3}});
+        let response = crate::mcp::handle(
+            State(app.clone()),
+            axum::http::HeaderMap::new(),
+            axum::Json(request.clone()),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(!first.is_cancelled() && !second.is_cancelled());
+        let headers = axum::http::HeaderMap::from_iter([(
+            axum::http::HeaderName::from_static("mcp-session-id"),
+            axum::http::HeaderValue::from_static("00000000-0000-4000-8000-000000000001"),
+        )]);
+        let response = crate::mcp::handle(State(app), headers, axum::Json(request)).await;
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+    }
     #[test]
     fn private_listener_accepts_ipv6_addressing() {
         let address = listen_address("3889").unwrap();
@@ -145,12 +237,12 @@ mod tests {
         use http_body_util::BodyExt;
         let app = App::new("x".repeat(32), true);
         let _permit = app.gate.clone().acquire_many_owned(2).await.unwrap();
-        app.active
-            .lock()
-            .unwrap()
-            .insert("mcp:1".into(), CancellationToken::new());
+        app.active.lock().unwrap().insert(
+            "00000000-0000-4000-8000-000000000001:mcp:1".into(),
+            CancellationToken::new(),
+        );
         for (id, expected) in [(1, -32002), (2, -32001)] {
-            let response = crate::mcp::handle(State(app.clone()), axum::Json(serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"bash","arguments":{"command":"true"}}}))).await;
+            let response = crate::mcp::handle(State(app.clone()), axum::http::HeaderMap::from_iter([(axum::http::HeaderName::from_static("mcp-session-id"), axum::http::HeaderValue::from_static("00000000-0000-4000-8000-000000000001"))]), axum::Json(serde_json::json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"bash","arguments":{"command":"true"}}}))).await;
             let body = response.into_body().collect().await.unwrap().to_bytes();
             let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(value["error"]["code"], expected);
@@ -177,6 +269,7 @@ mod tests {
                     arguments: serde_json::json!({"command":"true"}),
                 },
                 serde_json::json!(id),
+                id.into(),
             )
             .await;
             assert_eq!(reply.status(), expected);
