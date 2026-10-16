@@ -34,7 +34,7 @@
          self
      }
 
-@@ -12908,3 +12935,26 @@
+@@ -12908,3 +12935,27 @@
          }
      }
  }
@@ -56,6 +56,7 @@
 +        config.providers.transcription.deepgram.get_mut("voice").unwrap().base.api_key = None;
 +        let missing_key = channel().with_transcription_for_provider(&config, "deepgram.voice");
 +        assert!(missing_key.transcription.is_none() && missing_key.transcription_manager.is_none());
++        config.providers.transcription.deepgram.get_mut("voice").unwrap().base.api_key = Some("synthetic-deepgram-fixture".into());
 +        config.transcription.enabled = false;
 +        let disabled = channel().with_transcription_for_provider(&config, "deepgram.voice");
 +        assert!(disabled.transcription.is_none() && disabled.transcription_manager.is_none());
