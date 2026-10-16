@@ -124,3 +124,9 @@ Railway service inspection showed a successful deployment, the existing persiste
 A disposable native ARM Debian Bookworm trace showed `cp -p` reading POSIX ACL metadata with fgetxattr and writing it with fsetxattr. Injecting EPERM for fgetxattr reproduced the exact error and exit 1; denying optional fadvise64/copy_file_range still allowed copying. The executor filter now admits only the two descriptor-based ACL calls, subject to normal kernel UID/DAC checks. The Linux regression additionally verifies nonempty copied content, mode and timestamps. No networking or process-control grant was added.
 
 This is syscall diagnosis, not execution of the production x86_64 filter. Cross-target type checking passes; the updated native suite remains pending. No new Actions run was dispatched, as requested.
+
+## 2026-10-16: archive creation follow-up
+
+[Run 38848634945](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/38848634945) passed the strengthened copy assertions, then failed in archive creation with `tar: compat.tar: Cannot open: Operation not permitted`. The earlier ACL correction therefore resolved the copy failure; this run does not establish later Git or isolation assertions.
+
+Static inspection of Debian Bookworm x86_64 tar showed its imported `creat` symbol; the matching libc implementation issues syscall 85 (creat). This syscall was missing from the executor allowlist even though open/openat creation was already allowed. The fix admits creat with ordinary UID/DAC enforcement. Native regression assertions now identify copy, archive creation and extraction separately, remove the original before extraction and verify extracted content. Production x86_64 execution remains pending; no new Actions run was dispatched.

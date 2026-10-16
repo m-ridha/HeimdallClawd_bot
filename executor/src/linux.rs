@@ -67,6 +67,9 @@ pub fn restrict() -> io::Result<()> {
         libc::SYS_access,
         libc::SYS_openat,
         libc::SYS_open,
+        // GNU tar's rmtcreat uses the x86_64 creat syscall, equivalent to
+        // open(O_WRONLY | O_CREAT | O_TRUNC); ordinary UID/DAC checks apply.
+        libc::SYS_creat,
         libc::SYS_stat,
         libc::SYS_lstat,
         libc::SYS_readlink,
