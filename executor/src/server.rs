@@ -15,6 +15,7 @@ use std::{
 };
 use subtle::ConstantTimeEq;
 use tokio::sync::{Semaphore, mpsc};
+const ADMISSION_WAIT: Duration = Duration::from_secs(3);
 use tokio_util::sync::CancellationToken;
 #[derive(Clone)]
 pub struct App {
@@ -87,6 +88,23 @@ impl Drop for ActiveJob {
             .remove(&self.key);
     }
 }
+async fn acquire_slot(
+    gate: Arc<Semaphore>,
+    cancel: &CancellationToken,
+    tx: &mpsc::Sender<Result<Bytes, std::io::Error>>,
+) -> Result<tokio::sync::OwnedSemaphorePermit, (i32, &'static str)> {
+    tokio::select! {
+        biased;
+        _ = tx.closed() => Err((-32800, "executor_cancelled: queued request did not start")),
+        _ = cancel.cancelled() => Err((-32800, "executor_cancelled: queued request did not start")),
+        result = tokio::time::timeout(ADMISSION_WAIT, gate.acquire_owned()) => {
+            match result {
+                Ok(Ok(permit)) => Ok(permit),
+                _ => Err((-32001, "executor_busy: admission wait expired; request did not start")),
+            }
+        }
+    }
+}
 pub(crate) async fn execute_formatted(
     app: App,
     job: Job,
@@ -100,17 +118,13 @@ pub(crate) async fn execute_formatted(
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     let cancel = CancellationToken::new();
-    let permit = {
+    {
         let mut active = app.active.lock().unwrap();
         if active.contains_key(&key) {
             return StatusCode::CONFLICT.into_response();
         }
-        let Ok(permit) = app.gate.clone().try_acquire_owned() else {
-            return StatusCode::LOCKED.into_response();
-        };
         active.insert(key.clone(), cancel.clone());
-        permit
-    };
+    }
     let guard = ActiveJob {
         active: app.active.clone(),
         key,
@@ -118,6 +132,23 @@ pub(crate) async fn execute_formatted(
     };
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(2);
     tokio::spawn(async move {
+        // Return the response stream before waiting so disconnects can cancel
+        // queued work. No active-map mutex is held across an await.
+        let admission = acquire_slot(app.gate.clone(), &cancel, &tx).await;
+        let permit = match admission {
+            Ok(permit) => permit,
+            Err((code, message)) => {
+                drop(guard);
+                let bytes = serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":rpc_id,"error":{"code":code,"message":message}})).unwrap();
+                let _ =
+                    tokio::time::timeout(Duration::from_secs(2), tx.send(Ok(Bytes::from(bytes))))
+                        .await;
+                return;
+            }
+        };
+        if tx.is_closed() || cancel.is_cancelled() {
+            return;
+        }
         let id = job.id.clone();
         let execution = crate::process::run(job, cancel.clone(), Duration::from_secs(30));
         tokio::pin!(execution);
@@ -159,6 +190,57 @@ pub fn listen_address(port: &str) -> std::io::Result<std::net::SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn queued_admission_succeeds_when_a_slot_is_released() {
+        let gate = Arc::new(Semaphore::new(2));
+        let occupied = gate.clone().acquire_many_owned(2).await.unwrap();
+        let cancel = CancellationToken::new();
+        let (tx, _rx) = mpsc::channel(2);
+        let (permit, ()) = tokio::join!(acquire_slot(gate.clone(), &cancel, &tx), async {
+            drop(occupied);
+        });
+        let permit = permit.unwrap();
+        assert_eq!(gate.available_permits(), 1);
+        drop(permit);
+        assert_eq!(gate.available_permits(), 2);
+    }
+    #[tokio::test]
+    async fn queued_requests_cancel_on_disconnect_or_notification_without_starting() {
+        use http_body_util::BodyExt;
+        let app = App::new("x".repeat(32), true);
+        let _occupied = app.gate.clone().acquire_many_owned(2).await.unwrap();
+        for disconnect in [true, false] {
+            let key = "queued".to_string();
+            let response = execute_formatted(
+                app.clone(),
+                Job {
+                    id: "job".into(),
+                    tool: "bash".into(),
+                    arguments: serde_json::json!({"command":"true"}),
+                },
+                serde_json::json!(3),
+                key.clone(),
+            )
+            .await;
+            assert!(app.active.lock().unwrap().contains_key(&key));
+            if disconnect {
+                drop(response);
+            } else {
+                assert!(app.cancel(&key));
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(value["error"]["code"], -32800);
+            }
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while app.active.lock().unwrap().contains_key(&key) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(app.gate.available_permits(), 0);
+        }
+    }
     #[tokio::test]
     async fn active_guard_cleans_panic_and_abort_and_allows_id_reuse() {
         let app = App::new("x".repeat(32), true);
@@ -257,10 +339,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert("active".into(), CancellationToken::new());
-        for (id, expected) in [
-            ("active", StatusCode::CONFLICT),
-            ("other", StatusCode::LOCKED),
-        ] {
+        for (id, expected) in [("active", StatusCode::CONFLICT), ("other", StatusCode::OK)] {
             let reply = execute_formatted(
                 app.clone(),
                 Job {
