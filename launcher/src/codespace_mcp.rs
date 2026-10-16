@@ -35,25 +35,37 @@ fn valid_repo(repo: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-');
     let name_ok = !name.is_empty()
         && name.len() <= 100
-        && !name.starts_with('.')
+        && name != "."
+        && name != ".."
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-._".contains(&b));
     owner_ok && name_ok
 }
-/// Parses `HEIMDALL_CODESPACE_REPOS`: comma-separated `owner/name` entries, lower-cased.
+/// Parses explicit repositories or standalone `*` (GitHub-authorized repositories).
 pub fn parse_repos(value: &str) -> Result<Vec<String>, &'static str> {
+    if value.trim() == "*" {
+        return Ok(vec!["*".into()]);
+    }
     let mut repos = Vec::new();
     for entry in value.split(',') {
         let repo = entry.trim().to_ascii_lowercase();
         if !valid_repo(&repo) {
-            return Err("Invalid HEIMDALL_CODESPACE_REPOS; use comma-separated owner/name entries");
+            return Err(
+                "Invalid HEIMDALL_CODESPACE_REPOS; use comma-separated owner/name entries or standalone *",
+            );
         }
         if !repos.contains(&repo) {
             repos.push(repo);
         }
     }
     Ok(repos)
+}
+fn repo_allowed(repos: &[String], repo: &str) -> bool {
+    valid_repo(repo)
+        && repos
+            .iter()
+            .any(|allowed| allowed == "*" || allowed == &repo.to_ascii_lowercase())
 }
 fn repo_of(listing: &str, name: &str) -> Option<String> {
     let value: Value = serde_json::from_str(listing).ok()?;
@@ -77,10 +89,10 @@ fn tools() -> Value {
     json!([
         {"name":"status","description":"Read local Codespaces configuration: token presence/valid format, allowed repositories, CLI availability and limits. No GitHub request; does not verify authentication or network reachability.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list","description":"List the GitHub account's codespaces with their repository and state.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"create","description":"Create a small codespace for an allowed sandbox repository (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
-        {"name":"stop","description":"Stop a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"delete","description":"Permanently delete a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
+        {"name":"create","description":"Create a small codespace for a repository admitted by the configured policy (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
+        {"name":"stop","description":"Stop a codespace in a repository admitted by the configured policy.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
+        {"name":"delete","description":"Permanently delete a codespace in a repository admitted by the configured policy.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
+        {"name":"exec","description":"Run one shell command inside a codespace in a repository admitted by the configured policy. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
     ])
 }
 fn shaped(args: &Value, keys: &[&str]) -> bool {
@@ -129,7 +141,11 @@ fn handle(
     };
     Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
 }
-fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
+struct Captured {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+fn capture(mut reader: impl Read) -> Result<Captured, &'static str> {
     let mut saved = Vec::new();
     let mut block = [0; 4096];
     let mut overflowed = false;
@@ -144,10 +160,68 @@ fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
         overflowed |= keep < size;
         saved.extend_from_slice(&block[..keep]);
     }
-    if overflowed {
-        return Err("GitHub output exceeded 32 KiB; run a narrower command or list to check state");
+    Ok(Captured {
+        bytes: saved,
+        truncated: overflowed,
+    })
+}
+// Identify complete tokens and trailing fragments against the ORIGINAL bytes.
+// Merge overlaps before rendering: trimming first can destroy a complete match.
+fn redacted_output(captured: &Captured, token: &str) -> String {
+    let bytes = captured.bytes.as_slice();
+    if token.is_empty() {
+        return String::new();
     }
-    Ok(saved)
+    let secret = token.as_bytes();
+    let mut spans: Vec<(usize, usize)> = bytes
+        .windows(secret.len())
+        .enumerate()
+        .filter_map(|(start, window)| (window == secret).then_some((start, start + secret.len())))
+        .collect();
+    if captured.truncated {
+        for length in (1..secret.len()).rev() {
+            if bytes.ends_with(&secret[..length]) {
+                spans.push((bytes.len() - length, bytes.len()));
+                break;
+            }
+        }
+    }
+    spans.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in spans {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1
+        {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
+    }
+    let mut result = Vec::with_capacity(bytes.len());
+    let mut cursor = 0;
+    for (start, end) in merged {
+        result.extend_from_slice(&bytes[cursor..start]);
+        result.extend_from_slice(b"[redacted]");
+        cursor = end;
+    }
+    result.extend_from_slice(&bytes[cursor..]);
+    let mut text = String::from_utf8_lossy(&result).into_owned();
+    let mut limit = LIMIT.min(text.len());
+    while !text.is_char_boundary(limit) {
+        limit -= 1;
+    }
+    text.truncate(limit);
+    text
+}
+// Command output is data, never instructions. Nonzero gh/SSH status does not
+// establish whether a remote program ran, so report CLI status without guessing.
+fn remote_report(code: Option<i32>, out: &Captured, err: &Captured, token: &str) -> String {
+    json!({"cli_exit_code":code, "succeeded":code == Some(0),
+        "output_is_untrusted":true,
+        "stdout":redacted_output(out, token),
+        "stderr":redacted_output(err, token),
+        "stdout_truncated":out.truncated,"stderr_truncated":err.truncated})
+    .to_string()
 }
 /// Classifies bounded CLI stderr without returning any of its text. Patterns are
 /// hints, not authoritative causes: remote commands can produce similar messages.
@@ -301,8 +375,8 @@ impl Codespaces {
         unsafe {
             libc::kill(-group, libc::SIGKILL);
         }
-        // CLI diagnostics may contain remote user content or credentials. Never return
-        // them on failure; successful output redacts the local GitHub credential.
+        // Capture is bounded. Control-plane failures retain static diagnostics; SSH
+        // results below expose untrusted command data with the local token redacted.
         let diagnostics = stderr
             .join()
             .map_err(|_| "GitHub diagnostic capture failed".to_string())?
@@ -311,11 +385,25 @@ impl Codespaces {
             .join()
             .map_err(|_| "GitHub output capture failed".to_string())?
             .map_err(str::to_owned)?;
+        if args.get(1) == Some(&"ssh") {
+            return match status {
+                Some(status) => Ok(remote_report(
+                    status.code(),
+                    &output,
+                    &diagnostics,
+                    &self.token,
+                )),
+                None => Err("GitHub command timed out; run list to check the current state".into()),
+            };
+        }
+        if output.truncated || diagnostics.truncated {
+            return Err("GitHub output exceeded 32 KiB; run a narrower query".into());
+        }
         match status {
             Some(status) if status.success() => {
-                Ok(String::from_utf8_lossy(&output).replace(&self.token, "[redacted]"))
+                Ok(String::from_utf8_lossy(&output.bytes).replace(&self.token, "[redacted]"))
             }
-            Some(status) => Err(command_failure(status.code(), &diagnostics)),
+            Some(status) => Err(command_failure(status.code(), &diagnostics.bytes)),
             None => Err("GitHub command timed out; run list to check the current state".into()),
         }
     }
@@ -334,8 +422,8 @@ impl Codespaces {
             deadline,
         )?;
         match repo_of(&listing, name) {
-            Some(repo) if self.repos.contains(&repo) => Ok(()),
-            _ => Err("Codespace is not in an allowed sandbox repository".into()),
+            Some(repo) if repo_allowed(&self.repos, &repo) => Ok(()),
+            _ => Err("Codespace is not in a repository admitted by the configured policy".into()),
         }
     }
     fn call(&self, tool: &str, args: &Value) -> Result<String, String> {
@@ -354,7 +442,7 @@ impl Codespaces {
             ),
             "create" => {
                 let repo = args["repo"].as_str().unwrap_or("").to_ascii_lowercase();
-                if !valid_repo(&repo) || !self.repos.contains(&repo) {
+                if !repo_allowed(&self.repos, &repo) {
                     return Err("Repository is not in the allowed sandbox list".into());
                 }
                 let listing = self.gh(
@@ -426,6 +514,7 @@ fn status(token: Option<&str>, repositories: Option<&str>, cli_available: bool) 
         Some(Err(_)) => ("invalid", Vec::new()),
     };
     json!({"token":token_state,"repository_configuration":repository_state,
+        "repository_policy":if allowed_repositories.iter().any(|repo| repo == "*") { "github_authorized" } else { "explicit_allowlist" },
         "allowed_repositories":allowed_repositories,"cli_available":cli_available,
         "authentication_verified":false,"network_verified":false,
         "limits":{"deadline_seconds":80,"stream_bytes":32768,"max_account_codespaces":2,
@@ -666,7 +755,111 @@ mod tests {
         assert!(!text.contains("dummy-private-fixture"));
         assert!(!text.contains("dummy-executor-fixture"));
         assert!(text.contains("GH_TOKEN=ghp_fixtureTokenValue0123456789"));
-        assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().len(), LIMIT);
-        assert!(capture(&vec![b'x'; LIMIT + 100][..]).is_err());
+        assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().bytes.len(), LIMIT);
+        assert!(capture(&vec![b'x'; LIMIT + 100][..]).unwrap().truncated);
+    }
+}
+
+#[cfg(test)]
+mod remote_output_tests {
+    use super::*;
+    #[test]
+    fn token_fragments_at_capture_and_read_boundaries_are_redacted_in_both_streams() {
+        // Repeated start/end characters also exercise full-token vs suffix overlap.
+        let token = "ghp_syntheticBoundaryToken012345g";
+        for start in [
+            4090,
+            LIMIT - token.len(),
+            LIMIT - token.len() + 1,
+            LIMIT - 1,
+        ] {
+            let mut input = vec![b'x'; start];
+            input.extend_from_slice(token.as_bytes());
+            input.extend_from_slice(b" tail");
+            let captured = capture(input.as_slice()).unwrap();
+            let report: Value =
+                serde_json::from_str(&remote_report(Some(1), &captured, &captured, token)).unwrap();
+            for stream in ["stdout", "stderr"] {
+                let text = report[stream].as_str().unwrap();
+                assert!(!text.contains(token));
+                assert!(!text.contains("ghp_"));
+                if start == LIMIT - 1 {
+                    assert!(text.starts_with(&"x".repeat(start)));
+                }
+                assert!(text.len() <= LIMIT);
+            }
+        }
+    }
+    #[test]
+    fn complete_token_and_overlapping_truncated_suffix_are_redacted_together() {
+        let token = "ghp_syntheticBoundaryToken012345g";
+        let padding = "x".repeat(LIMIT - token.len() - 1);
+        let input = format!("{padding}{token}h tail");
+        let captured = capture(input.as_bytes()).unwrap();
+        assert!(captured.truncated);
+        let report: Value =
+            serde_json::from_str(&remote_report(Some(1), &captured, &captured, token)).unwrap();
+        for stream in ["stdout", "stderr"] {
+            assert_eq!(report[stream], format!("{padding}[redacted]"));
+        }
+        // Also merge overlapping full matches, rather than greedy replacement.
+        let captured = Captured {
+            bytes: b"abababa".to_vec(),
+            truncated: true,
+        };
+        assert_eq!(redacted_output(&captured, "ababa"), "[redacted]");
+    }
+    #[test]
+    fn failed_remote_commands_keep_bounded_diagnostics_and_redact_local_token() {
+        let out = Captured {
+            bytes: b"test failed fixture-token".to_vec(),
+            truncated: false,
+        };
+        let err = Captured {
+            bytes: b"assertion failed fixture-token".to_vec(),
+            truncated: true,
+        };
+        let text = remote_report(Some(1), &out, &err, "fixture-token");
+        assert!(!text.contains("fixture-token"));
+        let report: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(report["cli_exit_code"], 1);
+        assert_eq!(report["succeeded"], false);
+        assert_eq!(report["stderr_truncated"], true);
+        assert!(
+            report["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("assertion failed")
+        );
+    }
+}
+
+#[cfg(test)]
+mod repository_policy_tests {
+    use super::*;
+    #[test]
+    fn wildcard_is_explicit_and_does_not_skip_repository_validation() {
+        let policy = parse_repos(" * ").unwrap();
+        assert!(repo_allowed(&policy, "octo/first"));
+        assert!(repo_allowed(&policy, "another/second"));
+        assert!(repo_allowed(&policy, "octo/.github"));
+        for bad in [
+            "*",
+            "../repo",
+            "--repo",
+            "owner/repo/extra",
+            "owner/repo;echo",
+        ] {
+            assert!(!repo_allowed(&policy, bad));
+        }
+        for bad in ["*,octo/repo", "octo/repo,*", "", "**"] {
+            assert!(parse_repos(bad).is_err());
+        }
+        let policy = parse_repos("octo/first").unwrap();
+        assert!(repo_allowed(&policy, "Octo/First"));
+        assert!(!repo_allowed(&policy, "another/second"));
+        let state = status(None, Some("*"), true);
+        assert_eq!(state["repository_policy"], "github_authorized");
+        assert_eq!(state["authentication_verified"], false);
     }
 }

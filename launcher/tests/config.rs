@@ -174,10 +174,17 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
 fn codex_route_tracks_the_configured_model() {
     let cfg = render_config(&["1001".into()], "custom-codex-model").unwrap();
     let cfg: toml::Value = toml::from_str(&cfg).unwrap();
-    assert_eq!(
-        cfg["model_routes"][1]["model"].as_str(),
-        Some("custom-codex-model")
-    );
+    let routes = cfg["model_routes"].as_array().unwrap();
+    let codex = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("codex"))
+        .unwrap();
+    assert_eq!(codex["model"].as_str(), Some("custom-codex-model"));
+    let free = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("free"))
+        .unwrap();
+    assert_eq!(free["model"].as_str(), Some("openrouter/free"));
 }
 
 #[test]
@@ -466,4 +473,14 @@ fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials(
     );
     assert_eq!(cfg["memory"]["search_mode"].as_str(), Some("hybrid"));
     assert!(!text.contains("api_key"));
+}
+
+#[test]
+fn managed_instructions_use_full_bootstrap_budget() {
+    let config: toml::Value =
+        toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(
+        config["runtime_profiles"]["primary"]["compact_context"].as_bool(),
+        Some(false)
+    );
 }

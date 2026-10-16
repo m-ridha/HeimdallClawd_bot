@@ -30,13 +30,22 @@ pub async fn run_at(
     if !cfg!(target_os = "linux") || unsafe { libc::geteuid() } != 0 {
         return Err(io::Error::other("An isolated Linux supervisor is required"));
     }
+    let temp = tempfile::Builder::new()
+        .prefix("job-")
+        .tempdir_in("/run/heimdall-tmp")?;
+    let path = std::ffi::CString::new(temp.path().as_os_str().as_encoded_bytes())
+        .map_err(io::Error::other)?;
+    // SAFETY: this is a newly created, root-owned directory under a root-owned parent.
+    if unsafe { libc::chown(path.as_ptr(), 64173, 64173) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
     let mut command = Command::new(binary);
     command
         .arg("--helper")
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
-        .env("HOME", "/run/heimdall-tmp")
-        .env("TMPDIR", "/run/heimdall-tmp")
+        .env("HOME", temp.path())
+        .env("TMPDIR", temp.path())
         .current_dir("/data/workspace")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -63,11 +72,20 @@ pub async fn run_at(
         .id()
         .ok_or_else(|| io::Error::other("No helper PID"))? as i32;
     let mut group = Group(pid);
-    let mut stdin = child.stdin.take().unwrap();
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("Missing helper stdin"))?;
     let payload = serde_json::to_vec(&job).map_err(io::Error::other)?;
     let writer = tokio::spawn(async move { stdin.write_all(&payload).await });
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("Missing helper stdout"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("Missing helper stderr"))?;
     let mut output = Vec::new();
     let mut out_done = false;
     let mut err_done = false;
@@ -134,7 +152,10 @@ pub async fn run_at(
         id: job.id,
         content,
         is_error: reason.is_some()
-            || (!status.unwrap().success() && !(truncated && job.tool == "file_read")),
+            || (!status
+                .ok_or_else(|| io::Error::other("Missing helper exit status"))?
+                .success()
+                && !(truncated && job.tool == "file_read")),
         truncated,
     })
 }

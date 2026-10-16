@@ -136,3 +136,51 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
         }
     }
 }
+
+#[test]
+fn managed_github_guide_is_visible_with_production_prompt_budget() {
+    let temp = tempfile::tempdir().unwrap();
+    let launcher = std::env::var("HEIMDALL_TEST_SKILLS_MCP").unwrap();
+    let output = std::process::Command::new(launcher)
+        .arg("--render-config")
+        .env_clear()
+        .env("TELEGRAM_OWNER_ID", "1001")
+        .env("HEIMDALL_MODEL", "gpt-6.1-sol")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let config: Config = toml::from_str(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+    let guide = std::fs::read_to_string(std::env::var("HEIMDALL_TEST_TOOLS").unwrap()).unwrap();
+    std::fs::write(temp.path().join("TOOLS.md"), &guide).unwrap();
+    let compact = config.effective_compact_context("primary");
+    assert!(!compact, "managed guide requires the full bootstrap budget");
+    let prompt =
+        zeroclaw_runtime::agent::system_prompt::build_system_prompt_with_mode_and_effective_tools(
+            temp.path(),
+            "fixture-model",
+            &[
+                ("http_request", "Public HTTP"),
+                ("read_skill", "Load skills"),
+            ],
+            |name| ["http_request", "read_skill"].contains(&name),
+            &[],
+            None,
+            if compact { Some(6000) } else { None },
+            Some(config.risk_profile_for_agent("primary").unwrap()),
+            true,
+            config.effective_skills_prompt_mode("primary"),
+            compact,
+            config.effective_max_system_prompt_chars("primary"),
+            true,
+            false,
+            None,
+        );
+    assert!(guide.contains("## Working on GitHub repositories"));
+    assert!(
+        prompt.contains(guide.trim()),
+        "complete managed guide must survive prompt assembly"
+    );
+    assert!(prompt.contains("force=false"));
+    assert!(prompt.contains("A GitHub skill is optional guidance"));
+    assert!(!prompt.contains("[System prompt truncated"));
+}

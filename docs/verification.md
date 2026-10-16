@@ -1,6 +1,6 @@
 # Verification
 
-Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance are recorded in `deploy/bot/artifact.lock.json`.
+Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance were recorded in the historical artifact provenance; current hashes/provenance are generated into each release package.
 
 ## Passed
 
@@ -102,3 +102,43 @@ The original capability revision b30cb1f passed native Linux [run 38756450119](h
 The new contract passed locally against the pinned runtime with `cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_inventory` and `HEIMDALL_TEST_SKILLS_MCP` pointing to the built launcher. Both crates' portable tests and strict Clippy, eleven Python tests with the pinned SDK, actionlint, formatting and diff checks passed. Native Linux verification of this follow-up is pending. Updated instructions distinguish stored-session appends from actual Telegram notification/turn execution, and docs distinguish 55 policy grants from exposed inventory.
 
 Release acceptance remains outstanding: deploy the new artifact, restart, inspect the actual primary Telegram inventory for all fourteen added schemas, and exercise synthetic memory/graph/image/voice checks. Deepgram/Cohere keys must be configured, and Cohere request usage must be observed; successful keyword recall alone is insufficient. Check whether existing memory needs an explicit reindex. No live provider calls or production deployment were performed during this review follow-up.
+
+## 2026-10-16: supplied audit, local remediation
+
+See [assessment and remaining risks](audit-review.md). Named-secret origin enforcement and private-address rejection passed two integration checks against the pinned ZeroClaw tools crate. The new patch applies cleanly to an unmodified copy of its target file. Launcher and executor portable tests, strict Clippy for both crates, thirteen Python tests with the pinned SDK, formatting, actionlint and diff checks passed. An existing route-order-dependent test was corrected to assert the Codex route by hint and preserve the free route's model.
+
+`cargo check --locked --manifest-path executor/Cargo.toml --target x86_64-unknown-linux-gnu --tests` passed, checking the new Linux code and tests. This is cross-target type checking, not execution: the address-space cap, stacked seccomp filters, real pthread probe, timestamp/copy/archive compatibility and temporary-directory cleanup still require the branch's native Linux workflow before merge. The updated runtime patch has not completed a native release build. No live API calls, infrastructure changes or deployment were performed.
+
+## 2026-10-16: GitHub repository workflow, local checks
+
+The local changes add offline Git to both executor image recipes and their native test builders, plus a Linux regression for initialization, branching, diffing and committing. Codespaces accepts an explicit standalone `*` repository policy while retaining syntax validation, account listing checks and resource limits. Managed instructions explain GitHub REST editing, offline Git, remote builds and authorized CI dispatch; see [GitHub workflow](github-workflow.md).
+
+Both crates passed portable Cargo tests, strict Clippy and formatting checks. Launcher tests used the local pinned runtime and permission for loopback fixtures. All thirteen Python tests passed with the pinned IaC SDK. Linux cross-target type checking passed; native Linux execution of the Git regression is pending. No Linux isolation result is inferred from macOS tests.
+
+Railway service inspection showed a successful deployment, the existing persistent `/data` volume and the names `GITHUB_TOKEN` and `HEIMDALL_CODESPACE_REPOS`; presence does not establish token validity or permissions. No variable values or private keys were read. No repository mutations, Railway variable changes or deployment were performed. Access to the requested initial repository remains unverified. These changes are based on the audit remediation branch and require those fixes as well.
+
+## 2026-10-16: failed native run diagnosis
+
+[Run 38843995178](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/38843995178) failed in the support-binaries executor test: `cp -p` reported Operation not permitted at the compatibility assertion. The runtime-binary compile job succeeded; downstream validation was skipped and the parallel launcher build was canceled.
+
+A disposable native ARM Debian Bookworm trace showed `cp -p` reading POSIX ACL metadata with fgetxattr and writing it with fsetxattr. Injecting EPERM for fgetxattr reproduced the exact error and exit 1; denying optional fadvise64/copy_file_range still allowed copying. The executor filter now admits only the two descriptor-based ACL calls, subject to normal kernel UID/DAC checks. The Linux regression additionally verifies nonempty copied content, mode and timestamps. No networking or process-control grant was added.
+
+This is syscall diagnosis, not execution of the production x86_64 filter. Cross-target type checking passes; the updated native suite remains pending. No new Actions run was dispatched, as requested.
+
+## 2026-10-16: archive creation follow-up
+
+[Run 38848634945](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/38848634945) passed the strengthened copy assertions, then failed in archive creation with `tar: compat.tar: Cannot open: Operation not permitted`. The earlier ACL correction therefore resolved the copy failure; this run does not establish later Git or isolation assertions.
+
+Static inspection of Debian Bookworm x86_64 tar showed its imported `creat` symbol; the matching libc implementation issues syscall 85 (creat). This syscall was missing from the executor allowlist even though open/openat creation was already allowed. The fix admits creat with ordinary UID/DAC enforcement. Native regression assertions now identify copy, archive creation and extraction separately, remove the original before extraction and verify extracted content. Production x86_64 execution remains pending; no new Actions run was dispatched.
+
+## 2026-10-16: PR #11 review corrections
+
+Native [run 38849345937](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/38849345937) completed successfully for the pre-review-fix head b600c4c, including native contracts and packaging. This establishes the earlier copy/archive/Git Linux checks; it does not validate subsequent review changes or a deployment.
+
+Both review findings were confirmed. Compact mode's 6,000-character file cutoff omitted the detailed GitHub guide; the primary runtime now explicitly uses full context, whose native per-file budget is 20,000 characters. A contract in the existing native inventory suite reads the production guide and rendered launcher config, applies the effective compact/system-prompt settings to the pinned prompt builder and asserts the complete guide survives. It passed locally against the pinned runtime. No host reader or new skill is granted; the larger prompt has additional context cost.
+
+Truncated Codespaces output could retain an incomplete token. Output redaction now removes trailing token prefixes at truncated boundaries before returning diagnostics, while retaining complete-token replacement. Regressions cover stdout/stderr, 4 KiB read boundaries, the capture limit, a fully retained token at the limit and a token with overlapping start/end characters. Both crates' portable tests, strict Clippy, formatting, all thirteen Python tests with the pinned IaC SDK, actionlint and diff checks passed. Updated native Linux execution and post-release prompt acceptance remain pending. No Actions run or deployment was dispatched for these corrections.
+
+### Follow-up: overlapping redaction spans
+
+The follow-up review correctly reproduced a flaw in bb8506d: a fully captured token followed by `h` could make prefix trimming delete its final `g`, leaving a near-complete token unmatched. Redaction now finds every full-token span and the longest truncated suffix-prefix span in the original bytes, merges overlapping spans, then renders replacements. It bounds the returned UTF-8 text to the stream limit. Regressions assert exact redacted output for the reviewer's synthetic case in both streams and for overlapping full matches. All three redaction tests, both portable Cargo suites, strict Clippy, formatting and thirteen Python tests passed. Native execution of this revision remains pending; no workflow was started.

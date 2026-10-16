@@ -12,22 +12,22 @@ model = "gpt-6.1-sol"
 wire_api = "responses"
 requires_openai_auth = true
 
-[providers.transcription.deepgram.voice]
-model = "nova-3"
-
 [providers.models.openrouter.free]
 model = "openrouter/free"
 wire_api = "chat_completions"
+
+[[model_routes]]
+hint = "codex"
+model_provider = "openai.codex"
+model = "gpt-6.1-sol"
 
 [[model_routes]]
 hint = "free"
 model_provider = "openrouter.free"
 model = "openrouter/free"
 
-[[model_routes]]
-hint = "codex"
-model_provider = "openai.codex"
-model = "gpt-6.1-sol"
+[providers.transcription.deepgram.voice]
+model = "nova-3"
 
 [agents.primary]
 enabled = true
@@ -195,6 +195,8 @@ sandbox_backend = "none"
 	mode = "forbidden"
 
 [runtime_profiles.primary]
+# Keep the complete managed TOOLS.md guide in the 20,000-character bootstrap budget.
+compact_context = false
 agentic = true
 max_tool_iterations = 24
 max_actions_per_hour = 120
