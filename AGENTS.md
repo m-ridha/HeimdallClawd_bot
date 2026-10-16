@@ -129,3 +129,7 @@ Preserve these accepted behaviors; each has a regression test that must keep pas
 - Prefer explicit synchronization or deadlines over fixed sleeps where practical; where timing is the behavior under test (timeouts, cancellation), keep generous margins and assert the outcome, not the duration.
 - Python tests use `unittest`, patch `subprocess`, `urllib` and the clock, and assert sanitized error messages.
 - Verify with the commands in [Stack, setup, and checks](#stack-setup-and-checks). A broad refactor must preserve test intent and coverage, not merely shorten assertions.
+
+## GitHub repository workflow
+
+The owner wants work on any repository the GitHub token can access. REST operations use the agent's github secret alias. Codespaces retains explicit repository lists and adds standalone `HEIMDALL_CODESPACE_REPOS=*` for GitHub-authorized repositories; actual account listing and syntax checks remain mandatory. Offline Git is included in executor images; it receives no credentials or networking. Managed instructions explain API-first edits/PRs and Codespaces or authorized GitHub Actions for networked tests. Do not diagnose GitHub access from an executor download failure.

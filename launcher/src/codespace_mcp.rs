@@ -35,25 +35,37 @@ fn valid_repo(repo: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-');
     let name_ok = !name.is_empty()
         && name.len() <= 100
-        && !name.starts_with('.')
+        && name != "."
+        && name != ".."
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-._".contains(&b));
     owner_ok && name_ok
 }
-/// Parses `HEIMDALL_CODESPACE_REPOS`: comma-separated `owner/name` entries, lower-cased.
+/// Parses explicit repositories or standalone `*` (GitHub-authorized repositories).
 pub fn parse_repos(value: &str) -> Result<Vec<String>, &'static str> {
+    if value.trim() == "*" {
+        return Ok(vec!["*".into()]);
+    }
     let mut repos = Vec::new();
     for entry in value.split(',') {
         let repo = entry.trim().to_ascii_lowercase();
         if !valid_repo(&repo) {
-            return Err("Invalid HEIMDALL_CODESPACE_REPOS; use comma-separated owner/name entries");
+            return Err(
+                "Invalid HEIMDALL_CODESPACE_REPOS; use comma-separated owner/name entries or standalone *",
+            );
         }
         if !repos.contains(&repo) {
             repos.push(repo);
         }
     }
     Ok(repos)
+}
+fn repo_allowed(repos: &[String], repo: &str) -> bool {
+    valid_repo(repo)
+        && repos
+            .iter()
+            .any(|allowed| allowed == "*" || allowed == &repo.to_ascii_lowercase())
 }
 fn repo_of(listing: &str, name: &str) -> Option<String> {
     let value: Value = serde_json::from_str(listing).ok()?;
@@ -77,10 +89,10 @@ fn tools() -> Value {
     json!([
         {"name":"status","description":"Read local Codespaces configuration: token presence/valid format, allowed repositories, CLI availability and limits. No GitHub request; does not verify authentication or network reachability.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list","description":"List the GitHub account's codespaces with their repository and state.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-        {"name":"create","description":"Create a small codespace for an allowed sandbox repository (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
-        {"name":"stop","description":"Stop a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"delete","description":"Permanently delete a codespace in an allowed sandbox repository.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
-        {"name":"exec","description":"Run one shell command inside a codespace in an allowed sandbox repository. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
+        {"name":"create","description":"Create a small codespace for a repository admitted by the configured policy (owner/name). Machine size, idle timeout and retention are fixed; at most two codespaces may exist.","inputSchema":{"type":"object","properties":{"repo":{"type":"string","maxLength":140}},"required":["repo"],"additionalProperties":false}},
+        {"name":"stop","description":"Stop a codespace in a repository admitted by the configured policy.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
+        {"name":"delete","description":"Permanently delete a codespace in a repository admitted by the configured policy.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100}},"required":["name"],"additionalProperties":false}},
+        {"name":"exec","description":"Run one shell command inside a codespace in a repository admitted by the configured policy. Each call is a fresh remote shell; a stopped codespace is started automatically. Local deadline 80 seconds; stdout/stderr at most 32 KiB each. Remote work can continue after disconnect. Use an explicit cd for the desired directory.","inputSchema":{"type":"object","properties":{"name":{"type":"string","maxLength":100},"command":{"type":"string","minLength":1,"maxLength":8192}},"required":["name","command"],"additionalProperties":false}}
     ])
 }
 fn shaped(args: &Value, keys: &[&str]) -> bool {
@@ -362,8 +374,8 @@ impl Codespaces {
             deadline,
         )?;
         match repo_of(&listing, name) {
-            Some(repo) if self.repos.contains(&repo) => Ok(()),
-            _ => Err("Codespace is not in an allowed sandbox repository".into()),
+            Some(repo) if repo_allowed(&self.repos, &repo) => Ok(()),
+            _ => Err("Codespace is not in a repository admitted by the configured policy".into()),
         }
     }
     fn call(&self, tool: &str, args: &Value) -> Result<String, String> {
@@ -382,7 +394,7 @@ impl Codespaces {
             ),
             "create" => {
                 let repo = args["repo"].as_str().unwrap_or("").to_ascii_lowercase();
-                if !valid_repo(&repo) || !self.repos.contains(&repo) {
+                if !repo_allowed(&self.repos, &repo) {
                     return Err("Repository is not in the allowed sandbox list".into());
                 }
                 let listing = self.gh(
@@ -454,6 +466,7 @@ fn status(token: Option<&str>, repositories: Option<&str>, cli_available: bool) 
         Some(Err(_)) => ("invalid", Vec::new()),
     };
     json!({"token":token_state,"repository_configuration":repository_state,
+        "repository_policy":if allowed_repositories.iter().any(|repo| repo == "*") { "github_authorized" } else { "explicit_allowlist" },
         "allowed_repositories":allowed_repositories,"cli_available":cli_available,
         "authentication_verified":false,"network_verified":false,
         "limits":{"deadline_seconds":80,"stream_bytes":32768,"max_account_codespaces":2,
@@ -724,5 +737,35 @@ mod remote_output_tests {
                 .unwrap()
                 .contains("assertion failed")
         );
+    }
+}
+
+#[cfg(test)]
+mod repository_policy_tests {
+    use super::*;
+    #[test]
+    fn wildcard_is_explicit_and_does_not_skip_repository_validation() {
+        let policy = parse_repos(" * ").unwrap();
+        assert!(repo_allowed(&policy, "octo/first"));
+        assert!(repo_allowed(&policy, "another/second"));
+        assert!(repo_allowed(&policy, "octo/.github"));
+        for bad in [
+            "*",
+            "../repo",
+            "--repo",
+            "owner/repo/extra",
+            "owner/repo;echo",
+        ] {
+            assert!(!repo_allowed(&policy, bad));
+        }
+        for bad in ["*,octo/repo", "octo/repo,*", "", "**"] {
+            assert!(parse_repos(bad).is_err());
+        }
+        let policy = parse_repos("octo/first").unwrap();
+        assert!(repo_allowed(&policy, "Octo/First"));
+        assert!(!repo_allowed(&policy, "another/second"));
+        let state = status(None, Some("*"), true);
+        assert_eq!(state["repository_policy"], "github_authorized");
+        assert_eq!(state["authentication_verified"], false);
     }
 }

@@ -9,3 +9,5 @@ Startup verifies restrictions, files, commands, descendant cleanup, timeout, out
 `cargo test --locked` on macOS checks portable API/filesystem behavior. The Docker builder runs Linux checks as root; Linux security checks are not counted as passing on macOS. Run `cargo clippy --all-targets -- -D warnings` for lint checks.
 
 Configure the bot with `HEIMDALL_EXECUTOR_URL=http://heimdall-executor.railway.internal:3889` and `HEIMDALL_EXECUTOR_TOKEN` matching the executor token. The bot connects to the authenticated HTTP MCP endpoint `/mcp`, exposing only `bash`, `file_read`, `file_write`, `file_read_base64` and `file_write_base64`. Credentials remain in the control process; helpers receive none. A missing/invalid configuration stops startup. No host execution fallback is configured.
+
+The updated image includes Git for offline init/status/diff/branch/commit operations. Git fetch/clone/push and package downloads remain unavailable in this network-disabled executor; use the agent GitHub API path, Codespaces or authorized CI. Git configuration belongs in the repository or per-command flags because helper HOME is per-job. No token is supplied to workspace Git.

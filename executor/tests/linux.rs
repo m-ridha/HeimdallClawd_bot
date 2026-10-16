@@ -83,6 +83,13 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     assert_eq!(command.content, "command-ok");
     let compatibility = execute("bash", json!({"command":"touch compat.txt && cp -p compat.txt compat-copy.txt && tar -cf compat.tar compat.txt && tar -xf compat.tar && rm compat.txt compat-copy.txt compat.tar"}), t).await;
     assert!(!compatibility.is_error, "{}", compatibility.content);
+    let git = execute(
+        "bash",
+        json!({"command":"mkdir -p git-fixture && cd git-fixture && git init -q && printf 'initial\\n' > example.txt && git add example.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm initial && git checkout -qb feature && printf 'changed\\n' > example.txt && git diff --exit-code -- example.txt >/dev/null; result=$?; test \"$result\" -eq 1 && git add example.txt && git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm change && test \"$(git log --format=%s -1)\" = change && git status --porcelain && cd .. && rm -rf git-fixture && printf git-offline-ready"}),
+        t,
+    ).await;
+    assert!(!git.is_error, "{}", git.content);
+    assert_eq!(git.content, "git-offline-ready");
     let allocation = execute(
         "bash",
         json!({"command":"tail /dev/zero"}),
