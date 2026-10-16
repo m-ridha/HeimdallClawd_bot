@@ -1,25 +1,17 @@
 # Taplo configuration for TOML formatting
-# https://taplo.tamasfe.dev/configuration/
+# https://taplo.tamasfe.dev/configuration/formatter-options.html
 
 [formatting]
 # Align consecutive entries vertically
 align_entries = false
 # Align consecutive comments vertically
 align_comments = true
-# Align consecutive single-line array elements
-align_single_comments = true
 # Use CRLF line endings (overrides line-ending option)
 crlf = false
-# Use implicit array trailing newlines
-implicit_array_newline = false
-# Use implicit table trailing newlines
-implicit_table_newline = false
-# Indentation to use (number of spaces)
-indent_string = "  "
+# Indentation to use
+indent_string = "\t"
 # Add trailing newline to the source
 trailing_newline = true
-# Add trailing whitespace to the source
-trailing_whitespace = false
 
 [[rule]]
 # Keys that should be sorted
