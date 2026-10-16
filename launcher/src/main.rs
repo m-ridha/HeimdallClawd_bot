@@ -56,6 +56,12 @@ fn prepare_identity() -> io::Result<()> {
     {
         return Err(io::Error::last_os_error());
     }
+    drop_runtime_identity()
+}
+#[cfg(target_os = "linux")]
+fn drop_runtime_identity() -> io::Result<()> {
+    // SAFETY: called before starting threads; discard supplementary groups and
+    // irreversibly adopt the image's fixed, unprivileged runtime identity.
     if unsafe { libc::setgroups(0, std::ptr::null()) } != 0
         || unsafe { libc::setgid(1000) } != 0
         || unsafe { libc::setuid(1000) } != 0
@@ -106,6 +112,29 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--codespace-mcp") {
         return heimdall_launcher::codespace_mcp::serve();
     }
+    // Recovery must precede secret reads, identity initialization and all writes.
+    if std::env::args().nth(1).is_none() {
+        let recovery = match std::env::var("HEIMDALL_RECOVERY") {
+            Ok(value) => value,
+            Err(std::env::VarError::NotPresent) => "0".into(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(fail("Invalid HEIMDALL_RECOVERY"));
+            }
+        };
+        if heimdall_launcher::startup::recovery_enabled(Some(&recovery))? {
+            let port: u16 = std::env::var("PORT")
+                .unwrap_or_else(|_| "3888".into())
+                .parse()
+                .map_err(|_| fail("Invalid PORT"))?;
+            if port == 0 {
+                return Err(fail("PORT must be nonzero"));
+            }
+            #[cfg(target_os = "linux")]
+            drop_runtime_identity()?;
+            heimdall_launcher::startup::report_storage("/data");
+            return heimdall_launcher::startup::serve_recovery(port);
+        }
+    }
     let owner =
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
     let allowed = std::env::var("TELEGRAM_ALLOWED_USER_IDS").ok();
@@ -143,6 +172,7 @@ fn main() -> io::Result<()> {
     if port == 0 {
         return Err(fail("PORT must be nonzero"));
     }
+    heimdall_launcher::startup::report_storage("/data");
     prepare_identity()?;
     atomic_write(Path::new(STATE).join("config.toml").as_path(), &config)?;
     let workspace = Path::new(STATE).join("agents/primary/workspace");
@@ -159,14 +189,10 @@ fn main() -> io::Result<()> {
     }
     // Native refresh rejects missing/wrong-provider profiles and unusable tokens.
     // Capture all diagnostics privately: OAuth errors can contain credentials.
-    let validation = runtime(&vars)
-        .args(["auth", "refresh", "--model-provider", "openai-codex"])
-        .output()?;
-    if !validation.status.success() {
-        return Err(fail(
-            "ChatGPT authentication validation failed; complete ZeroClaw device sign-in in the Railway terminal",
-        ));
-    }
+    heimdall_launcher::startup::validate_auth(
+        runtime(&vars).args(["auth", "refresh", "--model-provider", "openai-codex"]),
+        heimdall_launcher::startup::AUTH_TIMEOUT,
+    )?;
     println!(
         "HeimdallClawd: ZeroClaw 0.8.5; {} allowed Telegram user(s); remote workspace MCP; port {port}",
         ids.len()

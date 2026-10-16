@@ -195,3 +195,21 @@ gosu heimdall zeroclaw eval run --suite /usr/share/heimdall/evals --mode replay
 ```
 
 Live mode is not implemented upstream. Supply additional synthetic fixtures to a separate suite directory for broader replay coverage. Do not copy private conversations into the repository or release assets.
+
+
+## Authentication and storage recovery
+
+Normal startup remains fail-closed. Native ChatGPT refresh has a 60-second deadline; failure or timeout stops startup with a sanitized error, without printing OAuth diagnostics. Both services log read-only filesystem capacity at startup. These are snapshots, not ongoing monitoring or quotas. Railway volume alerts depend on the account's available features; none are automatically configured by this repository.
+
+For an agent that cannot start because authentication is missing/revoked or `/data` is full:
+
+1. In the agent service's Railway Variables, temporarily set `HEIMDALL_RECOVERY=1` and deploy that variable change. Only literal `1` enables recovery; absent or `0` selects normal startup, and other values fail validation. Recovery is never entered automatically.
+2. Check for the explicit `HEIMDALL RECOVERY: bot OFFLINE` startup message. `/health` returns HTTP 200 with body `recovery`; this means the maintenance listener is running, **not** that Telegram, authentication or tools work. No ZeroClaw daemon or Telegram polling starts. Other paths return 503. Keep the service private and do not publish releases while recovery is enabled.
+3. Open the Railway dashboard terminal. Run `df -h /data` and `df -i /data` to check capacity and inodes. If needed, inspect top-level sizes locally with `du -x -h -d 1 /data`. Do not paste auth files, environment values or private file listings into chat/logs. Free space before attempting login. Recovery itself skips config/instruction writes and identity-directory initialization, so full persistent storage does not block this listener.
+4. Remove only operator-confirmed disposable artifacts. Preserve `/data/zeroclaw/auth-profiles.json`, `.secret_key`, databases, user workspace files and volume attachments. Do not delete the whole state directory or database sidecar files. The volume is not a backup; arrange and verify backups separately. Prefer investigating growth while free space remains; 80% usage is an advisory point to act, not an enforced quota.
+5. For authentication repair, run the device-login command from the setup section as `heimdall`. Complete sign-in without sharing credentials. Recovery assumes this existing deployment already has the state directory; it does not initialize a fresh installation. If the directory is absent or permissions are broken, repair them through the existing setup procedure before login.
+6. Remove `HEIMDALL_RECOVERY` (or set it to `0`) and redeploy. Confirm normal authentication validation, service health and an actual Telegram reply. Recovery mode has no automatic expiry; leaving it enabled keeps the bot offline. A green Railway deployment alone is insufficient acceptance.
+
+For full executor storage, keep its isolation readiness gate intact. The supervisor remains running but MCP/health are unready when the startup probe fails. Use the executor dashboard terminal to inspect `df -h /data/workspace`, `df -i /data/workspace` and `du -x -h -d 1 /data/workspace`; remove only confirmed disposable files. Clean up before redeploying, then verify startup isolation passes and a synthetic workspace read/write succeeds. Never copy credentials into the executor or enable host tools as a workaround.
+
+These procedures have local process/health tests, but dashboard-terminal availability and recovery after a deliberately full volume still require a disposable Railway environment test. They are not yet live-verified. No production recovery setting is changed by the implementation.

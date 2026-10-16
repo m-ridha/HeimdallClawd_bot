@@ -14,7 +14,7 @@ COPY launcher/Cargo.toml launcher/Cargo.lock ./
 COPY launcher/src ./src
 COPY launcher/tests ./tests
 COPY deploy/bot/config.template.toml deploy/bot/TOOLS.md deploy/bot/IDENTITY.md /deploy/bot/
-RUN cargo test --locked --lib --test config --test skills_mcp && cargo build --release --locked
+RUN cargo test --locked --lib --test config --test skills_mcp --test startup && cargo build --release --locked
 
 FROM scratch AS support-binaries
 COPY --from=launcher-build /launcher/target/release/heimdall-launcher /heimdall-launcher
