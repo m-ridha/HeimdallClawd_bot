@@ -19,7 +19,7 @@ The bot requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, and `HEIMDALL_EXECUT
 
 ## Authentication and state
 
-Subscription credentials live in `/data/zeroclaw`, together with configuration and SQLite sessions. This directory belongs to UID 1000 and is private. A native auth check runs before Telegram polling. Operational logs go to Railway stdout; local trace persistence and tool/prompt payload capture are disabled. There is no automatic API-key fallback.
+Subscription credentials live in `/data/zeroclaw`, together with configuration and SQLite sessions. This directory belongs to UID 1000 and is private. A native auth check runs before Telegram polling. Operational logs go to Railway stdout; local diagnostics rotate at 1 MiB with three archives and three-day archive retention; tool/prompt payload capture remains disabled. There is no automatic API-key fallback.
 
 For an interactive device sign-in, use the bot's Railway dashboard terminal:
 
@@ -162,3 +162,34 @@ Skill failures expose fixed heuristic categories for registry/network, missing s
 ### GitHub Codespaces creation rejected with CS_NET_01
 
 If GitHub reports HTTP 422 with `CS_NET_01` and says creation is blocked from the current network, the CLI diagnostic category is `network_policy`. A 422 without that marker remains unknown rather than being assumed to be a network rejection. Reproducing the same rejection in GitHub's web UI isolates it from the bot implementation. Check VPN/proxy settings and, where appropriate, test a normal alternative connection. If it persists, contact GitHub Support with the error code and time of the failed request; do not include tokens. Railway requests originate from Railway's network, so fixing browser-side connectivity does not establish that bot-side creation works. Do not rotate tokens, change resource limits or repeatedly retry creation as a workaround for this error. GitHub's public documentation does not explain the exact CS_NET_01 decision criteria.
+
+## Heartbeat
+
+The hourly worker runs as the primary agent and delivers only to the configured owner. ZeroClaw creates an empty `HEARTBEAT.md` in `/data/zeroclaw/agents/primary/workspace`. Add explicit task lines there through the Railway dashboard terminal, for example `- [low] Check the assigned inbox and notify me only about actionable new mail`. This is the agent control workspace, not the executor's `/data/workspace`; writing a same-named executor file does not configure heartbeat. Keep credentials out of instructions. Empty or paused tasks do not run. A fallback task can instead use the native `ZEROCLAW_heartbeat__message` variable. Use cron for exact reminder times. Heartbeat work consumes model/search quotas.
+
+## Additional providers and private clients
+
+The template selects Deepgram `nova-3` for voice/audio with automatic language detection, and Cohere `embed-v5.0-fast` for hybrid semantic memory. Add these **secrets to the agent service only**, as raw API keys without an Authorization prefix:
+
+| Railway variable | Value |
+| --- | --- |
+| `ZEROCLAW_providers__transcription__deepgram__voice__api_key` | Your Deepgram API key |
+| `ZEROCLAW_memory__embedding_api_key` | Your Cohere API key |
+
+The template contains no keys; ZeroClaw resolves native environment overrides in memory. Saving runtime configuration must not persist these credentials. Do not add keys to the executor or GitHub variables. The primary agent's transcription alias is `deepgram.voice`; a global transcription key alone does not configure that alias.
+
+Cohere uses `custom:https://api.cohere.ai/compatibility/v1`, which ZeroClaw resolves to `/embeddings`. The [Cohere compatibility API](https://docs.cohere.com/docs/compatibility-api) supports OpenAI-style embedding requests but does not support a dimensions parameter. Therefore configuration uses the model's [documented default of 2,048 dimensions](https://docs.cohere.com/docs/cohere-embed), rather than claiming a reduced vector size. Its 1,024-entry cache limits cached vector storage; it does not cap all memory/database growth. Keep model and dimensions together when changing providers; existing vectors may need reindexing.
+
+Voice audio is sent to Deepgram, and memory/query text is sent to Cohere. Their quotas/billing are separate from ChatGPT Plus and Railway's $5 spending limit. Provider errors are not evidence of a working integration; after deployment, send a short voice message and verify its transcription, then store and recall a synthetic fact with different wording. Check provider usage to confirm embedding requests; keyword recall alone does not prove embeddings worked.
+
+The embedded dashboard and ACP endpoint use the existing gateway on port 3888 with pairing required. No public route is provisioned. Establish an owner-controlled private access path before connecting a browser/editor. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor.
+
+WebAuthn activation needs `ZEROCLAW_webauthn__enabled`, `ZEROCLAW_webauthn__rp_id` and `ZEROCLAW_webauthn__rp_origin` matching the actual HTTPS client origin. Remote nodes need `ZEROCLAW_nodes__auth_token` as a Railway secret and a configured private client before enabling `ZEROCLAW_nodes__enabled`. Leave both inactive until those prerequisites are met.
+
+Run the bundled synthetic harness in the dashboard terminal:
+
+```sh
+gosu heimdall zeroclaw eval run --suite /usr/share/heimdall/evals --mode replay
+```
+
+Live mode is not implemented upstream. Supply additional synthetic fixtures to a separate suite directory for broader replay coverage. Do not copy private conversations into the repository or release assets.
