@@ -1,19 +1,22 @@
-# reference: https://taplo.tamasfe.dev/configuration/formatter-options.html
+# Taplo configuration for TOML formatting
+# https://taplo.tamasfe.dev/configuration/formatter-options.html
+
 [formatting]
-# Indent nested table headers
-indent_tables = true
-
-# Use tab for each indentation level
-indent_string = "\t"
-
-# Avoid extra alignment spaces around =
+# Align consecutive entries vertically
 align_entries = false
-
-# Allow one blank line between blocks
-allowed_blank_lines = 1
-
-# Preserve the original key order
-reorder_keys = false
-
-# End the file with a newline
+# Align consecutive comments vertically
+align_comments = true
+# Use CRLF line endings (overrides line-ending option)
+crlf = false
+# Indentation to use
+indent_string = "\t"
+# Add trailing newline to the source
 trailing_newline = true
+
+[[rule]]
+# Keys that should be sorted
+keys = ["dependencies", "dev-dependencies", "features"]
+
+	[rule.formatting]
+	# Sort array values
+	reorder_arrays = true

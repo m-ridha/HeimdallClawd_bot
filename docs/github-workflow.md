@@ -6,7 +6,7 @@ The GitHub token controls repository/API permissions. The Codespaces repository 
 | --- | --- |
 | Read repository files/history, inspect issues/PRs | `http_request`, `auth_secret="github"`, HTTPS api.github.com |
 | Create branches, file changes, multi-file commits and PRs | GitHub Contents/Git Database/Pulls APIs through the same HTTP tool |
-| Local status/diff/branches/commits | `workspace__bash` with offline Git, included in the updated executor image |
+| Local status/diff/branches/commits | `workspace__bash` with offline Git, Python 3 and jq, included in the updated executor image |
 | Clone/fetch/push, install dependencies, run networked builds | GitHub Codespaces through existing `codespace__` tools, subject to GitHub access/billing/policy |
 | CI build/test without Codespaces | An appropriate repository GitHub Actions workflow through the API, with explicit authorization for its effects |
 
@@ -47,3 +47,5 @@ Respect API/tool response and file limits. A truncated recursive tree is not a c
 An owner-installed `/data/zeroclaw/.ssh/id_ed25519` persists while the same `/data` volume remains attached; redeployment alone does not erase it. The volume is not a backup. The private key must remain private and readable only by the intended runtime user. Registering its public key with GitHub and configuring SSH selection are separate prerequisites for direct SSH Git transport.
 
 Current REST operations authenticate with GITHUB_TOKEN. The Codespaces CLI uses HOME=/data/zeroclaw/codespace, not /data/zeroclaw, so it does not automatically select that key. The executor has neither the agent volume/key nor network access. No private key is copied into it. Adding an SSH key does not fix REST token permissions, API rate limits or Codespaces creation policy failures.
+
+For a Codespace, check `git`, `gh`, `curl`, `jq`, `python3` and `ssh` before choosing commands. This project does not control other repositories' devcontainers or guarantee their installed tools. Configure/install required dependencies in that remote environment for the requested task; installing them in the executor does not enable networking there.

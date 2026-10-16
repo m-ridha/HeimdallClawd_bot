@@ -65,3 +65,5 @@ GitHub repository edits do not depend on Codespaces. See the [repository workflo
 Operator-only authentication/storage recovery is documented in [operations](operations.md#authentication-and-storage-recovery). Recovery deliberately stops the assistant while providing a labeled health listener; it grants no additional agent tools.
 
 Additional Telegram accounts are fully trusted operators, with shared configured credentialed capabilities as well as session/workspace visibility; see the [privilege model](operations.md#trusted-telegram-users).
+
+The updated executor image includes offline Git, Python 3 (standard library) and jq. Third-party Python dependencies and pip are not bundled. These tools retain the existing memory, timeout, output and syscall limits and have no network or credentials. Codespaces supplies networked development; its terminal toolkit depends on the repository devcontainer and should be checked before use. See the [GitHub workflow](github-workflow.md).

@@ -1,5 +1,5 @@
 FROM rust:1.99-slim-bookworm AS builder
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
@@ -18,7 +18,7 @@ COPY contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
 ENV HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh
 RUN cargo test --locked -p zeroclaw-tools --test heimdall_mcp && touch /contract-passed
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 64173 --user-group --no-create-home executor
 COPY --from=builder /build/target/release/heimdall-executor /usr/local/bin/heimdall-executor
 COPY --from=contract /contract-passed /usr/local/share/heimdall-contract-passed
