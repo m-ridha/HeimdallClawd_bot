@@ -116,3 +116,11 @@ The local changes add offline Git to both executor image recipes and their nativ
 Both crates passed portable Cargo tests, strict Clippy and formatting checks. Launcher tests used the local pinned runtime and permission for loopback fixtures. All thirteen Python tests passed with the pinned IaC SDK. Linux cross-target type checking passed; native Linux execution of the Git regression is pending. No Linux isolation result is inferred from macOS tests.
 
 Railway service inspection showed a successful deployment, the existing persistent `/data` volume and the names `GITHUB_TOKEN` and `HEIMDALL_CODESPACE_REPOS`; presence does not establish token validity or permissions. No variable values or private keys were read. No repository mutations, Railway variable changes or deployment were performed. Access to the requested initial repository remains unverified. These changes are based on the audit remediation branch and require those fixes as well.
+
+## 2026-10-16: failed native run diagnosis
+
+[Run 38843995178](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/38843995178) failed in the support-binaries executor test: `cp -p` reported Operation not permitted at the compatibility assertion. The runtime-binary compile job succeeded; downstream validation was skipped and the parallel launcher build was canceled.
+
+A disposable native ARM Debian Bookworm trace showed `cp -p` reading POSIX ACL metadata with fgetxattr and writing it with fsetxattr. Injecting EPERM for fgetxattr reproduced the exact error and exit 1; denying optional fadvise64/copy_file_range still allowed copying. The executor filter now admits only the two descriptor-based ACL calls, subject to normal kernel UID/DAC checks. The Linux regression additionally verifies nonempty copied content, mode and timestamps. No networking or process-control grant was added.
+
+This is syscall diagnosis, not execution of the production x86_64 filter. Cross-target type checking passes; the updated native suite remains pending. No new Actions run was dispatched, as requested.

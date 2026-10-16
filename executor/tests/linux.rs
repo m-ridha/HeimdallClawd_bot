@@ -81,7 +81,7 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     let command = execute("bash", json!({"command":"printf 'command-ok'"}), t).await;
     assert!(!command.is_error, "{}", command.content);
     assert_eq!(command.content, "command-ok");
-    let compatibility = execute("bash", json!({"command":"touch compat.txt && cp -p compat.txt compat-copy.txt && tar -cf compat.tar compat.txt && tar -xf compat.tar && rm compat.txt compat-copy.txt compat.tar"}), t).await;
+    let compatibility = execute("bash", json!({"command":"printf compatibility > compat.txt && chmod 640 compat.txt && touch -t 202001020304 compat.txt && cp -p compat.txt compat-copy.txt && test \"$(cat compat-copy.txt)\" = compatibility && test \"$(stat -c %a compat-copy.txt)\" = 640 && test \"$(stat -c %Y compat.txt)\" = \"$(stat -c %Y compat-copy.txt)\" && tar -cf compat.tar compat.txt && tar -xf compat.tar && rm compat.txt compat-copy.txt compat.tar"}), t).await;
     assert!(!compatibility.is_error, "{}", compatibility.content);
     let git = execute(
         "bash",

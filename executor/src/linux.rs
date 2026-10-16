@@ -49,6 +49,10 @@ pub fn restrict() -> io::Result<()> {
         libc::SYS_statfs,
         libc::SYS_fstatfs,
         libc::SYS_flock,
+        // cp -p reads/writes POSIX ACLs through file descriptors, even for files
+        // without an ACL. Kernel UID/DAC checks still govern metadata changes.
+        libc::SYS_fgetxattr,
+        libc::SYS_fsetxattr,
         // Never executed: a stacked filter below returns ENOSYS for glibc fallback.
         libc::SYS_clone3,
         libc::SYS_rt_sigaction,
