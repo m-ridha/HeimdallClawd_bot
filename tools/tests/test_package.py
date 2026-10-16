@@ -34,6 +34,7 @@ class PackageTests(unittest.TestCase):
             for dockerfile in [output / 'Dockerfile', output / 'executor/Dockerfile']:
                 self.assertNotIn('cargo ', dockerfile.read_text())
                 self.assertIn('sha256sum -c', dockerfile.read_text())
+            self.assertEqual(lock['typed_transcription_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/typed-transcription.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['http_secret_origins_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['features'], 'agent-runtime,channel-telegram,gateway,schema-export,plugins-wasm-cranelift,embedded-web,webauthn,channel-acp-server')
             self.assertIn('--features ' + lock['features'] + ' --bin zeroclaw', (ROOT / 'deploy/bot/Dockerfile').read_text())

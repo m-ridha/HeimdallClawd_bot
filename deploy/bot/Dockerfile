@@ -1,5 +1,5 @@
 FROM rust:1.99-slim-bookworm AS executor-build
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/*
 WORKDIR /executor
 COPY executor/Cargo.toml executor/Cargo.lock ./
 COPY executor/src ./src
@@ -32,7 +32,8 @@ COPY deploy/bot/patches/private-telegram.patch /tmp/private-telegram.patch
 COPY deploy/bot/patches/remote-skills.patch /tmp/remote-skills.patch
 COPY deploy/bot/patches/wasm-wit.patch /tmp/wasm-wit.patch
 COPY deploy/bot/patches/http-secret-origins.patch /tmp/http-secret-origins.patch
-RUN patch -p1 < /tmp/http-secret-origins.patch && patch -p1 < /tmp/private-telegram.patch && patch -p1 < /tmp/remote-skills.patch && patch -p1 < /tmp/wasm-wit.patch
+COPY deploy/bot/patches/typed-transcription.patch /tmp/typed-transcription.patch
+RUN patch -p1 < /tmp/http-secret-origins.patch && patch -p1 < /tmp/private-telegram.patch && patch -p1 < /tmp/typed-transcription.patch && patch -p1 < /tmp/remote-skills.patch && patch -p1 < /tmp/wasm-wit.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:24-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web
@@ -55,6 +56,7 @@ RUN cargo test --locked
 FROM runtime-source AS native-test-compile
 COPY executor/contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
 COPY deploy/tests/remote-skills.rs crates/zeroclaw-runtime/tests/heimdall_remote_skills.rs
+COPY deploy/tests/telegram-transcription.rs crates/zeroclaw-channels/tests/heimdall_transcription.rs
 COPY deploy/tests/logging-privacy.rs crates/zeroclaw-channels/tests/heimdall_logging.rs
 COPY deploy/tests/tool-inventory.rs crates/zeroclaw-runtime/tests/heimdall_inventory.rs
 COPY deploy/tests/http-secret-origins.rs crates/zeroclaw-tools/tests/heimdall_http_origins.rs
@@ -64,7 +66,7 @@ COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secret
 # Compile contracts before copying release binaries/configuration: those inputs are
 # read at test runtime, and must not invalidate the expensive test compiler layer.
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall --no-run \
-    && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --no-run \
+    && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run \
     && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets --no-run \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills --test heimdall_inventory --no-run
@@ -80,7 +82,7 @@ COPY deploy/bot/TOOLS.md /tmp/heimdall-TOOLS.md
 COPY deploy/bot/evals /tmp/heimdall-evals
 ENV HEIMDALL_TEST_DAEMON_VERBOSE=0 HEIMDALL_TEST_TOOLS=/tmp/heimdall-TOOLS.md HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
-    && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging \
+    && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription \
     && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_remote_skills --test heimdall_inventory \

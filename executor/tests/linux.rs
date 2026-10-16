@@ -109,6 +109,13 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     ).await;
     assert!(!git.is_error, "{}", git.content);
     assert_eq!(git.content, "git-offline-ready");
+    let scripting = execute(
+        "bash",
+        json!({"command": r#"python3 -B -c 'import base64,json,pathlib,subprocess,tempfile; p=pathlib.Path("python-fixture.json"); p.write_text(json.dumps({"value":base64.b64decode("cmVhZHk=").decode()})); assert subprocess.check_output(["jq","-r",".value",str(p)],text=True).strip()=="ready"; p.unlink(); f=tempfile.TemporaryFile(); f.write(b"ok"); f.close(); print("python-jq-ready")'"#}),
+        t,
+    ).await;
+    assert!(!scripting.is_error, "{}", scripting.content);
+    assert_eq!(scripting.content, "python-jq-ready\n");
     let allocation = execute(
         "bash",
         json!({"command":"tail /dev/zero"}),

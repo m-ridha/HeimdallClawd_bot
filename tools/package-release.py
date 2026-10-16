@@ -53,6 +53,7 @@ provenance = {
     'http_secret_origins_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
     'wasm_wit_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/wasm-wit.patch').read_bytes()).hexdigest(),
     'remote_skills_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/remote-skills.patch').read_bytes()).hexdigest(),
+    'typed_transcription_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/typed-transcription.patch').read_bytes()).hexdigest(),
     'private_telegram_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest(),
 }
 (out / 'deploy/bot/artifact.lock.json').write_text(json.dumps(provenance, indent=2) + '\n')
