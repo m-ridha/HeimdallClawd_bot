@@ -51,6 +51,7 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     let malicious = Path::new("/data/workspace/.tmp");
     let _ = std::fs::remove_file(malicious);
     std::os::unix::fs::symlink("/run/heimdall-control", malicious).unwrap();
+    assert!(include_str!("../entrypoint.sh").contains("exec /usr/local/bin/heimdall-executor"));
     let startup =
         include_str!("../entrypoint.sh").replace("exec /usr/local/bin/heimdall-executor", "exit 0");
     assert!(
@@ -80,6 +81,30 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     let command = execute("bash", json!({"command":"printf 'command-ok'"}), t).await;
     assert!(!command.is_error, "{}", command.content);
     assert_eq!(command.content, "command-ok");
+    let compatibility = execute("bash", json!({"command":"touch compat.txt && cp -p compat.txt compat-copy.txt && tar -cf compat.tar compat.txt && tar -xf compat.tar && rm compat.txt compat-copy.txt compat.tar"}), t).await;
+    assert!(!compatibility.is_error, "{}", compatibility.content);
+    let allocation = execute(
+        "bash",
+        json!({"command":"tail /dev/zero"}),
+        Duration::from_secs(10),
+    )
+    .await;
+    assert!(allocation.is_error);
+    assert!(
+        !allocation.content.contains("Execution timed out"),
+        "allocation cap did not stop job"
+    );
+    let temporary = execute(
+        "bash",
+        json!({"command":"printf '%s' \"$TMPDIR\"; touch \"$TMPDIR/probe\""}),
+        t,
+    )
+    .await;
+    assert!(!temporary.is_error, "{}", temporary.content);
+    assert!(
+        !Path::new(&temporary.content).exists(),
+        "per-job temp directory survived"
+    );
     let combined = execute(
         "bash",
         json!({"command":"rm -- note.txt; printf command-probe"}),

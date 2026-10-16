@@ -16,7 +16,7 @@ Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/op
 - WASM plugin and hook frameworks are enabled; no plugin is bundled.
 - Native host shell, filesystem, git, shell-only scheduling and delegation tools stay blocked.
 
-Release deployment is automatic only when a stable GitHub Release is published. Heartbeat and headless browser automation are not configured.
+Release deployment is automatic only when a stable GitHub Release is published. Owner-directed heartbeat is enabled; headless browser automation is not configured.
 
 ## Architecture
 

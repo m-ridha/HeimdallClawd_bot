@@ -1,6 +1,6 @@
 # Verification
 
-Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance are recorded in `deploy/bot/artifact.lock.json`.
+Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance were recorded in the historical artifact provenance; current hashes/provenance are generated into each release package.
 
 ## Passed
 
@@ -102,3 +102,9 @@ The original capability revision b30cb1f passed native Linux [run 38756450119](h
 The new contract passed locally against the pinned runtime with `cargo test --locked -p zeroclaw-runtime --no-default-features --test heimdall_inventory` and `HEIMDALL_TEST_SKILLS_MCP` pointing to the built launcher. Both crates' portable tests and strict Clippy, eleven Python tests with the pinned SDK, actionlint, formatting and diff checks passed. Native Linux verification of this follow-up is pending. Updated instructions distinguish stored-session appends from actual Telegram notification/turn execution, and docs distinguish 55 policy grants from exposed inventory.
 
 Release acceptance remains outstanding: deploy the new artifact, restart, inspect the actual primary Telegram inventory for all fourteen added schemas, and exercise synthetic memory/graph/image/voice checks. Deepgram/Cohere keys must be configured, and Cohere request usage must be observed; successful keyword recall alone is insufficient. Check whether existing memory needs an explicit reindex. No live provider calls or production deployment were performed during this review follow-up.
+
+## 2026-10-16: supplied audit, local remediation
+
+See [assessment and remaining risks](audit-review.md). Named-secret origin enforcement and private-address rejection passed two integration checks against the pinned ZeroClaw tools crate. The new patch applies cleanly to an unmodified copy of its target file. Launcher and executor portable tests, strict Clippy for both crates, thirteen Python tests with the pinned SDK, formatting, actionlint and diff checks passed. An existing route-order-dependent test was corrected to assert the Codex route by hint and preserve the free route's model.
+
+`cargo check --locked --manifest-path executor/Cargo.toml --target x86_64-unknown-linux-gnu --tests` passed, checking the new Linux code and tests. This is cross-target type checking, not execution: the address-space cap, stacked seccomp filters, real pthread probe, timestamp/copy/archive compatibility and temporary-directory cleanup still require the branch's native Linux workflow before merge. The updated runtime patch has not completed a native release build. No live API calls, infrastructure changes or deployment were performed.

@@ -57,7 +57,7 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 | `launcher/src/skills_mcp.rs`, `transfer_mcp.rs` | Narrow stdio MCP servers: registry skill install/list; bounded Telegram file transfer |
 | `executor/src/` | `main` (helper dispatch and startup probe), `server` (axum routes, auth, admission), `mcp` (JSON-RPC adapter), `process` (supervisor), `linux` (seccomp, rlimits, probe), `files` (fd-relative workspace I/O), `protocol` (jobs, limits) |
 | `executor/tests/`, `executor/contract/` | API, filesystem, MCP and Linux isolation tests; real ZeroClaw MCP client contract |
-| `deploy/bot/` | `Dockerfile` (source build and validation), `Dockerfile.artifact` (prebuilt packaging), `config.template.toml`, `TOOLS.md`, `runtime.lock.json`, `runtime.sha256`, `artifact.lock.json`, `patches/` |
+| `deploy/bot/` | `Dockerfile` (source build and validation), `Dockerfile.artifact` (prebuilt packaging), `config.template.toml`, `TOOLS.md`, `runtime.lock.json`, `patches/` and generated release provenance |
 | `deploy/tests/`, `deploy/executor/` | Tests installed into the pinned ZeroClaw crates at build time; executor artifact Dockerfile |
 | `.railway/` | `railway.py` IaC, requirements, README |
 | `.github/workflows/` | `build.yml` (compile, validate, package) and `release.yml` (deploy) |
@@ -76,7 +76,7 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 
 Preserve these accepted behaviors; each has a regression test that must keep passing.
 
-- Executor helpers run as UID/GID 64173 with a cleared environment, `PATH=/usr/bin:/bin`, `no_new_privs`, resource limits and the x86_64 seccomp allowlist. Do not add a syscall without a concrete need, a comment in the PR explaining it, and a Linux test. `clone3` and namespace-creating `clone` flags stay denied; networking, `ptrace`, `setsid` and `setpgid` stay denied.
+- Executor helpers run as UID/GID 64173 with a cleared environment, `PATH=/usr/bin:/bin`, `no_new_privs`, resource limits and the x86_64 seccomp allowlist. Do not add a syscall without a concrete need, a comment in the PR explaining it, and a Linux test. `clone3` stays denied with ENOSYS for glibc fallback; namespace-creating `clone` flags stay denied; networking, `ptrace`, `setsid` and `setpgid` stay denied.
 - Commands time out at 30 seconds, output and file content are bounded to 64 KiB (48 KiB for binary transfer), at most two jobs run concurrently, and the whole process group is killed on completion, timeout, cancellation and truncation. The executor is a subreaper; orphan descendants must not survive.
 - Workspace paths are relative, without traversal, and resolved with `openat` and `O_NOFOLLOW`; symlinks are never followed and writes are atomic replacements. Root startup must never `chown` or initialize anything inside the user-controlled workspace (`entrypoint.sh` and the `/data/workspace/.tmp` symlink test).
 - Executor health stays unready, and MCP returns 503, unless the startup isolation probe passes. Bearer comparison stays constant time. Request bodies stay bounded and IDs stay bounded and typed.

@@ -1,4 +1,6 @@
 use std::io;
+/// Two admitted helpers leave room for the supervisor within the 250 MB container.
+pub const HELPER_ADDRESS_SPACE: u64 = 96 * 1024 * 1024;
 #[cfg(target_os = "linux")]
 pub fn restrict() -> io::Result<()> {
     use seccompiler::{
@@ -15,6 +17,7 @@ pub fn restrict() -> io::Result<()> {
     }
     for (resource, value) in [
         (libc::RLIMIT_CPU, 30),
+        (libc::RLIMIT_AS, HELPER_ADDRESS_SPACE),
         (libc::RLIMIT_NOFILE, 64),
         (libc::RLIMIT_NPROC, 64),
         (libc::RLIMIT_FSIZE, 32 * 1024 * 1024),
@@ -40,6 +43,14 @@ pub fn restrict() -> io::Result<()> {
         libc::SYS_munmap,
         libc::SYS_brk,
         libc::SYS_madvise,
+        // Ordinary allocators, timestamp-preserving copy/archive tools and file locks.
+        libc::SYS_mremap,
+        libc::SYS_utimensat,
+        libc::SYS_statfs,
+        libc::SYS_fstatfs,
+        libc::SYS_flock,
+        // Never executed: a stacked filter below returns ENOSYS for glibc fallback.
+        libc::SYS_clone3,
         libc::SYS_rt_sigaction,
         libc::SYS_rt_sigprocmask,
         libc::SYS_rt_sigreturn,
@@ -159,6 +170,19 @@ pub fn restrict() -> io::Result<()> {
     )
     .map_err(io::Error::other)?;
     let program: BpfProgram = filter.try_into().map_err(io::Error::other)?;
+    // clone3 remains unavailable, but glibc pthread/posix_spawn can fall back to
+    // clone, whose namespace/parent-changing flags remain denied above.
+    let fallback = SeccompFilter::new(
+        BTreeMap::from([(libc::SYS_clone3, vec![])]),
+        SeccompAction::Allow,
+        SeccompAction::Errno(libc::ENOSYS as u32),
+        TargetArch::x86_64,
+    )
+    .map_err(io::Error::other)?;
+    let fallback: BpfProgram = fallback.try_into().map_err(io::Error::other)?;
+    // Install the fallback first: the final allowlist denies seccomp/prctl,
+    // so installing another filter after it would fail. ERRNO outranks ALLOW.
+    seccompiler::apply_filter(&fallback).map_err(io::Error::other)?;
     seccompiler::apply_filter(&program).map_err(io::Error::other)
 }
 #[cfg(not(target_os = "linux"))]
@@ -168,6 +192,15 @@ pub fn restrict() -> io::Result<()> {
 
 #[cfg(target_os = "linux")]
 pub fn probe() -> io::Result<()> {
+    // A real pthread exercises glibc clone3 -> clone fallback under the filter.
+    let thread = std::thread::Builder::new().spawn(|| 42)?;
+    if thread
+        .join()
+        .map_err(|_| io::Error::other("Thread probe panicked"))?
+        != 42
+    {
+        return Err(io::Error::other("Thread probe failed"));
+    }
     if std::env::var_os("EXECUTOR_TOKEN").is_some() {
         return Err(io::Error::other("Control secret inherited"));
     }
@@ -183,6 +216,12 @@ pub fn probe() -> io::Result<()> {
         if result != -1 || io::Error::last_os_error().raw_os_error() != Some(libc::EPERM) {
             return Err(io::Error::other("Forbidden syscall was not denied"));
         }
+    }
+    // SAFETY: null clone3 arguments cannot create a process; filter must return ENOSYS.
+    if unsafe { libc::syscall(libc::SYS_clone3, 0, 0) } != -1
+        || io::Error::last_os_error().raw_os_error() != Some(libc::ENOSYS)
+    {
+        return Err(io::Error::other("clone3 fallback policy failed"));
     }
     let parent = unsafe { libc::getppid() };
     if std::fs::read(format!("/proc/{parent}/environ")).is_ok()

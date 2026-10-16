@@ -129,7 +129,11 @@ fn handle(
     };
     Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
 }
-fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
+struct Captured {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+fn capture(mut reader: impl Read) -> Result<Captured, &'static str> {
     let mut saved = Vec::new();
     let mut block = [0; 4096];
     let mut overflowed = false;
@@ -144,10 +148,20 @@ fn capture(mut reader: impl Read) -> Result<Vec<u8>, &'static str> {
         overflowed |= keep < size;
         saved.extend_from_slice(&block[..keep]);
     }
-    if overflowed {
-        return Err("GitHub output exceeded 32 KiB; run a narrower command or list to check state");
-    }
-    Ok(saved)
+    Ok(Captured {
+        bytes: saved,
+        truncated: overflowed,
+    })
+}
+// Command output is data, never instructions. Nonzero gh/SSH status does not
+// establish whether a remote program ran, so report CLI status without guessing.
+fn remote_report(code: Option<i32>, out: &Captured, err: &Captured, token: &str) -> String {
+    json!({"cli_exit_code":code, "succeeded":code == Some(0),
+        "output_is_untrusted":true,
+        "stdout":String::from_utf8_lossy(&out.bytes).replace(token,"[redacted]"),
+        "stderr":String::from_utf8_lossy(&err.bytes).replace(token,"[redacted]"),
+        "stdout_truncated":out.truncated,"stderr_truncated":err.truncated})
+    .to_string()
 }
 /// Classifies bounded CLI stderr without returning any of its text. Patterns are
 /// hints, not authoritative causes: remote commands can produce similar messages.
@@ -301,8 +315,8 @@ impl Codespaces {
         unsafe {
             libc::kill(-group, libc::SIGKILL);
         }
-        // CLI diagnostics may contain remote user content or credentials. Never return
-        // them on failure; successful output redacts the local GitHub credential.
+        // Capture is bounded. Control-plane failures retain static diagnostics; SSH
+        // results below expose untrusted command data with the local token redacted.
         let diagnostics = stderr
             .join()
             .map_err(|_| "GitHub diagnostic capture failed".to_string())?
@@ -311,11 +325,25 @@ impl Codespaces {
             .join()
             .map_err(|_| "GitHub output capture failed".to_string())?
             .map_err(str::to_owned)?;
+        if args.get(1) == Some(&"ssh") {
+            return match status {
+                Some(status) => Ok(remote_report(
+                    status.code(),
+                    &output,
+                    &diagnostics,
+                    &self.token,
+                )),
+                None => Err("GitHub command timed out; run list to check the current state".into()),
+            };
+        }
+        if output.truncated || diagnostics.truncated {
+            return Err("GitHub output exceeded 32 KiB; run a narrower query".into());
+        }
         match status {
             Some(status) if status.success() => {
-                Ok(String::from_utf8_lossy(&output).replace(&self.token, "[redacted]"))
+                Ok(String::from_utf8_lossy(&output.bytes).replace(&self.token, "[redacted]"))
             }
-            Some(status) => Err(command_failure(status.code(), &diagnostics)),
+            Some(status) => Err(command_failure(status.code(), &diagnostics.bytes)),
             None => Err("GitHub command timed out; run list to check the current state".into()),
         }
     }
@@ -666,7 +694,35 @@ mod tests {
         assert!(!text.contains("dummy-private-fixture"));
         assert!(!text.contains("dummy-executor-fixture"));
         assert!(text.contains("GH_TOKEN=ghp_fixtureTokenValue0123456789"));
-        assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().len(), LIMIT);
-        assert!(capture(&vec![b'x'; LIMIT + 100][..]).is_err());
+        assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().bytes.len(), LIMIT);
+        assert!(capture(&vec![b'x'; LIMIT + 100][..]).unwrap().truncated);
+    }
+}
+
+#[cfg(test)]
+mod remote_output_tests {
+    use super::*;
+    #[test]
+    fn failed_remote_commands_keep_bounded_diagnostics_and_redact_local_token() {
+        let out = Captured {
+            bytes: b"test failed fixture-token".to_vec(),
+            truncated: false,
+        };
+        let err = Captured {
+            bytes: b"assertion failed fixture-token".to_vec(),
+            truncated: true,
+        };
+        let text = remote_report(Some(1), &out, &err, "fixture-token");
+        assert!(!text.contains("fixture-token"));
+        let report: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(report["cli_exit_code"], 1);
+        assert_eq!(report["succeeded"], false);
+        assert_eq!(report["stderr_truncated"], true);
+        assert!(
+            report["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("assertion failed")
+        );
     }
 }
