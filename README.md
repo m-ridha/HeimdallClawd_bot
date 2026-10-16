@@ -6,7 +6,7 @@ Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/op
 
 ## Features
 
-- Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Permitted users share one tool workspace.
+- Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Additional permitted users are fully trusted operators: they share the workspace, accessible memory/sessions and configured credentialed tools. See the [privilege model](docs/operations.md#trusted-telegram-users) before adding anyone.
 - ChatGPT subscription sign-in with `gpt-6.1-sol` by default (`HEIMDALL_MODEL`), plus an optional OpenRouter free route. Switch in Telegram with `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
 - An isolated workspace executor reached over authenticated private MCP: `bash`, `file_read`, `file_write` and 48 KiB binary `file_read_base64`/`file_write_base64`. Helpers run as a separate UID with seccomp restrictions, no networking, a 30-second timeout and 64 KiB output/content bounds.
 - Tavily web search, bounded web fetch and HTTP requests, and a Lynx text browser. Tavily is search, not an interactive browser.

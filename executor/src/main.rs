@@ -98,6 +98,7 @@ fn main() -> io::Result<()> {
                     "Executor authentication secret is too short",
                 ));
             }
+            heimdall_executor::linux::report_workspace_storage();
             let verified = process::verify_platform().await;
             let ready = verified.is_ok();
             println!(

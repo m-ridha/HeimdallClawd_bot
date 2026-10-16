@@ -54,6 +54,24 @@ async fn heimdall_native_mcp_client_contract() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    // Fresh real clients both start tools/call at ID 3. Each command waits
+    // for the other to start, proving overlap rather than sequential success.
+    let first = McpServer::connect(cfg(&"x".repeat(32))).await.unwrap();
+    let second = McpServer::connect(cfg(&"x".repeat(32))).await.unwrap();
+    let a = format!(".client-concurrent-a-{suffix}");
+    let b = format!(".client-concurrent-b-{suffix}");
+    let (left, right) = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        tokio::join!(
+            first.call_tool("bash", json!({"command":format!("touch {a}; while ! test -f {b}; do sleep 0.05; done; printf first")})),
+            second.call_tool("bash", json!({"command":format!("touch {b}; while ! test -f {a}; do sleep 0.05; done; printf second")}))
+        )
+    }).await.unwrap();
+    assert_eq!(left.unwrap()["content"][0]["text"], "first");
+    assert_eq!(right.unwrap()["content"][0]["text"], "second");
+    first
+        .call_tool("bash", json!({"command":format!("rm -- {a} {b}")}))
+        .await
+        .unwrap();
     let path = format!(".client-contract-{suffix}");
     let write = server
         .call_tool(
@@ -106,4 +124,44 @@ async fn heimdall_native_mcp_client_contract() {
     assert_eq!(cleanup["content"][0]["text"], "cleanup-ok");
     child.kill().await.unwrap();
     let _ = child.wait().await;
+}
+
+#[tokio::test]
+async fn heimdall_client_echoes_session_header_on_calls() {
+    use wiremock::matchers::{body_partial_json, header, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let endpoint = MockServer::start().await;
+    let session = "00000000-0000-4000-8000-000000000001";
+    Mock::given(method("POST"))
+        .and(body_partial_json(json!({"method":"initialize"})))
+        .respond_with(ResponseTemplate::new(200).insert_header("Mcp-Session-Id", session)
+            .set_body_json(json!({"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}}})))
+        .expect(1).mount(&endpoint).await;
+    Mock::given(body_partial_json(
+        json!({"method":"notifications/initialized"}),
+    ))
+    .and(header("Mcp-Session-Id", session))
+    .respond_with(ResponseTemplate::new(202))
+    .expect(1)
+    .mount(&endpoint)
+    .await;
+    Mock::given(body_partial_json(json!({"method":"tools/list"})))
+        .and(header("Mcp-Session-Id", session))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"bash","description":"fixture","inputSchema":{"type":"object"}}]}})))
+        .expect(1).mount(&endpoint).await;
+    Mock::given(body_partial_json(json!({"method":"tools/call","id":3})))
+        .and(header("Mcp-Session-Id", session))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"session-ok"}],"isError":false}})))
+        .expect(1).mount(&endpoint).await;
+    let config: McpServerConfig = serde_json::from_value(
+        json!({"name":"fixture","transport":"http","url":endpoint.uri(),"tool_timeout_secs":5}),
+    )
+    .unwrap();
+    let client = McpServer::connect(config).await.unwrap();
+    let reply = client
+        .call_tool("bash", json!({"command":"true"}))
+        .await
+        .unwrap();
+    assert_eq!(reply["content"][0]["text"], "session-ok");
+    endpoint.verify().await;
 }

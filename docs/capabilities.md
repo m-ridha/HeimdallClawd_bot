@@ -61,3 +61,7 @@ Do not edit `/data/zeroclaw/config.toml` expecting changes to survive startup: t
 Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. The Railway hard spending cap remains separate from those quotas.
 
 GitHub repository edits do not depend on Codespaces. See the [repository workflow](github-workflow.md) for API commits/PRs, updated offline Git support and build/test paths.
+
+Operator-only authentication/storage recovery is documented in [operations](operations.md#authentication-and-storage-recovery). Recovery deliberately stops the assistant while providing a labeled health listener; it grants no additional agent tools.
+
+Additional Telegram accounts are fully trusted operators, with shared configured credentialed capabilities as well as session/workspace visibility; see the [privilege model](operations.md#trusted-telegram-users).
