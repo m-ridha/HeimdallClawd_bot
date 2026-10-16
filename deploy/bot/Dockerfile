@@ -1,5 +1,5 @@
 FROM rust:1.99-slim-bookworm AS executor-build
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/*
 WORKDIR /executor
 COPY executor/Cargo.toml executor/Cargo.lock ./
 COPY executor/src ./src

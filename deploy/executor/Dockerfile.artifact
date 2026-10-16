@@ -1,5 +1,5 @@
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 64173 --user-group --no-create-home executor
 COPY heimdall-executor /usr/local/bin/heimdall-executor
 COPY executor.sha256 /tmp/executor.sha256

@@ -164,3 +164,9 @@ README/operations now describe additional Telegram accounts as fully trusted ope
 Native Linux builds and disposable Railway recovery tests remain deferred at the owner's request. No live logs or credentials were accessed for this fixture, and no deployment was performed.
 
 Fresh local checks for this follow-up: both portable Cargo suites and strict Clippy, executor x86_64 Linux type checking, formatting, thirteen Python tests with the pinned IaC SDK, actionlint and diff checks passed. The new logging fixture passes with production quiet mode. The cache guard was updated to pin five compile commands and their identical execution counterparts, including the logging contract. No native workflow was dispatched.
+
+## 2026-10-16: executor Python and jq
+
+The local change installs Debian Bookworm python3 and jq alongside Git in both executor production recipes and their native test builders. It adds a Linux regression for standard-library JSON/Base64/path/tempfile operations and spawning jq under the actual executor restrictions. No syscall, credential, network or resource-policy grant changed. Managed instructions describe offline scripting and checking the Codespaces toolkit independently.
+
+Both portable Cargo suites, strict Clippy, formatting, thirteen Python tests with the pinned IaC SDK and diff checks passed. Executor x86_64 Linux test type checking passed; it does not execute Python/jq under seccomp. The native scripting regression and deployed-image checks remain pending. No native workflow or deployment was started for this change.
