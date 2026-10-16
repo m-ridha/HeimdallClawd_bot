@@ -74,8 +74,9 @@ COPY prebuilt/heimdall-executor /usr/local/bin/heimdall-executor
 RUN chmod 755 /runtime/target/release/zeroclaw /usr/local/bin/heimdall-executor
 COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
 COPY deploy/bot/config.template.toml /tmp/heimdall-config.toml
+COPY deploy/bot/TOOLS.md /tmp/heimdall-TOOLS.md
 COPY deploy/bot/evals /tmp/heimdall-evals
-ENV HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
+ENV HEIMDALL_TEST_TOOLS=/tmp/heimdall-TOOLS.md HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
     && cargo test --locked -p zeroclaw-tools --no-default-features --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \

@@ -23,6 +23,8 @@ After deploying the new code, choose `HEIMDALL_CODESPACE_REPOS`:
 
 Do not change this variable to `*` on older code expecting only repository names. The current setting remains untouched by these local changes. GitHub API operations already cover any repository the token is authorized to access, regardless of this variable.
 
+The primary runtime explicitly disables compact context so the complete managed TOOLS.md fits the native 20,000-character per-file bootstrap budget. A pinned-runtime prompt contract checks that the complete guide survives assembly with the production-effective settings. This increases prompt size compared with compact mode; no host file reader is granted.
+
 The new managed TOOLS.md/IDENTITY.md instructions refresh at startup and explain API-first editing, offline Git, Codespaces and CI fallback. No external GitHub skill is required; CLI-oriented skill instructions must use a compatible remote environment instead of assuming a host shell exists.
 
 ## Diagnose before mutating

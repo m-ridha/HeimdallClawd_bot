@@ -474,3 +474,13 @@ fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials(
     assert_eq!(cfg["memory"]["search_mode"].as_str(), Some("hybrid"));
     assert!(!text.contains("api_key"));
 }
+
+#[test]
+fn managed_instructions_use_full_bootstrap_budget() {
+    let config: toml::Value =
+        toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(
+        config["runtime_profiles"]["primary"]["compact_context"].as_bool(),
+        Some(false)
+    );
+}
