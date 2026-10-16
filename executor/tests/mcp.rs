@@ -118,3 +118,50 @@ async fn mcp_rejects_unbounded_ids_and_extra_arguments() {
     assert_eq!(reply["error"]["code"], -32602);
     assert_eq!(call(true,true,json!({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"not-active"}})).await.0, StatusCode::ACCEPTED);
 }
+
+#[tokio::test]
+async fn initialize_issues_unique_sessions_and_rejects_malformed_headers() {
+    let app = App::new("x".repeat(32), true);
+    let mut sessions = Vec::new();
+    for _ in 0..2 {
+        let response = router(app.clone())
+            .oneshot(
+                Request::post("/mcp")
+                    .header("authorization", format!("Bearer {}", "x".repeat(32)))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"jsonrpc":"2.0","id":1,"method":"initialize"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let session = response.headers()["mcp-session-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(
+            uuid::Uuid::parse_str(&session).unwrap().to_string(),
+            session
+        );
+        sessions.push(session);
+    }
+    assert_ne!(sessions[0], sessions[1]);
+    for value in ["bad", "x:y", "00000000000040008000000000000001"] {
+        let response = router(app.clone())
+            .oneshot(
+                Request::post("/mcp")
+                    .header("authorization", format!("Bearer {}", "x".repeat(32)))
+                    .header("content-type", "application/json")
+                    .header("mcp-session-id", value)
+                    .body(Body::from(
+                        json!({"jsonrpc":"2.0","id":3,"method":"ping"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+}

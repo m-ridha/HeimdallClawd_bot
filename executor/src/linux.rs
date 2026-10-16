@@ -242,3 +242,18 @@ pub fn probe() -> io::Result<()> {
 pub fn probe() -> io::Result<()> {
     Err(io::Error::other("Linux probe required"))
 }
+
+/// Root-supervisor-only, read-only storage diagnostic; never logs filenames/content.
+pub fn report_workspace_storage() {
+    let mut usage = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: the fixed path is NUL terminated and usage is writable storage.
+    if unsafe { libc::statvfs(c"/data/workspace".as_ptr(), usage.as_mut_ptr()) } != 0 {
+        eprintln!("Workspace storage capacity unavailable");
+        return;
+    }
+    // SAFETY: statvfs initialized usage on success.
+    let usage = unsafe { usage.assume_init() };
+    let total = (usage.f_blocks as u128) * (usage.f_frsize as u128);
+    let available = (usage.f_bavail as u128) * (usage.f_frsize as u128);
+    eprintln!("Workspace storage: total_bytes={total} available_bytes={available}");
+}
