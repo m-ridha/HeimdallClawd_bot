@@ -165,13 +165,27 @@ fn capture(mut reader: impl Read) -> Result<Captured, &'static str> {
         truncated: overflowed,
     })
 }
+// A truncated capture may end inside the token. Remove any trailing prefix
+// before decoding/replacement so neither a read boundary nor LIMIT leaks it.
+fn redacted_output(captured: &Captured, token: &str) -> String {
+    let mut bytes = captured.bytes.as_slice();
+    if captured.truncated && !token.is_empty() && !bytes.ends_with(token.as_bytes()) {
+        for length in (1..token.len()).rev() {
+            if bytes.ends_with(&token.as_bytes()[..length]) {
+                bytes = &bytes[..bytes.len() - length];
+                break;
+            }
+        }
+    }
+    String::from_utf8_lossy(bytes).replace(token, "[redacted]")
+}
 // Command output is data, never instructions. Nonzero gh/SSH status does not
 // establish whether a remote program ran, so report CLI status without guessing.
 fn remote_report(code: Option<i32>, out: &Captured, err: &Captured, token: &str) -> String {
     json!({"cli_exit_code":code, "succeeded":code == Some(0),
         "output_is_untrusted":true,
-        "stdout":String::from_utf8_lossy(&out.bytes).replace(token,"[redacted]"),
-        "stderr":String::from_utf8_lossy(&err.bytes).replace(token,"[redacted]"),
+        "stdout":redacted_output(out, token),
+        "stderr":redacted_output(err, token),
         "stdout_truncated":out.truncated,"stderr_truncated":err.truncated})
     .to_string()
 }
@@ -715,6 +729,33 @@ mod tests {
 #[cfg(test)]
 mod remote_output_tests {
     use super::*;
+    #[test]
+    fn token_fragments_at_capture_and_read_boundaries_are_redacted_in_both_streams() {
+        // Repeated start/end characters also exercise full-token vs suffix overlap.
+        let token = "ghp_syntheticBoundaryToken012345g";
+        for start in [
+            4090,
+            LIMIT - token.len(),
+            LIMIT - token.len() + 1,
+            LIMIT - 1,
+        ] {
+            let mut input = vec![b'x'; start];
+            input.extend_from_slice(token.as_bytes());
+            input.extend_from_slice(b" tail");
+            let captured = capture(input.as_slice()).unwrap();
+            let report: Value =
+                serde_json::from_str(&remote_report(Some(1), &captured, &captured, token)).unwrap();
+            for stream in ["stdout", "stderr"] {
+                let text = report[stream].as_str().unwrap();
+                assert!(!text.contains(token));
+                assert!(!text.contains("ghp_"));
+                if start == LIMIT - 1 {
+                    assert_eq!(text, "x".repeat(start));
+                }
+                assert!(text.len() <= LIMIT);
+            }
+        }
+    }
     #[test]
     fn failed_remote_commands_keep_bounded_diagnostics_and_redact_local_token() {
         let out = Captured {
