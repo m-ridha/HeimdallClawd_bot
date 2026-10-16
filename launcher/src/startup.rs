@@ -19,6 +19,11 @@ pub fn recovery_enabled(value: Option<&str>) -> io::Result<bool> {
     }
 }
 
+/// Keep terminal payload formatting off; structured diagnostics use their own policy.
+pub fn configure_daemon(command: &mut Command, port: u16) -> &mut Command {
+    command.args(["daemon", "--host", "0.0.0.0", "--port", &port.to_string()])
+}
+
 /// Discard OAuth diagnostics; bound the process and reap it on every exit path.
 pub fn validate_auth(command: &mut Command, timeout: Duration) -> io::Result<()> {
     let mut child = command
@@ -131,6 +136,15 @@ pub fn serve_recovery(port: u16) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn daemon_uses_quiet_terminal_policy() {
+        let mut command = Command::new("fixture");
+        configure_daemon(&mut command, 3888);
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            ["daemon", "--host", "0.0.0.0", "--port", "3888"]
+        );
+    }
     #[test]
     fn recovery_is_explicit_and_strict() {
         assert!(!recovery_enabled(None).unwrap());

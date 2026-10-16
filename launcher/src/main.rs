@@ -198,14 +198,5 @@ fn main() -> io::Result<()> {
         ids.len()
     );
     use std::os::unix::process::CommandExt;
-    Err(runtime(&vars)
-        .args([
-            "daemon",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            &port.to_string(),
-            "--verbose",
-        ])
-        .exec())
+    Err(heimdall_launcher::startup::configure_daemon(&mut runtime(&vars), port).exec())
 }
