@@ -15,3 +15,22 @@ The updated image includes Git for offline init/status/diff/branch/commit operat
 MCP initialization returns an opaque UUID `Mcp-Session-Id`; clients echo it on subsequent requests. Active calls and cancellation are keyed by session plus typed JSON-RPC ID, so independent clients can reuse IDs. Sessions are correlation namespaces for already bearer-authenticated clients, not additional authorization. Canonical UUID headers are required when supplied. Legacy sessionless calls get unique execution keys; ambiguous ID-only cancellation is ignored, while response disconnect still cancels that job. Active-map entries, cancellation tokens and permits are released on task unwind or abort. No session registry or persistent session storage is needed.
 
 Admission queues fairly for at most three seconds while reserving the session-scoped ID. Cancellation/disconnect during admission prevents execution and cleans the reservation. Queue expiration returns JSON-RPC -32001 in the response stream; execution still has its separate 30-second limit. At most two jobs execute concurrently.
+
+## Structured command results
+
+For `bash`, the single MCP `content[0].text` block is now a JSON object:
+
+```json
+{"exit_code":7,"termination_reason":"completed","truncated":false,"stdout":"","stderr":""}
+```
+
+- `exit_code` is the observed shell exit code, not a boolean or a synthetic `128 + signal` code. It is `null` when the helper was terminated by a signal. A timeout/cancellation can retain an already observed exit code; the termination reason, not that code alone, determines success.
+- `termination_reason` is `completed`, `timeout`, `cancelled` or `output_limit`. `completed` means the supervisor finished collecting output normally; the shell can still have exited nonzero or by a signal.
+- `truncated` explicitly reports discarded bytes at the output cap. Exact-limit output followed by EOF is not truncated. Timeout/cancellation do not themselves set it; they can interrupt execution before all possible output is produced.
+- `stdout` and `stderr` contain only captured command bytes decoded with UTF-8 replacement for invalid sequences, never supervisor annotations. They share the existing **64 KiB raw-byte budget**, not 64 KiB each. JSON escaping/replacement can make the wire representation larger. Cross-stream ordering is not promised.
+
+`isError` stays false only for a completed command with exit code zero. Timeout, cancellation and output-limit termination always set it, even if the shell had already exited successfully before excess buffered output was observed. Process-group cleanup, admission, execution timeouts, isolation and concurrency limits are unchanged. Cancellation after a client disconnect still cleans up the job, but cannot deliver a result to that disconnected client.
+
+JSON is carried in the existing MCP 2024-11-05 text envelope so the pinned client's success and error paths both expose status; duplicating full streams into `structuredContent` would risk exceeding its unchanged response-size bound. Status fields precede streams because that client sanitizes and shortens error details. Consumers of bash text must parse the JSON rather than treat it as raw stdout. File and base64 tool text, error and truncation behavior are unchanged. Infrastructure/launch failures keep the existing generic error text and do not invent a command exit code or termination reason. Queued requests that never start retain their existing JSON-RPC errors.
+
+No Railway variables or operator configuration changes are required. These changes need the normal executor release and native Linux validation before they are considered live-verified.
