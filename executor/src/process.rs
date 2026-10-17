@@ -1,4 +1,4 @@
-use crate::protocol::{Job, LIMIT, Reply};
+use crate::protocol::{CommandOutcome, Job, LIMIT, Reply, TerminationReason};
 use std::{io, process::Stdio, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,6 +15,15 @@ impl Drop for Group {
             }
         }
     }
+}
+
+/// Retain one shared byte budget, plus the legacy merged view used by file
+/// tools and startup probes. Return true only if this read discarded bytes.
+fn capture(merged: &mut Vec<u8>, stream: &mut Vec<u8>, bytes: &[u8]) -> bool {
+    let retained = bytes.len().min(LIMIT - merged.len());
+    merged.extend_from_slice(&bytes[..retained]);
+    stream.extend_from_slice(&bytes[..retained]);
+    retained < bytes.len()
 }
 
 pub async fn run(job: Job, cancel: CancellationToken, timeout: Duration) -> io::Result<Reply> {
@@ -87,13 +96,15 @@ pub async fn run_at(
         .take()
         .ok_or_else(|| io::Error::other("Missing helper stderr"))?;
     let mut output = Vec::new();
+    let mut stdout_output = Vec::new();
+    let mut stderr_output = Vec::new();
     let mut out_done = false;
     let mut err_done = false;
     let mut out_buf = [0u8; 4096];
     let mut err_buf = [0u8; 4096];
     let deadline = tokio::time::sleep(timeout);
     tokio::pin!(deadline);
-    let mut reason = None;
+    let mut reason = TerminationReason::Completed;
     let mut truncated = false;
     let mut status = None;
     let mut failure = None;
@@ -102,18 +113,57 @@ pub async fn run_at(
             break;
         }
         tokio::select! {
-            _=cancel.cancelled()=>{reason=Some("Execution canceled");break;}
-            _=&mut deadline=>{reason=Some("Execution timed out");break;}
-            read=stdout.read(&mut out_buf),if !out_done=>{
-                let n=match read { Ok(n)=>n, Err(error)=>{failure=Some(error);break;} };if n==0{out_done=true;}else{let room=LIMIT-output.len();output.extend_from_slice(&out_buf[..n.min(room)]);if n>room{truncated=true;break;}}
+            _ = cancel.cancelled() => {
+                reason = TerminationReason::Cancelled;
+                break;
             }
-            read=stderr.read(&mut err_buf),if !err_done=>{
-                let n=match read { Ok(n)=>n, Err(error)=>{failure=Some(error);break;} };if n==0{err_done=true;}else{let room=LIMIT-output.len();output.extend_from_slice(&err_buf[..n.min(room)]);if n>room{truncated=true;break;}}
+            _ = &mut deadline => {
+                reason = TerminationReason::Timeout;
+                break;
             }
-            result=child.wait(),if status.is_none()=>{
-                match result { Ok(value)=>status=Some(value), Err(error)=>{failure=Some(error);break;} }
+            read = stdout.read(&mut out_buf), if !out_done => {
+                let n = match read {
+                    Ok(n) => n,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                };
+                if n == 0 {
+                    out_done = true;
+                } else if capture(&mut output, &mut stdout_output, &out_buf[..n]) {
+                    truncated = true;
+                    reason = TerminationReason::OutputLimit;
+                    break;
+                }
+            }
+            read = stderr.read(&mut err_buf), if !err_done => {
+                let n = match read {
+                    Ok(n) => n,
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                };
+                if n == 0 {
+                    err_done = true;
+                } else if capture(&mut output, &mut stderr_output, &err_buf[..n]) {
+                    truncated = true;
+                    reason = TerminationReason::OutputLimit;
+                    break;
+                }
+            }
+            result = child.wait(), if status.is_none() => {
+                match result {
+                    Ok(value) => status = Some(value),
+                    Err(error) => {
+                        failure = Some(error);
+                        break;
+                    }
+                }
+                // SAFETY: pid is the process group created for this helper.
                 // A completed shell must not leave background descendants running.
-                unsafe{libc::kill(-pid,libc::SIGKILL);}
+                unsafe { libc::kill(-pid, libc::SIGKILL); }
             }
         }
     }
@@ -142,21 +192,39 @@ pub async fn run_at(
         return Err(error);
     }
     let mut content = String::from_utf8_lossy(&output).into_owned();
-    if let Some(reason) = reason {
-        content.push_str(&format!("\n{reason}"));
+    // Preserve legacy annotations internally and for file tools, but do not
+    // inject them into the command's actual stdout or stderr.
+    match reason {
+        TerminationReason::Timeout => content.push_str("\nExecution timed out"),
+        TerminationReason::Cancelled => content.push_str("\nExecution canceled"),
+        _ => {}
     }
     if truncated {
         content.push_str("\n[output truncated; execution stopped]");
     }
+    let status = status.ok_or_else(|| io::Error::other("Missing helper exit status"))?;
+    let command = (job.tool == "bash").then(|| CommandOutcome {
+        exit_code: status.code(),
+        termination_reason: reason,
+        truncated,
+        stdout: String::from_utf8_lossy(&stdout_output).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr_output).into_owned(),
+    });
+    let is_error = if command.is_some() {
+        reason != TerminationReason::Completed || !status.success()
+    } else {
+        // Keep the existing file-tool truncation and error behavior unchanged.
+        matches!(
+            reason,
+            TerminationReason::Timeout | TerminationReason::Cancelled
+        ) || (!status.success() && !(truncated && job.tool == "file_read"))
+    };
     Ok(Reply {
         id: job.id,
         content,
-        is_error: reason.is_some()
-            || (!status
-                .ok_or_else(|| io::Error::other("Missing helper exit status"))?
-                .success()
-                && !(truncated && job.tool == "file_read")),
+        is_error,
         truncated,
+        command,
     })
 }
 
@@ -233,7 +301,12 @@ pub async fn verify_platform() -> io::Result<()> {
         Duration::from_millis(150),
     )
     .await?;
-    if !timed.is_error || !timed.content.contains("timed out") {
+    if !timed.is_error
+        || !timed
+            .command
+            .as_ref()
+            .is_some_and(|command| command.termination_reason == TerminationReason::Timeout)
+    {
         return Err(io::Error::other("timeout probe failed"));
     }
     let flood = run(
@@ -242,7 +315,11 @@ pub async fn verify_platform() -> io::Result<()> {
         timeout,
     )
     .await?;
-    if !flood.truncated {
+    if !flood.is_error
+        || !flood.command.as_ref().is_some_and(|command| {
+            command.truncated && command.termination_reason == TerminationReason::OutputLimit
+        })
+    {
         return Err(io::Error::other("output limit probe failed"));
     }
     let canceled = CancellationToken::new();
@@ -257,9 +334,43 @@ pub async fn verify_platform() -> io::Result<()> {
         timeout,
     )
     .await?;
-    if !result.is_error || !result.content.contains("canceled") {
+    if !result.is_error
+        || !result
+            .command
+            .as_ref()
+            .is_some_and(|command| command.termination_reason == TerminationReason::Cancelled)
+    {
         return Err(io::Error::other("cancellation probe failed"));
     }
     println!("Isolation check descendants_timeout_output_cancel: PASS");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streams_share_one_limit_and_exact_limit_is_not_truncated() {
+        let mut merged = Vec::new();
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        assert!(!capture(&mut merged, &mut stdout, &vec![b'o'; 32768]));
+        assert!(!capture(&mut merged, &mut stderr, &vec![b'e'; 32768]));
+        assert_eq!(merged.len(), 65536);
+        assert_eq!(stdout.len(), 32768);
+        assert_eq!(stderr.len(), 32768);
+        assert!(capture(&mut merged, &mut stderr, b"overflow"));
+        assert_eq!(merged.len(), stdout.len() + stderr.len());
+        assert_eq!(merged.len(), 65536);
+    }
+
+    #[test]
+    fn partial_reads_retain_only_available_bytes() {
+        let mut merged = vec![b'x'; 65535];
+        let mut stderr = Vec::new();
+        assert!(capture(&mut merged, &mut stderr, b"abc"));
+        assert_eq!(stderr, b"a");
+        assert_eq!(merged.len(), 65536);
+    }
 }
