@@ -1,8 +1,15 @@
 #![cfg(target_os = "linux")]
-use serde_json::json;
+use serde_json::{Value, json};
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 use zeroclaw_config::schema::McpServerConfig;
 use zeroclaw_tools::mcp_client::McpServer;
+
+fn command_outcome(reply: Value) -> Value {
+    assert_eq!(reply["isError"], false);
+    serde_json::from_str(reply["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
 #[tokio::test]
 async fn heimdall_native_mcp_client_contract() {
     assert_eq!(
@@ -66,8 +73,8 @@ async fn heimdall_native_mcp_client_contract() {
             second.call_tool("bash", json!({"command":format!("touch {b}; while ! test -f {a}; do sleep 0.05; done; printf second")}))
         )
     }).await.unwrap();
-    assert_eq!(left.unwrap()["content"][0]["text"], "first");
-    assert_eq!(right.unwrap()["content"][0]["text"], "second");
+    assert_eq!(command_outcome(left.unwrap())["stdout"], "first");
+    assert_eq!(command_outcome(right.unwrap())["stdout"], "second");
     first
         .call_tool("bash", json!({"command":format!("rm -- {a} {b}")}))
         .await
@@ -90,12 +97,35 @@ async fn heimdall_native_mcp_client_contract() {
         .call_tool("bash", json!({"command":"pwd"}))
         .await
         .unwrap();
-    assert_eq!(pwd["content"][0]["text"], "/data/workspace\n");
+    assert_eq!(command_outcome(pwd)["stdout"], "/data/workspace\n");
     let protected = server
         .call_tool("bash", json!({"command":"cat /run/heimdall-control/probe"}))
         .await
         .unwrap_err();
     assert!(protected.to_string().contains("Permission denied"));
+    let split = server
+        .call_tool("bash", json!({"command":"printf out; printf err >&2"}))
+        .await
+        .unwrap();
+    assert_eq!(command_outcome(split), json!({
+        "exit_code":0, "termination_reason":"completed", "truncated":false,
+        "stdout":"out", "stderr":"err",
+    }));
+    let silent = server
+        .call_tool("bash", json!({"command":"exit 7"}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(silent.contains("\"exit_code\":7"), "{silent}");
+    assert!(silent.contains("\"termination_reason\":\"completed\""), "{silent}");
+    // Status must survive the pinned client's shortening of long errors.
+    let noisy = server
+        .call_tool("bash", json!({"command":"head -c 8192 /dev/zero; exit 9"}))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(noisy.contains("\"exit_code\":9"), "{noisy}");
+    assert!(noisy.contains("\"truncated\":false"), "{noisy}");
     let pidfile = format!(".client-pid-{suffix}");
     let interrupted = tokio::time::timeout(
         std::time::Duration::from_millis(300),
@@ -121,7 +151,7 @@ async fn heimdall_native_mcp_client_contract() {
         )
         .await
         .unwrap();
-    assert_eq!(cleanup["content"][0]["text"], "cleanup-ok");
+    assert_eq!(command_outcome(cleanup)["stdout"], "cleanup-ok");
     child.kill().await.unwrap();
     let _ = child.wait().await;
 }

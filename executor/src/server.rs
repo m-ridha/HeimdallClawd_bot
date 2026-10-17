@@ -166,8 +166,15 @@ pub(crate) async fn execute_formatted(
             content: "Executor restrictions or process launch failed".into(),
             is_error: true,
             truncated: false,
+            command: None,
         });
-        let bytes = serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":rpc_id,"result":{"content":[{"type":"text","text":reply.content}],"isError":reply.is_error}})).unwrap();
+        let result = reply.mcp_result().unwrap_or_else(|_| {
+            serde_json::json!({
+                "content": [{"type": "text", "text": "Executor result encoding failed"}],
+                "isError": true,
+            })
+        });
+        let bytes = serde_json::to_vec(&serde_json::json!({"jsonrpc":"2.0","id":rpc_id,"result":result})).unwrap();
         drop(guard);
         drop(permit);
         let _ = tokio::time::timeout(Duration::from_secs(2), tx.send(Ok(Bytes::from(bytes)))).await;
