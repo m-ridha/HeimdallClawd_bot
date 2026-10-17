@@ -16,8 +16,8 @@ SERVICE = '00000000-0000-0000-0000-000000000003'
 ENV = {'RAILWAY_PROJECT_ID': SERVICE, 'RAILWAY_ENVIRONMENT_ID': SERVICE}
 
 class DeploymentHealthTests(unittest.TestCase):
-    def run_with(self, responses):
-        with patch.object(sys, 'argv', ['deploy-release.py', '.', SERVICE, 'v0.1.0', 'executor']), patch.dict(os.environ, ENV), patch.object(deploy, 'railway', side_effect=responses) as cli, patch.object(deploy.time, 'sleep') as sleep:
+    def run_with(self, responses, *, github_actions=False):
+        with patch.object(sys, 'argv', ['deploy-release.py', '.', SERVICE, 'v0.1.0', 'executor']), patch.dict(os.environ, {**ENV, 'GITHUB_ACTIONS': 'true' if github_actions else 'false'}), patch.object(deploy, 'railway', side_effect=responses) as cli, patch.object(deploy.time, 'sleep') as sleep:
             deploy.main()
         return cli, sleep
 
@@ -45,9 +45,15 @@ class DeploymentHealthTests(unittest.TestCase):
 
     def test_actions_masks_dynamic_deployment_before_progress(self):
         output = io.StringIO()
-        with patch.dict(os.environ, {'GITHUB_ACTIONS': 'true'}), contextlib.redirect_stdout(output):
-            self.run_with([{'deploymentId': DEPLOYMENT}, [{'id': DEPLOYMENT, 'status': 'SUCCESS'}]])
-        self.assertEqual(output.getvalue().splitlines()[0], f'::add-mask::{DEPLOYMENT}')
+        with contextlib.redirect_stdout(output):
+            self.run_with(
+                [{'deploymentId': DEPLOYMENT}, [{'id': DEPLOYMENT, 'status': 'SUCCESS'}]],
+                github_actions=True,
+            )
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines[0], f'::add-mask::{DEPLOYMENT}')
+        self.assertNotIn(DEPLOYMENT, '\n'.join(lines[1:]))
+        self.assertNotIn(SERVICE, output.getvalue())
 
     def test_timeout_does_not_disclose_identifiers(self):
         with patch.object(deploy.time, 'monotonic', side_effect=[0, 901]), contextlib.redirect_stdout(io.StringIO()):
