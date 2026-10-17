@@ -33,7 +33,8 @@ COPY deploy/bot/patches/remote-skills.patch /tmp/remote-skills.patch
 COPY deploy/bot/patches/wasm-wit.patch /tmp/wasm-wit.patch
 COPY deploy/bot/patches/http-secret-origins.patch /tmp/http-secret-origins.patch
 COPY deploy/bot/patches/typed-transcription.patch /tmp/typed-transcription.patch
-RUN patch -p1 < /tmp/http-secret-origins.patch && patch -p1 < /tmp/private-telegram.patch && patch -p1 < /tmp/typed-transcription.patch && patch -p1 < /tmp/remote-skills.patch && patch -p1 < /tmp/wasm-wit.patch
+COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
+RUN patch -p1 < /tmp/http-secret-origins.patch && patch -p1 < /tmp/http-diagnostics.patch && patch -p1 < /tmp/private-telegram.patch && patch -p1 < /tmp/typed-transcription.patch && patch -p1 < /tmp/remote-skills.patch && patch -p1 < /tmp/wasm-wit.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:24-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web

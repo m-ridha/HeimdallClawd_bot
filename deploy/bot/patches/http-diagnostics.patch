@@ -1,0 +1,91 @@
+--- a/crates/zeroclaw-tools/src/http_request.rs
++++ b/crates/zeroclaw-tools/src/http_request.rs
+@@ -15,6 +15,29 @@
+ const HTTP_REQUEST_PROXY_PINNING_ERROR: &str = "http_request requires direct transport so validated DNS answers remain pinned; set \
+      proxy.scope = \"services\" and omit tool.http_request and tool.* from proxy.services, or disable the proxy; \
+      proxy.scope = \"environment\" is incompatible with pinned HTTP requests";
++
++/// Persist status/category only: never request URLs, arguments or payloads.
++fn heimdall_http_diagnostic(category: &str, status: Option<u16>) {
++    ::zeroclaw_log::record!(
++        INFO,
++        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
++            .with_attrs(::serde_json::json!({"category": category, "http_status": status})),
++        "http_request diagnostic"
++    );
++}
++
++/// Only expose operational response header values. All other values are redacted.
++pub fn heimdall_response_headers(headers: &HeaderMap) -> String {
++    headers.iter().map(|(name, value)| {
++        let value = match name.as_str() {
++            "content-type" | "retry-after" | "x-ratelimit-limit" | "x-ratelimit-remaining"
++            | "x-ratelimit-reset" | "x-ratelimit-used" | "x-ratelimit-resource" =>
++                value.to_str().unwrap_or("[invalid header]"),
++            _ => "***REDACTED***",
++        };
++        format!("{name}: {value}")
++    }).collect::<Vec<_>>().join(", ")
++}
+ 
+ /// HTTP request tool for API interactions.
+ /// Supports GET, POST, PUT, DELETE methods with configurable security.
+@@ -566,7 +589,18 @@
+                 return Ok(ToolResult { success: false, output: ToolOutput::default(), error: Some(error.to_string()) });
+             }
+         }
+-        let body = args.get("body").and_then(|v| v.as_str());
++        let body = match args.get("body") {
++            None => None,
++            Some(serde_json::Value::String(body)) => Some(body.as_str()),
++            Some(_) => {
++                heimdall_http_diagnostic("invalid_body", None);
++                return Ok(ToolResult {
++                    success: false,
++                    output: ToolOutput::default(),
++                    error: Some("'body' must be a JSON-encoded string; serialize JSON objects before sending".into()),
++                });
++            }
++        };
+ 
+         if !self.security.can_act() {
+             return Ok(ToolResult {
+@@ -655,18 +689,8 @@
+                 let status_code = status.as_u16();
+ 
+                 // Get response headers (redact sensitive ones)
+-                let response_headers = response.headers().iter();
+-                let headers_text = response_headers
+-                    .map(|(k, _)| {
+-                        let is_sensitive = k.as_str().to_lowercase().contains("set-cookie");
+-                        if is_sensitive {
+-                            format!("{}: ***REDACTED***", k.as_str())
+-                        } else {
+-                            format!("{}: {:?}", k.as_str(), k.as_str())
+-                        }
+-                    })
+-                    .collect::<Vec<_>>()
+-                    .join(", ");
++                heimdall_http_diagnostic("response", Some(status_code));
++                let headers_text = heimdall_response_headers(response.headers());
+ 
+                 // Get response body with size limit
+                 let response_text = match self.read_response_text(response).await {
+@@ -704,12 +728,11 @@
+                 })
+             }
+             Err(e) => {
+-                let mut error = format!("HTTP request failed: {e}");
+-                if let Some(variable) = ignored_environment_proxy {
+-                    error.push_str(&format!(
+-                        "; {variable} was intentionally ignored by the DNS-pinned request"
+-                    ));
+-                }
++                let category = if e.downcast_ref::<reqwest::Error>().is_some_and(|error| error.is_timeout()) { "timeout" } else if e.downcast_ref::<reqwest::Error>().is_some_and(|error| error.is_connect()) {
++                    "connection"
++                } else { "transport" };
++                heimdall_http_diagnostic(category, None);
++                let error = format!("HTTP request failed ({category}); no HTTP status received");
+                 Ok(ToolResult {
+                     success: false,
+                     output: ToolOutput::default(),
