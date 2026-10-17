@@ -95,8 +95,20 @@ mod tests {
     #[test]
     fn command_text_contains_typed_status_even_without_output() {
         for (code, reason, truncated, error, name) in [
-            (Some(0), TerminationReason::Completed, false, false, "completed"),
-            (Some(7), TerminationReason::Completed, false, true, "completed"),
+            (
+                Some(0),
+                TerminationReason::Completed,
+                false,
+                false,
+                "completed",
+            ),
+            (
+                Some(7),
+                TerminationReason::Completed,
+                false,
+                true,
+                "completed",
+            ),
             (None, TerminationReason::Completed, false, true, "completed"),
             (None, TerminationReason::Timeout, false, true, "timeout"),
             (None, TerminationReason::Cancelled, false, true, "cancelled"),
@@ -195,7 +207,9 @@ mod tests {
         };
         let result = reply.mcp_result().unwrap();
         let text = result["content"][0]["text"].as_str().unwrap();
-        assert!(text.starts_with("{\"exit_code\":7,\"termination_reason\":\"completed\",\"truncated\":false,"));
+        assert!(text.starts_with(
+            "{\"exit_code\":7,\"termination_reason\":\"completed\",\"truncated\":false,"
+        ));
         let wire = serde_json::to_vec(&json!({"jsonrpc":"2.0", "id":3, "result":result})).unwrap();
         // The configured native MCP client response bound remains unchanged.
         assert!(wire.len() < 524288, "{} bytes", wire.len());

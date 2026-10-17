@@ -107,17 +107,23 @@ async fn heimdall_native_mcp_client_contract() {
         .call_tool("bash", json!({"command":"printf out; printf err >&2"}))
         .await
         .unwrap();
-    assert_eq!(command_outcome(split), json!({
-        "exit_code":0, "termination_reason":"completed", "truncated":false,
-        "stdout":"out", "stderr":"err",
-    }));
+    assert_eq!(
+        command_outcome(split),
+        json!({
+            "exit_code":0, "termination_reason":"completed", "truncated":false,
+            "stdout":"out", "stderr":"err",
+        })
+    );
     let silent = server
         .call_tool("bash", json!({"command":"exit 7"}))
         .await
         .unwrap_err()
         .to_string();
     assert!(silent.contains("\"exit_code\":7"), "{silent}");
-    assert!(silent.contains("\"termination_reason\":\"completed\""), "{silent}");
+    assert!(
+        silent.contains("\"termination_reason\":\"completed\""),
+        "{silent}"
+    );
     // Status must survive the pinned client's shortening of long errors.
     let noisy = server
         .call_tool("bash", json!({"command":"head -c 8192 /dev/zero; exit 9"}))

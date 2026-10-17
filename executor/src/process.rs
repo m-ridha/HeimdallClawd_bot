@@ -217,8 +217,7 @@ pub async fn run_at(
         matches!(
             reason,
             TerminationReason::Timeout | TerminationReason::Cancelled
-        )
-            || (!status.success() && !(truncated && job.tool == "file_read"))
+        ) || (!status.success() && !(truncated && job.tool == "file_read"))
     };
     Ok(Reply {
         id: job.id,
@@ -303,9 +302,10 @@ pub async fn verify_platform() -> io::Result<()> {
     )
     .await?;
     if !timed.is_error
-        || !timed.command.as_ref().is_some_and(|command| {
-            command.termination_reason == TerminationReason::Timeout
-        })
+        || !timed
+            .command
+            .as_ref()
+            .is_some_and(|command| command.termination_reason == TerminationReason::Timeout)
     {
         return Err(io::Error::other("timeout probe failed"));
     }
@@ -335,9 +335,10 @@ pub async fn verify_platform() -> io::Result<()> {
     )
     .await?;
     if !result.is_error
-        || !result.command.as_ref().is_some_and(|command| {
-            command.termination_reason == TerminationReason::Cancelled
-        })
+        || !result
+            .command
+            .as_ref()
+            .is_some_and(|command| command.termination_reason == TerminationReason::Cancelled)
     {
         return Err(io::Error::other("cancellation probe failed"));
     }
