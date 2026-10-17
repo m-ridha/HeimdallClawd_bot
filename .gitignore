@@ -17,3 +17,11 @@
 **/__pycache__/
 
 .vscode/
+
+# Local authentication material (not a substitute for secret scanning).
+**/.ssh/
+**/id_ed25519
+**/id_rsa
+**/id_ecdsa
+*.pem
+*.key

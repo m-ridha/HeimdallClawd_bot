@@ -60,7 +60,7 @@
 +            .with_ack_reactions(false).with_api_base("http://127.0.0.1:9".into());
 +        for kind in ["group", "supergroup", "channel", "", "unknown"] {
 +            for field in ["text", "photo", "voice", "document"] {
-+                let mut message = serde_json::json!({"message_id":1,"chat":{"id":-1,"type":kind},"from":{"id":1001,"first_name":"Owner"},"caption":"@HeimdallClawd_bot test"});
++                let mut message = serde_json::json!({"message_id":1,"chat":{"id":-1,"type":kind},"from":{"id":1001,"first_name":"Owner"},"caption":"@fixture_assistant_bot test"});
 +                message[field] = if field == "text" {serde_json::json!("test")} else if field == "photo" {serde_json::json!([{"file_id":"test","width":1,"height":1}])} else {serde_json::json!({"file_id":"test"})};
 +                let update = serde_json::json!({"update_id":4,"message":message});
 +                let (tx, mut rx) = tokio::sync::mpsc::channel(1);

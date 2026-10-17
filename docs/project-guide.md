@@ -27,7 +27,7 @@ Changing the model keeps the same agent and isolated tool boundary. Conversation
 
 ## Use another model on OpenRouter
 
-Your existing OpenRouter key can access additional models allowed by that account. You do not need a new deployment merely to select another model on the existing provider slot.
+An operator-configured OpenRouter key can access models allowed by that account. You do not need a new deployment merely to select another model on the existing provider slot.
 
 1. Copy the exact model ID from that model's OpenRouter page. Use the full ID, including its provider prefix. Check its price and tool-calling support; the free router's price does not apply to a different selected model.
 2. In Telegram, send `/models openrouter.free`. Here `openrouter.free` is the configured provider slot's name.
