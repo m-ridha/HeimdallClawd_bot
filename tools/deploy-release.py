@@ -21,23 +21,29 @@ def exact_status(deployments, deployment_id):
 
 
 def main():
-    path, service, tag = sys.argv[1:]
+    path, service, tag, label = sys.argv[1:]
+    if label not in {"agent", "executor"}:
+        raise ValueError("Service label must be agent or executor")
     for value in [service, os.environ['RAILWAY_PROJECT_ID'], os.environ['RAILWAY_ENVIRONMENT_ID']]:
         uuid.UUID(value)
     scope = ['--project', os.environ['RAILWAY_PROJECT_ID'], '--environment', os.environ['RAILWAY_ENVIRONMENT_ID'], '--service', service]
     uploaded = railway('up', str(pathlib.Path(path).resolve()), '--path-as-root', '--detach', '--json', '--message', f'HeimdallClawd {tag}', *scope)
     deployment_id = str(uuid.UUID(uploaded['deploymentId']))
-    print(f'{service}: deployed {deployment_id}', flush=True)
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        print(f'::add-mask::{deployment_id}', flush=True)
+    print(f'{label}: deployment submitted', flush=True)
     deadline = time.monotonic() + 900
     while time.monotonic() < deadline:
         status = exact_status(railway('deployment', 'list', '--json', '--limit', '50', *scope), deployment_id)
-        print(f'{deployment_id}: {status or "not yet listed"}', flush=True)
+        if status not in {'SUCCESS', 'FAILED', 'CRASHED', 'REMOVED', 'SKIPPED', 'BUILDING', 'DEPLOYING', 'INITIALIZING', 'QUEUED', 'WAITING', 'SLEEPING'}:
+            status = None
+        print(f'{label}: {status or "not yet listed"}', flush=True)
         if status == 'SUCCESS':
             return
         if status in {'FAILED', 'CRASHED', 'REMOVED', 'SKIPPED'}:
-            raise RuntimeError(f'Deployment {deployment_id} ended with {status}; no release will be published')
+            raise RuntimeError(f'{label}: deployment ended with {status}; no release will be published')
         time.sleep(15)
-    raise RuntimeError(f'Deployment {deployment_id} did not become healthy within 15 minutes')
+    raise RuntimeError(f'{label}: deployment did not become healthy within 15 minutes')
 
 
 if __name__ == '__main__':

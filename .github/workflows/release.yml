@@ -64,6 +64,10 @@ jobs:
           : "${RAILWAY_ENVIRONMENT_ID:?Missing production variable RAILWAY_ENVIRONMENT_ID}"
           : "${RAILWAY_AGENT_SERVICE_ID:?Missing production variable RAILWAY_AGENT_SERVICE_ID}"
           : "${RAILWAY_EXECUTOR_SERVICE_ID:?Missing production variable RAILWAY_EXECUTOR_SERVICE_ID}"
+          # IDs are configuration, but should not appear in public deployment logs.
+          for name in RAILWAY_PROJECT_ID RAILWAY_ENVIRONMENT_ID RAILWAY_AGENT_SERVICE_ID RAILWAY_EXECUTOR_SERVICE_ID; do
+            printf '::add-mask::%s\n' "${!name}"
+          done
           python3 tools/verify-railway-token.py
           # RAILWAY_TOKEN supplies the project/environment; link queries account workspaces.
           railway config plan --file .railway/railway.py --out "$RUNNER_TEMP/railway-plan.json"
@@ -73,8 +77,8 @@ jobs:
           mkdir bot
           tar -xzf "heimdallclawd-$RELEASE_TAG.tar.gz" -C bot
           cd "$GITHUB_WORKSPACE"
-          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot/executor" "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG"
-          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG"
+          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot/executor" "$RAILWAY_EXECUTOR_SERVICE_ID" "$RELEASE_TAG" executor
+          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG" agent
 
   attach-assets:
     needs: deploy

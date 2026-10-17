@@ -71,3 +71,9 @@ The prior Docker ordering copied the launcher, executor and config before compil
 The extended-capabilities build adds embedded dashboard assets, WebAuthn and ACP channel support. Dashboard generation uses Node 24 only in a build stage; Node is not installed in the agent image. Its source and dependencies come from the checksum-pinned runtime and npm lockfile. The first build after changing these features is a cold compile; subsequent configuration-only builds retain the separate cached runtime target. Native validation also runs the bundled synthetic replay evaluation.
 
 The native channels suite includes `heimdall_transcription`, a synthetic Telegram download/transcription/dispatch contract against a loopback typed provider. The typed Deepgram constructor/limit regression runs under the existing `--lib heimdall` filter. `typed-transcription.patch` is applied after the private Telegram patch and its digest is recorded in generated release provenance.
+
+## Deployment log privacy
+
+The production environment keeps `RAILWAY_TOKEN` as a secret and the four project/environment/service IDs as variables. The release job masks those IDs before token preflight or Railway commands. The deployment helper accepts an explicit `agent` or `executor` label, masks the newly returned deployment ID in Actions, and reports progress using the label. Exact deployment IDs are still used internally to verify the correct rollout. No variable renaming or migration is required.
+
+These changes affect future logs only. Existing logs, release contents, Git history and commit emails need separate exposure review before publication. Do not delete audit evidence or rewrite published history as part of an ordinary release. GitHub private vulnerability reporting and environment protection are account settings; adding SECURITY.md does not enable them.
