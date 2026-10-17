@@ -55,3 +55,62 @@ async fn execute_rejects_secret_misdirection_and_private_addresses_before_transp
         assert!(result.error.unwrap().contains("private"), "{url}");
     }
 }
+
+#[test]
+fn operational_headers_keep_values_without_exposing_other_values() {
+    use reqwest::header::{HeaderMap, HeaderValue};
+    use zeroclaw_tools::http_request::heimdall_response_headers;
+    let mut headers = HeaderMap::new();
+    headers.insert("x-ratelimit-remaining", HeaderValue::from_static("0"));
+    headers.insert("retry-after", HeaderValue::from_static("60"));
+    headers.insert(
+        "set-cookie",
+        HeaderValue::from_static("TEST_private_cookie"),
+    );
+    headers.insert(
+        "authorization",
+        HeaderValue::from_static("Bearer TEST_private_token"),
+    );
+    headers.insert("x-custom", HeaderValue::from_static("TEST_private_content"));
+    let output = heimdall_response_headers(&headers);
+    assert!(output.contains("x-ratelimit-remaining: 0"));
+    assert!(output.contains("retry-after: 60"));
+    assert!(output.contains("set-cookie: ***REDACTED***"));
+    assert!(!output.contains("TEST_private"));
+}
+
+#[tokio::test]
+async fn malformed_request_bodies_fail_before_transport_without_echoing_content() {
+    use std::sync::Arc;
+    use zeroclaw_api::tool::Tool;
+    use zeroclaw_config::policy::SecurityPolicy;
+    use zeroclaw_tools::http_request::HttpRequestTool;
+    let tool = HttpRequestTool::new(
+        Arc::new(SecurityPolicy::default()),
+        vec!["*".into()],
+        1024,
+        1,
+        false,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    for body in [
+        serde_json::json!({"secret":"TEST_private_body"}),
+        serde_json::json!([]),
+        serde_json::json!(null),
+        serde_json::json!(42),
+    ] {
+        let result = tool
+            .execute(serde_json::json!({
+                "url":"https://not-a-real-host.invalid/", "method":"POST", "body":body
+            }))
+            .await
+            .unwrap();
+        assert!(!result.success);
+        assert_eq!(
+            result.error.as_deref(),
+            Some("'body' must be a JSON-encoded string; serialize JSON objects before sending")
+        );
+    }
+}

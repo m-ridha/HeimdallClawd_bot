@@ -198,7 +198,7 @@ sandbox_backend = "none"
 # Keep the complete managed TOOLS.md guide in the 20,000-character bootstrap budget.
 compact_context = false
 agentic = true
-max_tool_iterations = 24
+max_tool_iterations = 48
 max_actions_per_hour = 120
 max_context_tokens = 32_000
 parallel_tools = true

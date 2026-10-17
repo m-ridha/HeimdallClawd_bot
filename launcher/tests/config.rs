@@ -484,3 +484,17 @@ fn managed_instructions_use_full_bootstrap_budget() {
         Some(false)
     );
 }
+
+#[test]
+fn primary_turn_budget_supports_multi_step_github_work() {
+    let cfg: toml::Value =
+        toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["max_tool_iterations"].as_integer(),
+        Some(48)
+    );
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["max_actions_per_hour"].as_integer(),
+        Some(120)
+    );
+}
