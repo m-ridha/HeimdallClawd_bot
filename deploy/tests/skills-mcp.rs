@@ -15,6 +15,11 @@ async fn heimdall_native_client_connects_to_skill_installer_without_host_executi
         .output()
         .unwrap();
     assert!(rendered.status.success());
+    // Config::load_or_init unconditionally ensures data/ exists before dispatching
+    // `skills list`. Production sign-in creates it before polling. The confined
+    // child must not be granted access to create or read instance data.
+    std::fs::create_dir_all("/data/zeroclaw/data").unwrap();
+    std::fs::write("/data/zeroclaw/data/private-fixture", "TEST_private_data").unwrap();
     std::fs::create_dir_all("/data/zeroclaw/shared/skills/managed").unwrap();
     std::fs::create_dir_all("/data/zeroclaw/agents/primary/workspace").unwrap();
     std::fs::write("/data/zeroclaw/config.toml", rendered.stdout).unwrap();
