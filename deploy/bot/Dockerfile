@@ -15,7 +15,7 @@ COPY executor/tests ./tests
 COPY executor/entrypoint.sh ./
 # Failed-syscall trace contains only synthetic native test activity, never live credentials.
 RUN strace -f -e trace=process,prctl,signal,socketpair,pipe2,fcntl -e status=failed -o /tmp/native-syscalls cargo test --locked -- --show-output \
-    || { tail -100 /tmp/native-syscalls; exit 1; }
+    || { grep -v tgkill /tmp/native-syscalls | tail -100; exit 1; }
 RUN cargo build --release --locked
 
 FROM rust:1.99-slim-bookworm AS launcher-build

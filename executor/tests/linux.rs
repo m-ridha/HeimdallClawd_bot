@@ -116,6 +116,25 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     ).await;
     assert!(!scripting.is_error, "{}", scripting.content);
     assert_eq!(scripting.content, "python-jq-ready\n");
+    let local_pair = execute(
+        "bash",
+        json!({"command": r#"python3 -B -c 'import errno,socket
+left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+left.send(b"local")
+assert right.recv(16)==b"local"
+for family,kind in [(socket.AF_INET,socket.SOCK_STREAM),(socket.AF_UNIX,socket.SOCK_STREAM)]:
+    try:
+        socket.socketpair(family,kind)
+    except OSError as error:
+        assert error.errno==errno.EPERM,error
+    else:
+        raise SystemExit("unexpected socket-pair grant")
+print("local-pair-only")'"#}),
+        t,
+    )
+    .await;
+    assert!(!local_pair.is_error, "{}", local_pair.content);
+    assert_eq!(local_pair.content, "local-pair-only\n");
     // Exercise the actual helper environment and confinement, not the builder's rustup.
     let rust = execute(
         "bash",
