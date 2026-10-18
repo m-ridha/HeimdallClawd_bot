@@ -2,7 +2,7 @@
 
 The `Release to Railway` workflow runs when a stable GitHub Release is published (`release: published`). Pushing a tag by itself does not deploy. Draft and prerelease releases do not deploy. The release tag must use `vX.Y.Z`, and its commit must belong to `main`.
 
-The build job uses a native Linux x86_64 Rust 1.99 / Debian Bookworm container. It verifies the pinned ZeroClaw archive, applies the maintained Telegram, remote-skill and WASM interface-path patches, and runs the native Telegram, MCP client, configuration and executor checks. It packages the resulting runtime, launcher and executor binaries after testing, records its actual checksum and source provenance, and verifies the deployable bot image. CI-generated executable hashes can differ from the documented local cross-build; packaging checks the checksum recorded for that exact build.
+The build job uses a native Linux x86_64 Rust 1.99 / Debian Bookworm container. It verifies the pinned ZeroClaw archive, applies the maintained Telegram, HTTP, native-child and remote-skill patches, and runs the native Telegram, MCP client, configuration and executor checks. It packages the resulting runtime, launcher and executor binaries after testing, records its actual checksum and source provenance, and verifies the deployable bot image. CI-generated executable hashes can differ from the documented local cross-build; packaging checks the checksum recorded for that exact build.
 
 The deployment job uses the GitHub `production` environment. Configure:
 
@@ -70,7 +70,7 @@ The prior Docker ordering copied the launcher, executor and config before compil
 
 The extended-capabilities build adds embedded dashboard assets, WebAuthn and ACP channel support. Dashboard generation uses Node 24 only in a build stage; Node is not installed in the agent image. Its source and dependencies come from the checksum-pinned runtime and npm lockfile. The first build after changing these features is a cold compile; subsequent configuration-only builds retain the separate cached runtime target. Native validation also runs the bundled synthetic replay evaluation.
 
-The native channels suite includes `heimdall_transcription`, a synthetic Telegram download/transcription/dispatch contract against a loopback typed provider. The typed Deepgram constructor/limit regression runs under the existing `--lib heimdall` filter. `typed-transcription.patch` is applied after the private Telegram patch and its digest is recorded in generated release provenance.
+The native channels suite includes `heimdall_transcription`, a synthetic Telegram download/transcription/dispatch contract against a loopback typed provider. It uses the upstream production channel factory so the test covers typed provider selection and voice limits without a local transcription patch. The remaining patch digests are recorded in generated release provenance.
 
 ## Deployment log privacy
 

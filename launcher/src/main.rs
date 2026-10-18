@@ -200,7 +200,7 @@ fn main() -> io::Result<()> {
         heimdall_launcher::startup::AUTH_TIMEOUT,
     )?;
     println!(
-        "HeimdallClawd: ZeroClaw 0.8.5; {} allowed Telegram user(s); remote workspace MCP; port {port}",
+        "HeimdallClawd: ZeroClaw 0.8.6; {} allowed Telegram user(s); remote workspace MCP; port {port}",
         ids.len()
     );
     use std::os::unix::process::CommandExt;

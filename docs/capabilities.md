@@ -16,11 +16,12 @@ These changes describe the next release, not a verified live deployment. Heartbe
 | GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN`; Codespaces supports an explicit repository list or standalone `*` for GitHub-authorized repositories; separate GitHub billing. See [setup](operations.md#github-access). Not live-verified. |
 | Telegram messaging | Poll, reaction, channel_room, ask_user and send_via tools allowed. Actual operations depend on Telegram support, bot permissions and configured peers. No other chat channel is installed. |
 | File transfer | transfer__send delivers executor files to an explicitly specified allowlisted Telegram recipient. transfer__import imports incoming files from the primary agent's telegram_files directory. transfer__receive accepts a Telegram file_id. Binary transfers are capped at 48 KiB; larger files are rejected. Native deliver_file is ACP-oriented, and native file_upload/file_download tools still need owner-configured endpoints. |
+| Tool discovery | Full built-in availability is selected explicitly; deferred built-in schemas are retrieved with `tool_search`. Exact execution grants still apply, and MCP tools remain eagerly connected for remote skill scripts. |
 | Extra MCP servers | MCP remains enabled and supports owner-configured additional servers/bundles. No unknown external service is connected automatically. |
 
 ## Extended native capabilities (not live-verified)
 
-The primary profile contains 55 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
+The primary profile contains 56 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
 
 | Capability | Status and limits |
 | --- | --- |
@@ -71,3 +72,5 @@ The updated executor image includes offline Git, Python 3 (standard library) and
 Native subprocess confinement preserves the tool grants. See [native child-process isolation](operations.md#native-child-process-isolation) for per-tool filesystem/credential access, kernel requirements, and remaining limitations.
 
 The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native Linux CI validation passed with the updated confinement policy; live deployment verification remains pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
+
+For the runtime migration, retained patches, persistent-state checks and new integration prerequisites, see [the v0.8.6 upgrade procedure](operations.md#upgrading-to-zeroclaw-v086).

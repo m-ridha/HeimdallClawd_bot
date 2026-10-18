@@ -1,6 +1,6 @@
 # Audit assessment (16 October 2026)
 
-The supplied audit is a useful static review, not a verified exploit report. Recommendations were checked against the project and pinned runtime. Tool availability and automatic execution remain priorities: the 55 policy grants, current auto-approval list, skill scripts and Open Skills synchronization are retained. This work is local and not deployed.
+The supplied audit is a useful static review, not a verified exploit report. Recommendations were checked against the project and pinned runtime. Tool availability and automatic execution remain priorities: the existing policy grants and auto-approval list, skill scripts and Open Skills synchronization are retained. This work is local and not deployed.
 
 | Finding | Assessment / action |
 | --- | --- |

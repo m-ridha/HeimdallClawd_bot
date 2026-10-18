@@ -61,6 +61,10 @@ channel = "telegram.home"
 agents = ["primary"]
 external_peers = []
 
+[tools]
+# Availability stays full; the exact risk-profile grants below control execution.
+optional = ["*"]
+
 [risk_profiles.primary]
 level = "supervised"
 workspace_only = true
@@ -89,6 +93,7 @@ allowed_tools = [
 	"transfer__receive",
 	"transfer__import",
 	"read_skill",
+	"tool_search",
 	"text_browser",
 	"web_fetch",
 	"http_request",
@@ -146,6 +151,7 @@ auto_approve = [
 	"transfer__receive",
 	"transfer__import",
 	"read_skill",
+	"tool_search",
 	"text_browser",
 	"web_fetch",
 	"http_request",
@@ -202,6 +208,8 @@ max_tool_iterations = 48
 max_actions_per_hour = 120
 max_context_tokens = 32_000
 parallel_tools = true
+# Discover built-in schemas on demand; MCP stays eager for remote skill dispatch.
+deferred_builtin_tools = true
 max_tool_result_chars = 70_000
 
 [mcp]
@@ -332,6 +340,7 @@ allowed_tools = [
 
 [browser]
 enabled = false
+automation_enabled = false
 backend = "rust_native"
 native_headless = true
 allowed_domains = ["*"]

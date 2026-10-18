@@ -182,3 +182,11 @@ Both portable Cargo suites, strict Clippy, thirteen Python tests with the pinned
 ## 2026-10-18: offline Rust executor CI validation
 
 Native Linux [run 39118114066](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/39118114066) passed for commit `190b9253bb8ba6058bfc88f50c74af6f9c012dad`. The confined smoke test exercises Rust tooling versions, offline standard-library Cargo tests, formatting, Clippy, the updated address-space cap and restricted local IPC. The per-process virtual-address ceiling increased from 96 MiB to 1 GiB; Railway's 250 MB container RAM cap and the 30-second command deadline remain unchanged. This is synthetic native CI evidence, not a live Railway result. Post-release verification on the deployed executor remains pending.
+
+## 18 October 2026 — ZeroClaw v0.8.6 upgrade preparation
+
+The upgrade pins revision `c473221313341a853e04122f93bb9bd26b5e6c47` and its downloaded source archive checksum. Source review found upstream replacements for typed transcription initialization and crate-local WIT paths; those two local patches were removed. The five remaining patches were regenerated against the pinned source, preserving their policy and contract tests. Production and native-test builds explicitly include the external-tool and project-intelligence adapters introduced by the upstream feature split.
+
+The native transcription contract now uses the upstream production channel factory with a typed loopback provider, rather than a method supplied by a local patch. It checks the configured duration limit before downloading/transcribing a valid synthetic voice note. Tool inventory checks cover built-in discovery, excluded-host-tool visibility, ACP memory exclusion and the external adapters.
+
+Native Linux workflow validation and live Railway upgrade checks are tracked in the upgrade PR. Local macOS checks cannot establish Linux isolation or deployed compatibility. No production deployment or persistent-state migration has been performed as part of source preparation.

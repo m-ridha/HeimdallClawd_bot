@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        55
+        56
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -398,6 +398,7 @@ fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
     let approved = tool_names(profile, "auto_approve");
     assert_eq!(allowed, approved);
     for name in [
+        "tool_search",
         "image_info",
         "sessions_current",
         "sessions_list",
@@ -497,4 +498,23 @@ fn primary_turn_budget_supports_multi_step_github_work() {
         cfg["runtime_profiles"]["primary"]["max_actions_per_hour"].as_integer(),
         Some(120)
     );
+}
+
+#[test]
+fn upgraded_tool_inventory_stays_full_with_bounded_discovery() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    assert_eq!(
+        cfg["tools"]["optional"].as_array().unwrap(),
+        &[toml::Value::String("*".into())]
+    );
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["deferred_builtin_tools"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(cfg["mcp"]["deferred_loading"].as_bool(), Some(false));
+    assert_eq!(cfg["browser"]["automation_enabled"].as_bool(), Some(false));
+    for field in ["allowed_tools", "auto_approve"] {
+        assert!(tool_names(&cfg["risk_profiles"]["primary"], field).contains(&"tool_search"));
+    }
 }

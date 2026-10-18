@@ -17,8 +17,8 @@ RUN cargo test --locked -- --show-output && cargo build --release --locked
 FROM rust:1.99-slim-bookworm AS contract
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates pkg-config g++ libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /runtime
-RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/cb2b20a9fe59004b7ef03e123942d31f29236d15 -o /tmp/runtime.tar.gz \
-    && echo '81c5a9dd51ab4738d3e1d71dd93b191de15935f4b0d6e83f6a7a28f2a3fdf8a4  /tmp/runtime.tar.gz' | sha256sum -c - \
+RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/c473221313341a853e04122f93bb9bd26b5e6c47 -o /tmp/runtime.tar.gz \
+    && echo 'ae1916dd79364f936a6600e8eb143aa1f405750d501f6c5ef7f1a83f717d574c  /tmp/runtime.tar.gz' | sha256sum -c - \
     && tar -xzf /tmp/runtime.tar.gz --strip-components=1 -C /runtime && rm /tmp/runtime.tar.gz
 COPY --from=builder /build/target/release/heimdall-executor /usr/local/bin/heimdall-executor
 COPY entrypoint.sh /tmp/executor-entrypoint.sh
