@@ -1,6 +1,6 @@
 # Operations
 
-HeimdallClawd uses pinned ZeroClaw 0.8.5 with a Rust launcher and a separate Rust workspace executor. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
+HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher and a separate Rust workspace executor. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
 
 ## Railway services
 
@@ -225,7 +225,7 @@ Queued executor requests reserve their session-scoped ID immediately. Cancellati
 Terminal logging privacy: daemon startup omits `--verbose` because a pinned-runtime fixture showed verbose failed-MCP diagnostics could print private tool-result text. The production terminal formatter stays off; launcher/recovery/storage status messages remain available. The regression exercises actual Telegram and MCP failures with synthetic data through the native subscriber. It checks terminal output only, not every runtime path or persisted diagnostic record; existing payload-capture settings remain off. Returned tool errors still reach the agent for troubleshooting. Production-log inspection remains a separate post-deployment check.
 
 
-Telegram voice transcription uses `agents.primary.transcription_provider = "deepgram.voice"` and the native `ZEROCLAW_providers__transcription__deepgram__voice__api_key` override. The typed-transcription patch is required for this pinned runtime: its original Telegram factory initialized legacy settings first, leaving voice limits unset when only typed providers were supplied. The corrected factory initializes both together. Keep the Deepgram variable populated with its raw key and deploy the updated runtime; do not duplicate the key into legacy TOML fields. Configuration/registration tests do not prove the live key is valid or the Deepgram account has available service. Verify with a fresh private voice note after deployment.
+Telegram voice transcription uses `agents.primary.transcription_provider = "deepgram.voice"` and the native `ZEROCLAW_providers__transcription__deepgram__voice__api_key` override. ZeroClaw v0.8.6 initializes the typed provider and voice limits together through its production channel factory; the former local transcription patch has been removed. Keep the Deepgram variable populated with its raw key and deploy the updated runtime; do not duplicate the key into legacy TOML fields. Configuration/registration tests do not prove the live key is valid or the Deepgram account has available service. Verify with a fresh private voice note after deployment.
 
 ## Native child-process isolation
 
@@ -240,3 +240,17 @@ After native validation, verify Landlock compatibility on Railway and exercise t
 The native OAuth refresh is a trusted control-plane operation: it still reads/writes the sign-in state needed to refresh the subscription and is not subjected to the browser/registry filesystem profile. Its environment is explicitly limited to PATH, HOME and ZEROCLAW_CONFIG_DIR, and its diagnostics remain discarded. The long-running agent/MCP servers retain the credentials required by their granted integrations.
 
 These are credential-access profiles, not isolated tenants or a complete native-process sandbox. Landlock ABI 3 does not mediate every metadata operation, and native network clients retain their intended connectivity. A browser killed abruptly may leave its private scratch directory until container replacement; normal completion cleans it. No live-provider or Railway verification is claimed by the native tests.
+
+## Upgrading to ZeroClaw v0.8.6
+
+The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. This upgrade retains the existing provider variable names, subscription sign-in, persistent volume paths and executor protocol. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
+
+The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. Five Heimdall patches remain: private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, native child isolation and remote skill scripts. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
+
+`[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager so script skills can find the connected workspace executor. The launcher still regenerates configuration at startup: dashboard, RPC or CLI config edits are not durable deployment configuration. Use Railway overrides or a reviewed template change for settings that must survive restart.
+
+Before rollout, confirm existing memory, response-cache and audit SQLite files (including WAL/SHM companions) are regular, singly linked, owned by the service user and inaccessible to group/others. v0.8.6 rejects unsafe files. If startup reports this condition, enter recovery mode, stop database writers, back up state and correct the specific file's ownership/mode after checking it is not a symlink or hardlink. Do not recursively change permissions or delete databases to make startup pass.
+
+After deployment, verify private text and voice messages, model switching, a GitHub read through the `github` alias, web search, text browsing, tool discovery, remote skill execution and workspace write/read/command tools. Check that group messages are rejected and the protected executor fixture remains unreadable. Review scheduled-task and heartbeat delivery after restart. None of these live checks is implied by a successful source build.
+
+The embedded dashboard, ACP, WASM plugin host and WebAuthn build support remain included. New OIDC enrollment, A2A peers, additional providers/search backends, plugin packages and remote browser automation require operator-selected endpoints, credentials and grants. No public endpoint or implicit paid-provider fallback is introduced. Pairing codes are now opaque longer values and admin-gated; remote clients must authenticate and should match the daemon version. Installed WASM packages must target this release's WIT contract and be verified before use.

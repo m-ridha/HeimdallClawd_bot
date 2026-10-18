@@ -1,9 +1,9 @@
 --- a/crates/zeroclaw-channels/src/telegram.rs
 +++ b/crates/zeroclaw-channels/src/telegram.rs
-@@ -4052,6 +4052,19 @@
+@@ -6917,6 +6917,18 @@
      ) -> UpdateOutcome {
          let uid = update.get("update_id").and_then(serde_json::Value::as_i64);
- 
+
 +        // HeimdallClawd only accepts private chats, including approval callbacks.
 +        // Reject before pairing, media downloads, reactions or approval side effects.
 +        let message = if let Some(callback) = update.get("callback_query") {
@@ -12,24 +12,14 @@
 +            update.get("message")
 +        };
 +        if message.and_then(|m| m.pointer("/chat/type")).and_then(serde_json::Value::as_str) != Some("private") {
-+            if let Some(uid) = uid { *offset = uid + 1; }
 +            *transient_retry = None;
 +            return UpdateOutcome::Advanced;
 +        }
 +
          // ── Handle callback_query (inline keyboard taps) ──
          if let Some(cb) = update.get("callback_query") {
-             self.handle_approval_callback(cb).await;
-@@ -12454,7 +12467,7 @@
-             "callback_query": {
-                 "id": "cb-route-1",
-                 "from": { "id": 1001, "first_name": "zeroclaw_operator" },
--                "message": { "message_id": 77, "chat": { "id": 12345 } },
-+                "message": { "message_id": 77, "chat": { "id": 12345, "type": "private" } },
-                 "data": format!("approval:{approval_id}:approve"),
-             }
-         });
-@@ -12844,3 +12857,54 @@
+             let cb_data = cb
+@@ -24248,3 +24260,53 @@
          assert!(cb_data.strip_prefix("approval:").is_none());
      }
  }
@@ -45,9 +35,9 @@
 +        channel.pending_approvals.lock().await.insert("private-only".into(),PendingApproval{sender:approval_tx,destination:"1001".into(),tool_name:"shell".into()});
 +        for kind in ["group","supergroup",""] {
 +            let update=serde_json::json!({"update_id":7,"callback_query":{"id":"cb","from":{"id":1001},"message":{"message_id":1,"chat":{"id":1001,"type":kind}},"data":"approval:private-only:approve"}});
-+            let (tx,mut rx)=tokio::sync::mpsc::channel(1);let mut offset=0;let mut retry=None;
-+            channel.process_update(&update,&tx,&mut offset,&mut retry).await;
-+            assert_eq!(offset,8);assert!(rx.try_recv().is_err());
++            let (tx,mut rx)=tokio::sync::mpsc::channel(1);let mut retry=None;
++            channel.process_update(&update,&tx,&mut retry).await;
++            assert!(rx.try_recv().is_err());
 +            assert!(matches!(approval_rx.try_recv(),Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
 +        }
 +        assert!(channel.pending_approvals.lock().await.contains_key("private-only"));
@@ -64,10 +54,9 @@
 +                message[field] = if field == "text" {serde_json::json!("test")} else if field == "photo" {serde_json::json!([{"file_id":"test","width":1,"height":1}])} else {serde_json::json!({"file_id":"test"})};
 +                let update = serde_json::json!({"update_id":4,"message":message});
 +                let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-+                let mut offset=0; let mut retry=None;
-+                let outcome=channel.process_update(&update,&tx,&mut offset,&mut retry).await;
++                 let mut retry=None;
++                let outcome=channel.process_update(&update,&tx,&mut retry).await;
 +                assert!(matches!(outcome,UpdateOutcome::Advanced));
-+                assert_eq!(offset,5);
 +                assert!(rx.try_recv().is_err(),"non-private {kind} {field} reached agent");
 +            }
 +        }
@@ -78,8 +67,8 @@
 +            .with_ack_reactions(false).with_api_base("http://127.0.0.1:9".into());
 +        for (sender,allowed) in [(1001,true),(999999999,false)] {
 +            let update=serde_json::json!({"update_id":1,"message":{"message_id":1,"chat":{"id":sender,"type":"private"},"from":{"id":sender,"first_name":"Test"},"text":"hello"}});
-+            let (tx,mut rx)=tokio::sync::mpsc::channel(1); let mut offset=0;let mut retry=None;
-+            channel.process_update(&update,&tx,&mut offset,&mut retry).await;
++            let (tx,mut rx)=tokio::sync::mpsc::channel(1); let mut retry=None;
++            channel.process_update(&update,&tx,&mut retry).await;
 +            assert_eq!(rx.try_recv().is_ok(),allowed);
 +        }
 +    }

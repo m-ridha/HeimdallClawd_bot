@@ -27,10 +27,10 @@
 +        format!("{name}: {value}")
 +    }).collect::<Vec<_>>().join(", ")
 +}
- 
+
  /// HTTP request tool for API interactions.
  /// Supports GET, POST, PUT, DELETE methods with configurable security.
-@@ -566,7 +589,18 @@
+@@ -612,7 +635,18 @@
                  return Ok(ToolResult { success: false, output: ToolOutput::default(), error: Some(error.to_string()) });
              }
          }
@@ -47,12 +47,12 @@
 +                });
 +            }
 +        };
- 
+
          if !self.security.can_act() {
              return Ok(ToolResult {
-@@ -655,18 +689,8 @@
+@@ -701,18 +735,8 @@
                  let status_code = status.as_u16();
- 
+
                  // Get response headers (redact sensitive ones)
 -                let response_headers = response.headers().iter();
 -                let headers_text = response_headers
@@ -68,10 +68,10 @@
 -                    .join(", ");
 +                heimdall_http_diagnostic("response", Some(status_code));
 +                let headers_text = heimdall_response_headers(response.headers());
- 
-                 // Get response body with size limit
-                 let response_text = match self.read_response_text(response).await {
-@@ -704,12 +728,11 @@
+
+                 // Get response body with a streamed size limit so transparent
+                 // decompression cannot expand past the cap in memory. A body /
+@@ -761,12 +785,11 @@
                  })
              }
              Err(e) => {

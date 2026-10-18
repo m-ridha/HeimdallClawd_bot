@@ -12,8 +12,6 @@ deploy/bot/patches/http-diagnostics.patch
 deploy/bot/patches/http-secret-origins.patch
 deploy/bot/patches/private-telegram.patch
 deploy/bot/patches/remote-skills.patch
-deploy/bot/patches/typed-transcription.patch
-deploy/bot/patches/wasm-wit.patch
 deploy/bot/runtime.lock.json
 deploy/executor/Dockerfile.artifact
 deploy/tests/codespace-mcp.rs

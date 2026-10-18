@@ -16,7 +16,7 @@ COPY prebuilt/heimdall-launcher /usr/local/bin/heimdall-launcher
 COPY deploy/bot/runtime.sha256 /tmp/runtime.sha256
 RUN sha256sum -c /tmp/runtime.sha256 && zeroclaw --version && rm /tmp/runtime.sha256
 LABEL org.opencontainers.image.title="HeimdallClawd" \
-    io.heimdall.runtime.version="0.8.5" io.heimdall.runtime.revision="cb2b20a9fe59004b7ef03e123942d31f29236d15"
+    io.heimdall.runtime.version="0.8.6" io.heimdall.runtime.revision="c473221313341a853e04122f93bb9bd26b5e6c47"
 COPY deploy/bot/evals /usr/share/heimdall/evals
 ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888
 EXPOSE 3888

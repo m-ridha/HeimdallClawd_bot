@@ -94,7 +94,7 @@
                  }
 --- a/crates/zeroclaw-runtime/src/skills/mod.rs
 +++ b/crates/zeroclaw-runtime/src/skills/mod.rs
-@@ -2884,7 +2884,9 @@
+@@ -2963,7 +2963,9 @@
  }
 
  fn ensure_skills_registry(workspace_dir: &Path, registry_url: Option<&str>) -> Result<PathBuf> {
