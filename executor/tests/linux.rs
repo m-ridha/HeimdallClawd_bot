@@ -116,6 +116,39 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     ).await;
     assert!(!scripting.is_error, "{}", scripting.content);
     assert_eq!(scripting.content, "python-jq-ready\n");
+    // Exercise the actual helper environment and confinement, not the builder's rustup.
+    let rust = execute(
+        "bash",
+        json!({"command": r#"set -eu
+mkdir rust-fixture
+trap 'rm -rf rust-fixture' EXIT
+cd rust-fixture
+export CARGO_HOME="$PWD/.cargo"
+export CARGO_INCREMENTAL=0
+cargo --version
+rustc --version
+rustfmt --version
+cargo clippy --version
+cargo init --offline --lib --name rust_fixture --vcs none .
+cargo generate-lockfile --offline
+cargo fmt --all -- --check
+cargo test --offline --locked -j 1
+cargo clippy --offline --locked -j 1 --all-targets -- -D warnings
+printf 'rust-offline-ready\n'
+"#}),
+        Duration::from_secs(30),
+    )
+    .await;
+    assert!(
+        !rust.is_error,
+        "Rust helper compatibility: {}",
+        rust.content
+    );
+    assert!(
+        rust.content.contains("rust-offline-ready"),
+        "{}",
+        rust.content
+    );
     let allocation = execute(
         "bash",
         json!({"command":"tail /dev/zero"}),

@@ -1,5 +1,13 @@
-FROM rust:1.99-slim-bookworm AS executor-build
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/*
+FROM rust:1.99-slim-bookworm AS rust-tools
+# Copy real toolchain binaries/sysroot, not rustup proxies needing a writable HOME.
+RUN rustup component add rustfmt clippy \
+    && mkdir -p /opt/heimdall-rust \
+    && cp -a "$(rustc --print sysroot)/." /opt/heimdall-rust/ \
+    && chmod -R go-w /opt/heimdall-rust
+
+FROM rust-tools AS executor-build
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq gcc libc6-dev libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/bin/$tool"; done
 WORKDIR /executor
 COPY executor/Cargo.toml executor/Cargo.lock ./
 COPY executor/src ./src

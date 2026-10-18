@@ -69,3 +69,5 @@ Additional Telegram accounts are fully trusted operators, with shared configured
 The updated executor image includes offline Git, Python 3 (standard library) and jq. Third-party Python dependencies and pip are not bundled. These tools retain the existing memory, timeout, output and syscall limits and have no network or credentials. Codespaces supplies networked development; its terminal toolkit depends on the repository devcontainer and should be checked before use. See the [GitHub workflow](github-workflow.md).
 
 Native subprocess confinement preserves the tool grants. See [native child-process isolation](operations.md#native-child-process-isolation) for per-tool filesystem/credential access, kernel requirements, and remaining limitations.
+
+The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native compatibility under the unchanged confinement limits is pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
