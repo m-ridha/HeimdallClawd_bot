@@ -70,4 +70,4 @@ The updated executor image includes offline Git, Python 3 (standard library) and
 
 Native subprocess confinement preserves the tool grants. See [native child-process isolation](operations.md#native-child-process-isolation) for per-tool filesystem/credential access, kernel requirements, and remaining limitations.
 
-The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native compatibility under the unchanged confinement limits is pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
+The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native Linux CI validation passed with the updated confinement policy; live deployment verification remains pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
