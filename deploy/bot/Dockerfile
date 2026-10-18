@@ -6,14 +6,17 @@ RUN rustup component add rustfmt clippy \
     && chmod -R go-w /opt/heimdall-rust
 
 FROM rust-tools AS executor-build
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq gcc libc6-dev libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq gcc libc6-dev libstdc++6 strace && rm -rf /var/lib/apt/lists/*
 RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/bin/$tool"; done
 WORKDIR /executor
 COPY executor/Cargo.toml executor/Cargo.lock ./
 COPY executor/src ./src
 COPY executor/tests ./tests
 COPY executor/entrypoint.sh ./
-RUN cargo test --locked -- --show-output && cargo build --release --locked
+# Failed-syscall trace contains only synthetic native test activity, never live credentials.
+RUN strace -f -e trace=process,prctl,signal,socketpair,pipe2,fcntl -e status=failed -o /tmp/native-syscalls cargo test --locked -- --show-output \
+    || { tail -100 /tmp/native-syscalls; exit 1; }
+RUN cargo build --release --locked
 
 FROM rust:1.99-slim-bookworm AS launcher-build
 WORKDIR /launcher
