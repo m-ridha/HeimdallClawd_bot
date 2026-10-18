@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -44,6 +45,38 @@ class PackageTests(unittest.TestCase):
             self.assertFalse(list(output.rglob('railway.toml')))
             self.assertFalse((output / '.git').exists())
             self.assertFalse((output / 'launcher/target').exists())
+
+    def test_unlisted_files_and_symlinks_are_not_packaged(self):
+        # Run a synthetic checkout so no repository files are mutated.
+        with tempfile.TemporaryDirectory() as temp:
+            checkout = pathlib.Path(temp) / 'checkout'
+            import shutil
+            shutil.copytree(ROOT / 'tools', checkout / 'tools', ignore=shutil.ignore_patterns('__pycache__'))
+            for name in ['launcher', 'deploy']:
+                shutil.copytree(ROOT / name, checkout / name, ignore=shutil.ignore_patterns('target'))
+            shutil.copyfile(ROOT / '.dockerignore', checkout / '.dockerignore')
+            (checkout / 'executor').mkdir()
+            shutil.copyfile(ROOT / 'executor/entrypoint.sh', checkout / 'executor/entrypoint.sh')
+            private = checkout / 'deploy/bot/.ssh'
+            private.mkdir()
+            (private / 'id_ed25519').write_text('TEST_private_credential')
+            (checkout / 'deploy/bot/auth.json').write_text('TEST_private_auth')
+            (checkout / 'deploy/bot/extra-link').symlink_to(private)
+            with mock.patch.object(sys.modules[__name__], 'ROOT', checkout):
+                result, output = self.package(temp)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((output / 'deploy/bot/.ssh').exists())
+            self.assertFalse((output / 'deploy/bot/auth.json').exists())
+            self.assertFalse((output / 'deploy/bot/extra-link').exists())
+            shutil.rmtree(output)
+            required = checkout / 'deploy/bot/config.template.toml'
+            required.unlink()
+            required.symlink_to(private / 'id_ed25519')
+            with mock.patch.object(sys.modules[__name__], 'ROOT', checkout):
+                result, _ = self.package(temp)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('must not contain symlinks', result.stderr)
+            self.assertNotIn('TEST_private', result.stderr)
 
     def test_rejects_wrong_launcher_architecture(self):
         with tempfile.TemporaryDirectory() as temp:

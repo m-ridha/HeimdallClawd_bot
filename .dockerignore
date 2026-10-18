@@ -8,3 +8,17 @@ docs
 
 .railway
 **/__pycache__
+
+# Authentication material must never enter a build context.
+**/.ssh
+**/id_ed25519
+**/id_rsa
+**/id_ecdsa
+**/*.pem
+**/*.key
+**/auth.json
+**/auth-profiles.json
+**/.secret_key
+**/*.db
+**/*.db-shm
+**/*.db-wal
