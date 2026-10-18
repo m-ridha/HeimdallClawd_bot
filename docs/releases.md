@@ -77,3 +77,7 @@ The native channels suite includes `heimdall_transcription`, a synthetic Telegra
 The production environment keeps `RAILWAY_TOKEN` as a secret and the four project/environment/service IDs as variables. The release job masks those IDs before token preflight or Railway commands. The deployment helper accepts an explicit `agent` or `executor` label, masks the newly returned deployment ID in Actions, and reports progress using the label. Exact deployment IDs are still used internally to verify the correct rollout. No variable renaming or migration is required.
 
 These changes affect future logs only. Existing logs, release contents, Git history and commit emails need separate exposure review before publication. Do not delete audit evidence or rewrite published history as part of an ordinary release. GitHub private vulnerability reporting and environment protection are account settings; adding SECURITY.md does not enable them.
+
+## Release input hygiene
+
+`tools/release-files.txt` is the reviewed source-file manifest for release packages. Add required source files explicitly when extending the package; unlisted local files are omitted. Missing listed files and symlinked source paths stop packaging. Docker contexts separately exclude credential files. Neither mechanism replaces secret scanning of reviewed inputs.

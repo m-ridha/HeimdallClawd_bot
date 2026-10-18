@@ -1,0 +1,107 @@
+--- a/crates/zeroclaw-tools/src/text_browser.rs
++++ b/crates/zeroclaw-tools/src/text_browser.rs
+@@ -6,6 +6,30 @@
+ use zeroclaw_config::policy::SecurityPolicy;
+
+ use crate::helpers::domain_guard;
++
++/// Output is bounded while reading, not after collecting an unbounded pipe.
++async fn heimdall_browser_dump(browser: &str, args: &[String]) -> std::io::Result<std::process::Output> {
++    let child = tokio::process::Command::new("/usr/local/bin/heimdall-launcher")
++        .arg("browser-child").arg(browser).args(args)
++        .env_clear().env("PATH", "/usr/bin:/bin").kill_on_drop(true)
++        .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped())
++        .stderr(std::process::Stdio::null()).spawn()?;
++    heimdall_browser_output(child).await
++}
++
++/// Bounded child-output contract shared by the browser and native regression tests.
++pub async fn heimdall_browser_output(mut child: tokio::process::Child) -> std::io::Result<std::process::Output> {
++    use tokio::io::AsyncReadExt;
++    let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser output unavailable"))?;
++    let mut bytes = Vec::new();
++    stdout.take(500_001).read_to_end(&mut bytes).await?;
++    if bytes.len() > 500_000 {
++        child.kill().await?;
++        return Err(std::io::Error::other("Text browser output limit exceeded"));
++    }
++    let status = child.wait().await?;
++    Ok(std::process::Output { status, stdout: bytes, stderr: Vec::new() })
++}
+
+ /// Text browser tool: renders web pages as plain text using text-based browsers
+ /// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
+@@ -125,7 +149,8 @@
+     /// Detect which text browser is available on the system.
+     async fn detect_browser() -> Option<String> {
+         for browser in SUPPORTED_BROWSERS {
+-            if let Ok(output) = tokio::process::Command::new("which")
++            if let Ok(output) = tokio::process::Command::new("/usr/bin/which")
++                .env_clear().env("PATH", "/usr/bin:/bin").kill_on_drop(true)
+                 .arg(browser)
+                 .output()
+                 .await
+@@ -149,7 +174,8 @@
+                 );
+             }
+             // Verify it's installed
+-            let installed = tokio::process::Command::new("which")
++            let installed = tokio::process::Command::new("/usr/bin/which")
++                .env_clear().env("PATH", "/usr/bin:/bin").kill_on_drop(true)
+                 .arg(&browser)
+                 .output()
+                 .await
+@@ -165,7 +191,8 @@
+         if let Some(ref preferred) = self.preferred_browser {
+             let preferred = preferred.trim().to_lowercase();
+             if SUPPORTED_BROWSERS.contains(&preferred.as_str()) {
+-                let installed = tokio::process::Command::new("which")
++                let installed = tokio::process::Command::new("/usr/bin/which")
++                .env_clear().env("PATH", "/usr/bin:/bin").kill_on_drop(true)
+                     .arg(&preferred)
+                     .output()
+                     .await
+@@ -361,13 +388,7 @@
+             self.timeout_secs
+         });
+
+-        let result = tokio::time::timeout(
+-            timeout,
+-            tokio::process::Command::new(&browser)
+-                .args(&dump_args)
+-                .output(),
+-        )
+-        .await;
++        let result = tokio::time::timeout(timeout, heimdall_browser_dump(&browser, &dump_args)).await;
+
+         match result {
+             Ok(Ok(output)) => {
+@@ -380,14 +401,11 @@
+                         error: None,
+                     })
+                 } else {
+-                    let stderr = String::from_utf8_lossy(&output.stderr);
+                     Ok(ToolResult {
+                         success: false,
+                         output: ToolOutput::default(),
+                         error: Some(format!(
+-                            "{browser} exited with status {}: {}",
+-                            output.status,
+-                            stderr.trim()
++                            "{browser} exited unsuccessfully; child isolation or browser transport failed"
+                         )),
+                     })
+                 }
+--- a/crates/zeroclaw-runtime/src/skills/mod.rs
++++ b/crates/zeroclaw-runtime/src/skills/mod.rs
+@@ -2884,7 +2884,9 @@
+ }
+
+ fn ensure_skills_registry(workspace_dir: &Path, registry_url: Option<&str>) -> Result<PathBuf> {
+-    let registry_dir = workspace_dir.join(SKILLS_REGISTRY_DIR_NAME);
++    let registry_dir = std::env::var_os("HEIMDALL_SKILLS_CACHE")
++        .map(PathBuf::from)
++        .unwrap_or_else(|| workspace_dir.join(SKILLS_REGISTRY_DIR_NAME));
+     let repo_url = registry_url.unwrap_or(SKILLS_REGISTRY_REPO_URL);
+
+     if !registry_dir.exists() {

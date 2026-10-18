@@ -331,6 +331,11 @@ impl Codespaces {
         let mut command = Command::new(GH);
         configure_command(&mut command, &self.token);
         command.args(args);
+        let session = crate::child_policy::Session::new()
+            .map_err(|_| "Cannot prepare private child state".to_string())?;
+        session
+            .configure(&mut command, crate::child_policy::Scope::Codespaces)
+            .map_err(|_| "Child filesystem isolation is unavailable".to_string())?;
         // Separate process group lets timeout cleanup terminate ssh descendants.
         // SAFETY: setsid is async-signal-safe; the child invokes no Rust allocation
         // or synchronization before exec and reports OS failure directly.

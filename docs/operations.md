@@ -226,3 +226,17 @@ Terminal logging privacy: daemon startup omits `--verbose` because a pinned-runt
 
 
 Telegram voice transcription uses `agents.primary.transcription_provider = "deepgram.voice"` and the native `ZEROCLAW_providers__transcription__deepgram__voice__api_key` override. The typed-transcription patch is required for this pinned runtime: its original Telegram factory initialized legacy settings first, leaving voice limits unset when only typed providers were supplied. The corrected factory initializes both together. Keep the Deepgram variable populated with its raw key and deploy the updated runtime; do not duplicate the key into legacy TOML fields. Configuration/registration tests do not prove the live key is valid or the Deepgram account has available service. Verify with a fresh private voice note after deployment.
+
+## Native child-process isolation
+
+The text browser runs through a launcher wrapper with an empty credential environment, an ephemeral HOME/TMPDIR, and a Linux Landlock filesystem policy. It can read system binaries, libraries, public configuration and its private scratch directory; it cannot read agent authentication files, conversation storage, SSH keys, or `/proc`.
+
+The registry installer retains its existing cleared environment and official-registry restrictions. Landlock grants the rendered configuration, managed skill storage, and read-only skill/plugin metadata directories, while a private temporary registry cache avoids granting access to the agent workspace. Codespaces receives only its GitHub token and access to its own CLI state and scratch directory. Its intentionally authorized remote commands can still access credentials available inside the Codespace; this policy protects the Railway agent's other credentials.
+
+Native descendants inherit filesystem restrictions and a seccomp denial of process-memory inspection. These profiles require Linux Landlock ABI 3 or newer and fail closed without it; there is no unrestricted fallback. Existing skill/GitHub timeout, output and process-group handling remains. The native text-browser transport still has its upstream redirect/DNS limitations; prefer `web_fetch` for untrusted URLs. Browser state is ephemeral rather than an authenticated persistent browsing profile.
+
+After native validation, verify Landlock compatibility on Railway and exercise text browsing, skill listing/installing, and Codespaces before treating the change as live-verified. No production deployment is implied by local/CI checks.
+
+The native OAuth refresh is a trusted control-plane operation: it still reads/writes the sign-in state needed to refresh the subscription and is not subjected to the browser/registry filesystem profile. Its environment is explicitly limited to PATH, HOME and ZEROCLAW_CONFIG_DIR, and its diagnostics remain discarded. The long-running agent/MCP servers retain the credentials required by their granted integrations.
+
+These are credential-access profiles, not isolated tenants or a complete native-process sandbox. Landlock ABI 3 does not mediate every metadata operation, and native network clients retain their intended connectivity. A browser killed abruptly may leave its private scratch directory until container replacement; normal completion cleans it. No live-provider or Railway verification is claimed by the native tests.
