@@ -106,7 +106,7 @@ Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a pro
 
 Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with Railway CLI 5.68.0 and Python SDK 0.7.0. Service variables are unmanaged by IaC and volumes are preserved. See [IaC operations](docs/railway-iac.md) and [.railway/README.md](.railway/README.md).
 
-Keep one replica per service, sleeping disabled and the account's $5 hard spending limit. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
+Keep one replica per service and sleeping disabled. Operate frugally, monitor usage, and configure budgets to suit the deployment. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
 
 See [GitHub access setup](docs/operations.md#github-access) for token permissions, Codespaces limits and verification.
 

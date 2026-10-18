@@ -43,9 +43,9 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 - Authentication is ChatGPT subscription sign-in with a native refresh check before polling. There is no automatic API-key or paid-provider fallback. Other providers are explicit, owner-configured additions.
 - Host tools stay blocked: `shell`, `file_read`, `file_write`, `git_operations`, `schedule` and `delegate` remain in `excluded_tools`, `allowed_commands` stays empty, and there is no host execution fallback when the executor fails.
 - Tool grants are explicit. Registering an MCP server or plugin grants nothing; add its exact prefixed tool names to both `allowed_tools` and `auto_approve` (and to `pipeline.allowed_tools` only when pipelines should use it). Update the pinned count and expectations in `launcher/tests/config.rs` in the same change.
-- Keep one replica per service, sleeping disabled and the $5 hard spending limit. Keep the Singapore region (`asia-southeast1-eqsg3a`) and the existing volume names, sizes and mounts: `heimdall-data` at `/data` (500 MB) and `executor-workspace` at `/data/workspace` (200 MB). Volumes are storage, not backups.
+- Keep infrastructure frugal and avoid unnecessary always-on services. Budget is operator-controlled rather than a fixed project constraint. Keep one replica per service, sleeping disabled, the existing IaC region, and the existing volume names, sizes and mounts: `heimdall-data` at `/data` (500 MB) and `executor-workspace` at `/data/workspace` (200 MB). Volumes are storage, not backups.
 - Public web access allows public hosts only (`allow_private_hosts = false`). The workspace executor stays network-disabled.
-- Reminders default to `Asia/Jakarta` when the user gives a local time without a timezone (see `deploy/bot/TOOLS.md`).
+- For reminders without an explicit timezone, use the timezone recorded in the agent’s `USER.md`; ask the requesting user if it is unknown. An explicit timezone in the request takes precedence (see `deploy/bot/TOOLS.md`).
 - Park unscheduled ideas in a new `docs/ideas.md` rather than implementing them. A backlog or capability list is not authorization to build it all.
 
 ## Architecture
