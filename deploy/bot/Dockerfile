@@ -13,7 +13,7 @@ COPY executor/Cargo.toml executor/Cargo.lock ./
 COPY executor/src ./src
 COPY executor/tests ./tests
 COPY executor/entrypoint.sh ./
-RUN cargo test --locked && cargo build --release --locked
+RUN cargo test --locked -- --show-output && cargo build --release --locked
 
 FROM rust:1.99-slim-bookworm AS launcher-build
 WORKDIR /launcher

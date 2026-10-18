@@ -1,6 +1,7 @@
 use std::io;
-/// Two admitted helpers leave room for the supervisor within the 250 MB container.
-pub const HELPER_ADDRESS_SPACE: u64 = 96 * 1024 * 1024;
+/// Virtual address space, not resident memory: LLVM's shared library alone
+/// cannot map within 96 MiB. Container memory remains capped separately.
+pub const HELPER_ADDRESS_SPACE: u64 = 1024 * 1024 * 1024;
 #[cfg(target_os = "linux")]
 pub fn restrict() -> io::Result<()> {
     use seccompiler::{

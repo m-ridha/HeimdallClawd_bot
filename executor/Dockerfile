@@ -13,7 +13,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY tests ./tests
 COPY entrypoint.sh ./
-RUN cargo test --locked && cargo build --release --locked
+RUN cargo test --locked -- --show-output && cargo build --release --locked
 FROM rust:1.99-slim-bookworm AS contract
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates pkg-config g++ libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /runtime
