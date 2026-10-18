@@ -151,6 +151,15 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     } else {
         cmd.args(["list", "--agent", "primary"]);
     }
+    let session = crate::child_policy::Session::new()
+        .map_err(|_| "Cannot prepare private child state".to_string())?;
+    cmd.env(
+        "HEIMDALL_SKILLS_CACHE",
+        session.directory().join("skills-registry"),
+    );
+    session
+        .configure(&mut cmd, crate::child_policy::Scope::Skills)
+        .map_err(|_| "Child filesystem isolation is unavailable".to_string())?;
     // Separate process group lets timeout cleanup terminate Git descendants.
     unsafe {
         cmd.pre_exec(|| {

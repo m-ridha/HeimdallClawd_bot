@@ -11,7 +11,7 @@ Use this repository's **Security → Report a vulnerability** option when privat
 - Telegram access is restricted to configured accounts in private chats. Additional allowed accounts share a privileged assistant and are trusted operators, not isolated tenants.
 - The agent holds provider and integration credentials. A separate, network-disabled executor runs file and command jobs without those credentials and applies filesystem, syscall, identity and resource restrictions.
 - Native host shell/file/Git tools remain excluded. Executor failure must not enable a host execution fallback.
-- Named HTTP credentials are bound to approved HTTPS origins. Public web tools reject private hosts.
+- Named HTTP credentials are bound to approved HTTPS origins. HTTP/fetch tools enforce destination restrictions; the native text browser has the redirect/DNS limitations documented in operations.
 - Logs must not capture credentials, private message bodies, or tool payloads. Error diagnostics must remain bounded and sanitized.
 
 See [capabilities](docs/capabilities.md), [executor boundaries](executor/README.md), and [operations](docs/operations.md) for the exact supported configuration and limits.

@@ -24,6 +24,15 @@ pub fn configure_daemon(command: &mut Command, port: u16) -> &mut Command {
     command.args(["daemon", "--host", "0.0.0.0", "--port", &port.to_string()])
 }
 
+/// The native OAuth refresh needs its state files, not integration environment secrets.
+pub fn configure_auth(command: &mut Command, state: &str) {
+    command
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", state)
+        .env("ZEROCLAW_CONFIG_DIR", state);
+}
+
 /// Discard OAuth diagnostics; bound the process and reap it on every exit path.
 pub fn validate_auth(command: &mut Command, timeout: Duration) -> io::Result<()> {
     let mut child = command
@@ -178,5 +187,22 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("timed out"));
         assert!(start.elapsed() < Duration::from_secs(5));
+    }
+}
+
+#[cfg(test)]
+mod auth_environment_tests {
+    #[test]
+    fn refresh_does_not_inherit_integration_secrets() {
+        let mut command = std::process::Command::new("/usr/bin/env");
+        command.env("TEST_PROVIDER_SECRET", "TEST_private_value");
+        super::configure_auth(&mut command, "/tmp/fixture-state");
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("ZEROCLAW_CONFIG_DIR=/tmp/fixture-state"));
+        assert!(!text.contains("TEST_PROVIDER_SECRET"));
+        assert!(!text.contains("TEST_private_value"));
+        assert_eq!(text.lines().count(), 3);
     }
 }

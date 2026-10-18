@@ -103,6 +103,10 @@ fn runtime(vars: &[(String, String)]) -> Command {
     command
 }
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("browser-child") {
+        return heimdall_launcher::child_policy::browser();
+    }
+
     if std::env::args().nth(1).as_deref() == Some("--skills-mcp") {
         return heimdall_launcher::skills_mcp::serve();
     }
@@ -189,8 +193,10 @@ fn main() -> io::Result<()> {
     }
     // Native refresh rejects missing/wrong-provider profiles and unusable tokens.
     // Capture all diagnostics privately: OAuth errors can contain credentials.
+    let mut auth = Command::new(RUNTIME);
+    heimdall_launcher::startup::configure_auth(&mut auth, STATE);
     heimdall_launcher::startup::validate_auth(
-        runtime(&vars).args(["auth", "refresh", "--model-provider", "openai-codex"]),
+        auth.args(["auth", "refresh", "--model-provider", "openai-codex"]),
         heimdall_launcher::startup::AUTH_TIMEOUT,
     )?;
     println!(

@@ -42,3 +42,7 @@ launcher/tests/skills_mcp.rs
 launcher/tests/startup.rs
 .dockerignore
 executor/entrypoint.sh
+launcher/src/child_policy.rs
+deploy/bot/patches/native-child.patch
+launcher/tests/child_policy.rs
+deploy/tests/native-child.rs

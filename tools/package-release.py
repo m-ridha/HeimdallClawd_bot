@@ -67,6 +67,7 @@ provenance = {
     'binary_sha256': digest, 'launcher_sha256': launcher_digest, 'executor_sha256': executor_digest,
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
+    'native_child_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/native-child.patch').read_bytes()).hexdigest(),
     'http_diagnostics_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-diagnostics.patch').read_bytes()).hexdigest(),
     'http_secret_origins_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
     'wasm_wit_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/wasm-wit.patch').read_bytes()).hexdigest(),
