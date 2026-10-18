@@ -116,17 +116,77 @@ async fn actual_linux_isolation_and_descendant_cleanup() {
     ).await;
     assert!(!scripting.is_error, "{}", scripting.content);
     assert_eq!(scripting.content, "python-jq-ready\n");
+    let local_pair = execute(
+        "bash",
+        json!({"command": r#"python3 -B -c 'import errno,socket
+left,right=socket.socketpair(socket.AF_UNIX,socket.SOCK_SEQPACKET | socket.SOCK_CLOEXEC)
+left.send(b"local")
+assert right.recv(16)==b"local"
+for family,kind in [(socket.AF_INET,socket.SOCK_STREAM),(socket.AF_UNIX,socket.SOCK_STREAM)]:
+    try:
+        socket.socketpair(family,kind)
+    except OSError as error:
+        assert error.errno==errno.EPERM,error
+    else:
+        raise SystemExit("unexpected socket-pair grant")
+print("local-pair-only")'"#}),
+        t,
+    )
+    .await;
+    assert!(!local_pair.is_error, "{}", local_pair.content);
+    assert_eq!(local_pair.content, "local-pair-only\n");
+    // Exercise the actual helper environment and confinement, not the builder's rustup.
+    let rust = execute(
+        "bash",
+        json!({"command": r#"set -eu
+mkdir rust-fixture
+trap 'rm -rf rust-fixture' EXIT
+cd rust-fixture
+export CARGO_HOME="$PWD/.cargo"
+export CARGO_INCREMENTAL=0
+export RUSTFLAGS="-C codegen-units=1 -C debuginfo=0"
+cargo --version
+rustc --version
+rustfmt --version
+cargo clippy --version
+cargo init --offline --lib --name rust_fixture --vcs none .
+cargo generate-lockfile --offline
+cargo fmt --all -- --check
+python3 -B -c 'import resource,subprocess; subprocess.run(["cargo","test","--offline","--locked","-j","1"],check=True); print("rust_test_peak_rss_kib="+str(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss))'
+python3 -B -c 'import resource,subprocess; subprocess.run(["cargo","clippy","--offline","--locked","-j","1","--all-targets","--","-D","warnings"],check=True); print("rust_clippy_peak_rss_kib="+str(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss))'
+printf 'rust-offline-ready\n'
+"#}),
+        Duration::from_secs(30),
+    )
+    .await;
+    eprintln!("Rust smoke diagnostics: {}", rust.content);
+    assert!(
+        !rust.is_error,
+        "Rust helper compatibility: {}",
+        rust.content
+    );
+    assert!(
+        rust.content.contains("rust-offline-ready"),
+        "{}",
+        rust.content
+    );
+    // Reserve virtual space without faulting pages into RAM. The former
+    // tail /dev/zero probe could OOM a 250 MB container before hitting 1 GiB AS.
     let allocation = execute(
         "bash",
-        json!({"command":"tail /dev/zero"}),
+        json!({"command": r#"python3 -B -c 'import errno,mmap
+try:
+    mmap.mmap(-1, 2 * 1024 * 1024 * 1024)
+except OSError as error:
+    assert error.errno == errno.ENOMEM, error
+    print("address-space-cap-enforced")
+else:
+    raise SystemExit("address-space cap not enforced")'"#}),
         Duration::from_secs(10),
     )
     .await;
-    assert!(allocation.is_error);
-    assert!(
-        !allocation.content.contains("Execution timed out"),
-        "allocation cap did not stop job"
-    );
+    assert!(!allocation.is_error, "{}", allocation.content);
+    assert_eq!(allocation.content, "address-space-cap-enforced\n");
     let temporary = execute(
         "bash",
         json!({"command":"printf '%s' \"$TMPDIR\"; touch \"$TMPDIR/probe\""}),

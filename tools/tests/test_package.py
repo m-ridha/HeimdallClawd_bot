@@ -33,7 +33,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn(lock[field], (output / 'deploy/bot/runtime.sha256').read_text())
             self.assertEqual(hashlib.sha256((output / 'executor/heimdall-executor').read_bytes()).hexdigest(), lock['executor_sha256'])
             for dockerfile in [output / 'Dockerfile', output / 'executor/Dockerfile']:
-                self.assertNotIn('cargo ', dockerfile.read_text())
+                self.assertNotRegex(dockerfile.read_text(), r'\bcargo\s+(?:build|test|install|check)\b')
                 self.assertIn('sha256sum -c', dockerfile.read_text())
             self.assertEqual(lock['native_child_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/native-child.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['typed_transcription_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/typed-transcription.patch').read_bytes()).hexdigest())

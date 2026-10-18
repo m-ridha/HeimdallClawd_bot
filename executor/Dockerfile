@@ -1,11 +1,19 @@
-FROM rust:1.99-slim-bookworm AS builder
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/*
+FROM rust:1.99-slim-bookworm AS rust-tools
+# Copy real toolchain binaries/sysroot, not rustup proxies needing a writable HOME.
+RUN rustup component add rustfmt clippy \
+    && mkdir -p /opt/heimdall-rust \
+    && cp -a "$(rustc --print sysroot)/." /opt/heimdall-rust/ \
+    && chmod -R go-w /opt/heimdall-rust
+
+FROM rust-tools AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq gcc libc6-dev libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/bin/$tool"; done
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY tests ./tests
 COPY entrypoint.sh ./
-RUN cargo test --locked && cargo build --release --locked
+RUN cargo test --locked -- --show-output && cargo build --release --locked
 FROM rust:1.99-slim-bookworm AS contract
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates pkg-config g++ libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /runtime
@@ -18,8 +26,10 @@ COPY contract/mcp-client.rs crates/zeroclaw-tools/tests/heimdall_mcp.rs
 ENV HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh
 RUN cargo test --locked -p zeroclaw-tools --test heimdall_mcp && touch /contract-passed
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 jq gcc libc6-dev libstdc++6 && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 64173 --user-group --no-create-home executor
+COPY --from=rust-tools /opt/heimdall-rust /opt/heimdall-rust
+RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/bin/$tool"; done
 COPY --from=builder /build/target/release/heimdall-executor /usr/local/bin/heimdall-executor
 COPY --from=contract /contract-passed /usr/local/share/heimdall-contract-passed
 COPY entrypoint.sh /usr/local/bin/entrypoint

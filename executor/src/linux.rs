@@ -1,6 +1,7 @@
 use std::io;
-/// Two admitted helpers leave room for the supervisor within the 250 MB container.
-pub const HELPER_ADDRESS_SPACE: u64 = 96 * 1024 * 1024;
+/// Virtual address space, not resident memory: LLVM's shared library alone
+/// cannot map within 96 MiB. Container memory remains capped separately.
+pub const HELPER_ADDRESS_SPACE: u64 = 1024 * 1024 * 1024;
 #[cfg(target_os = "linux")]
 pub fn restrict() -> io::Result<()> {
     use seccompiler::{
@@ -169,6 +170,33 @@ pub fn restrict() -> io::Result<()> {
         libc::SYS_clone,
         vec![SeccompRule::new(vec![condition]).map_err(io::Error::other)?],
     );
+    // Rust 1.99's fork/exec error channel uses an unnamed Unix SEQPACKET
+    // pair. This cannot create a network endpoint or connect to another job.
+    let condition = |argument, value| {
+        SeccompCondition::new(argument, SeccompCmpArgLen::Qword, SeccompCmpOp::Eq, value)
+            .map_err(io::Error::other)
+    };
+    rules.insert(
+        libc::SYS_socketpair,
+        vec![
+            SeccompRule::new(vec![
+                condition(0, libc::AF_UNIX as u64)?,
+                condition(1, (libc::SOCK_SEQPACKET | libc::SOCK_CLOEXEC) as u64)?,
+                condition(2, 0)?,
+            ])
+            .map_err(io::Error::other)?,
+        ],
+    );
+    // Connected local-pair I/O only: no destination/source address arguments.
+    for syscall in [libc::SYS_sendto, libc::SYS_recvfrom] {
+        rules.insert(
+            syscall,
+            vec![
+                SeccompRule::new(vec![condition(4, 0)?, condition(5, 0)?])
+                    .map_err(io::Error::other)?,
+            ],
+        );
+    }
     let filter = SeccompFilter::new(
         rules,
         SeccompAction::Errno(libc::EPERM as u32),
