@@ -112,7 +112,9 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ("knowledge.enabled", "true"),
         ("memory.consolidation-extract-facts", "true"),
         ("memory.snapshot-enabled", "true"),
-        ("memory.rerank-enabled", "false"),
+        ("memory.rerank-enabled", "true"),
+        ("memory.rerank-strategy", "mmr"),
+        ("memory.candidate-multiplier", "2"),
         ("agents.primary.acp-enable-mcp", "true"),
         ("observability.log-persistence", "rotating"),
         ("observability.log-tool-io", "off"),
@@ -130,7 +132,11 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "{}",
             String::from_utf8_lossy(&result.stderr)
         );
-        assert_eq!(String::from_utf8_lossy(&result.stdout).trim(), expected);
+        assert_eq!(
+            String::from_utf8_lossy(&result.stdout).trim(),
+            expected,
+            "effective runtime property: {property}"
+        );
     }
     let result = std::process::Command::new(&binary)
         .args(["config", "migrate"])
