@@ -58,7 +58,7 @@ Do not edit `/data/zeroclaw/config.toml` expecting changes to survive startup: t
 5. Install a suitable small registry skill, read its instructions, and run a compatible script tool. Verify the command runs in the executor and that missing dependencies are reported accurately.
 6. Create a simple SOP and a short permitted pipeline. Verify state persists after a restart. Install and test a specific WASM plugin separately before depending on it.
 
-Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. The Railway hard spending cap remains separate from those quotas.
+Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. Monitor Railway costs separately and choose an appropriate budget for the deployment.
 
 GitHub repository edits do not depend on Codespaces. See the [repository workflow](github-workflow.md) for API commits/PRs, updated offline Git support and build/test paths.
 
