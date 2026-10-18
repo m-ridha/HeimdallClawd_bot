@@ -45,6 +45,33 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
     std::fs::create_dir_all(&config.data_dir).unwrap();
     let workspace = config.agent_workspace_dir("primary");
     std::fs::create_dir_all(&workspace).unwrap();
+    let inject = zeroclaw_runtime::agent::memory_inject::MemoryInjectConfig::from_memory_config(
+        &config.memory,
+        5,
+    );
+    assert!(inject.rerank_enabled);
+    assert_eq!(inject.rerank.candidate_pool_cap, 10);
+    assert_eq!(
+        inject.rerank.strategy,
+        zeroclaw_memory::rerank::RerankStrategy::Mmr { lambda: 0.7 }
+    );
+    let entry = |id: &str| {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "key": id, "content":"Synthetic memory fact for duplicate collapse",
+            "category":"core", "timestamp":"2026-01-01T00:00:00Z", "score":0.95
+        }))
+        .unwrap()
+    };
+    let ranked = zeroclaw_memory::rerank::run(
+        vec![entry("first"), entry("duplicate")],
+        &inject.rerank,
+        |_| true,
+    );
+    assert_eq!(
+        ranked.len(),
+        1,
+        "enabled native stage must collapse duplicate facts"
+    );
     let config = Arc::new(config);
     let security = Arc::new(SecurityPolicy::for_agent(&config, "primary").unwrap());
     let memory = Arc::new(SqliteMemory::new("primary", &workspace).unwrap());

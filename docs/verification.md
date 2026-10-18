@@ -190,3 +190,5 @@ The upgrade pins revision `c473221313341a853e04122f93bb9bd26b5e6c47` and its dow
 The native transcription contract now uses the upstream production channel factory with a typed loopback provider, rather than a method supplied by a local patch. It checks the configured duration limit before downloading/transcribing a valid synthetic voice note. Tool inventory checks cover built-in discovery, excluded-host-tool visibility, ACP memory exclusion and the external adapters.
 
 Native Linux workflow validation and live Railway upgrade checks are tracked in the upgrade PR. Local macOS checks cannot establish Linux isolation or deployed compatibility. No production deployment or persistent-state migration has been performed as part of source preparation.
+
+Source inspection also confirmed that native memory reranking is implemented, correcting the earlier capability description. The template now enables MMR/deduplication with a two-times candidate pool, and the inventory contract materializes the production settings and checks duplicate collapse without any external provider.

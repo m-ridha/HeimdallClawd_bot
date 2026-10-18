@@ -518,3 +518,12 @@ fn upgraded_tool_inventory_stays_full_with_bounded_discovery() {
         assert!(tool_names(&cfg["risk_profiles"]["primary"], field).contains(&"tool_search"));
     }
 }
+
+#[test]
+fn memory_reranking_has_a_small_local_candidate_pool() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    assert_eq!(cfg["memory"]["rerank_enabled"].as_bool(), Some(true));
+    assert_eq!(cfg["memory"]["rerank_strategy"].as_str(), Some("mmr"));
+    assert_eq!(cfg["memory"]["candidate_multiplier"].as_integer(), Some(2));
+}

@@ -400,8 +400,10 @@ response_cache_enabled = true
 response_cache_ttl_minutes = 15
 response_cache_max_entries = 128
 response_cache_hot_entries = 16
-# The pinned runtime reports reranking as unimplemented.
-rerank_enabled = false
+# Bounded native scoring/deduplication; no additional provider call or key.
+rerank_enabled = true
+rerank_strategy = "mmr"
+candidate_multiplier = 2
 embedding_provider = "custom:https://api.cohere.ai/compatibility/v1"
 embedding_model = "embed-v5.0-fast"
 embedding_dimensions = 2048
