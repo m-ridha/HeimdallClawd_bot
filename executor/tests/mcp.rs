@@ -58,6 +58,16 @@ async fn mcp_initializes_and_exposes_only_workspace_tools() {
             "file_write"
         ]
     );
+    assert_eq!(
+        tools[0]["inputSchema"]["properties"]["command"]["maxLength"],
+        32768
+    );
+    for index in [3, 4] {
+        assert_eq!(
+            tools[index]["inputSchema"]["properties"]["content"]["maxLength"],
+            65536
+        );
+    }
     assert!(
         tools
             .iter()

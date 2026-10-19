@@ -1,6 +1,6 @@
 //! Narrow registry installer; no model-controlled commands, URLs or filesystem paths.
 use serde_json::{Value, json};
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 const STATE: &str = "/data/zeroclaw";
@@ -217,28 +217,11 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     }
 }
 pub fn serve() -> io::Result<()> {
-    let input = io::stdin();
-    let mut input = input.lock();
-    let output = io::stdout();
-    let mut output = output.lock();
-    loop {
-        let mut line = String::new();
-        let size = (&mut input).take(131073).read_line(&mut line)?;
-        if size == 0 {
-            return Ok(());
-        }
-        if size > 131072 {
-            return Err(io::Error::other("MCP request too large"));
-        }
-        let response = match serde_json::from_str(&line) {
-            Ok(request) => handle(request, &mut execute),
-            Err(_) => Some(error(Value::Null, -32700, "Invalid JSON")),
-        };
-        if let Some(response) = response {
-            writeln!(output, "{response}")?;
-            output.flush()?;
-        }
-    }
+    crate::mcp_stdio::serve(
+        &mut io::stdin().lock(),
+        &mut io::stdout().lock(),
+        |request| handle(request, &mut execute),
+    )
 }
 #[cfg(test)]
 mod tests {

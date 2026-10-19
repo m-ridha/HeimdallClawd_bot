@@ -15,7 +15,7 @@ Keep one replica per service and sleeping disabled. Monitor costs and use an ope
 
 The bot requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, and `HEIMDALL_EXECUTOR_TOKEN`. No Telegram owner ID is hardcoded; omitting it stops startup. Keep token values in Railway variables only. `TELEGRAM_ALLOWED_USER_IDS` accepts comma-separated numeric IDs with optional surrounding spaces; the owner is always included and duplicates are removed. A blank variable means owner only. Empty entries within a nonempty list, zero, negative and malformed entries fail startup. Only private chats from permitted accounts are accepted. All permitted accounts share the executor workspace; conversation keys include the sender identity.
 
-`HEIMDALL_MODEL` selects the subscription model and defaults to `gpt-6.1-sol`. `HEIMDALL_EXECUTOR_URL`, when supplied, must equal `http://heimdall-executor.railway.internal:3889`; the MCP endpoint is `/mcp`. Set the executor's `EXECUTOR_TOKEN` to the same private value as the bot's executor token.
+`HEIMDALL_MODEL` selects the subscription model and defaults to `gpt-6.1-sol`. `HEIMDALL_EXECUTOR_URL`, when supplied, must equal `http://heimdall-executor.railway.internal:3889`; the MCP endpoint is `/mcp`. The transfer bridge reads the `workspace` MCP URL from the embedded template and validates its private origin and exact path; it does not read the mutable deployed TOML. Set the executor's `EXECUTOR_TOKEN` to the same private value as the bot's executor token.
 
 ## Authentication and state
 

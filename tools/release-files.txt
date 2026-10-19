@@ -48,3 +48,4 @@ deploy/bot/patches/native-child.patch
 deploy/bot/patches/gateway-admin-auth.patch
 launcher/tests/child_policy.rs
 deploy/tests/native-child.rs
+launcher/src/mcp_stdio.rs

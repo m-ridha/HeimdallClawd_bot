@@ -4,7 +4,7 @@
 
 Telegram messages reach ZeroClaw inside the agent service. The Rust launcher prepares private configuration, checks authentication and starts ZeroClaw. It also hosts a narrow stdio MCP skill installer. ZeroClaw calls the selected model provider. For workspace file or command operations, ZeroClaw calls the separate executor over authenticated private MCP. The executor performs the operation in its own persistent workspace and returns the result.
 
-Changing the model keeps the same agent and isolated tool boundary. Conversation state lives on the agent's `/data` volume. User tool files live on the executor's `/data/workspace` volume; neither belongs in Git. Optional `launcher/src/agentmail.rs` admits signed, filtered email events, supervises ZeroClaw behind one public listener and hosts the narrow email-rule management MCP server. See [email events](agentmail-events.md).
+Changing the model keeps the same agent and isolated tool boundary. Conversation state lives on the agent's `/data` volume. User tool files live on the executor's `/data/workspace` volume; neither belongs in Git. Optional `launcher/src/agentmail.rs` admits signed, filtered email events, supervises ZeroClaw behind one public listener and hosts the narrow email-rule management MCP server. See [email events](agentmail-events.md). The skills and Codespaces servers share bounded stdio framing in `launcher/src/mcp_stdio.rs`; their tool validation remains separate.
 
 ## Folders
 

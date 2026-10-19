@@ -1,3 +1,4 @@
+use crate::linux::{HELPER_GID, HELPER_UID};
 use crate::protocol::{CommandOutcome, Job, LIMIT, Reply, TerminationReason};
 use std::{io, process::Stdio, time::Duration};
 use tokio::{
@@ -45,7 +46,7 @@ pub async fn run_at(
     let path = std::ffi::CString::new(temp.path().as_os_str().as_encoded_bytes())
         .map_err(io::Error::other)?;
     // SAFETY: this is a newly created, root-owned directory under a root-owned parent.
-    if unsafe { libc::chown(path.as_ptr(), 64173, 64173) } != 0 {
+    if unsafe { libc::chown(path.as_ptr(), HELPER_UID, HELPER_GID) } != 0 {
         return Err(io::Error::last_os_error());
     }
     let mut command = Command::new(binary);
@@ -67,8 +68,8 @@ pub async fn run_at(
         unsafe {
             command.pre_exec(|| {
                 if libc::setgroups(0, std::ptr::null()) != 0
-                    || libc::setgid(64173) != 0
-                    || libc::setuid(64173) != 0
+                    || libc::setgid(HELPER_GID) != 0
+                    || libc::setuid(HELPER_UID) != 0
                 {
                     return Err(io::Error::last_os_error());
                 }

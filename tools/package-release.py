@@ -7,14 +7,20 @@ import re
 import shutil
 import sys
 
+
+def read_linux_binary(path, component):
+    data = pathlib.Path(path).read_bytes()
+    if data[:6] != b'\x7fELF\x02\x01' or data[18:20] != b'\x3e\x00':
+        raise SystemExit(f'Expected a Linux x86_64 {component} executable')
+    return data
+
+
 binary, launcher_binary, executor_binary, destination, tag, commit = sys.argv[1:]
 if not re.fullmatch(r'v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', tag):
     raise SystemExit('Invalid release tag')
 if not re.fullmatch(r'[0-9a-f]{40}', commit):
     raise SystemExit('Invalid source commit')
-binary_data = pathlib.Path(binary).read_bytes()
-if binary_data[:6] != b'\x7fELF\x02\x01' or binary_data[18:20] != b'\x3e\x00':
-    raise SystemExit('Expected a Linux x86_64 ELF executable')
+binary_data = read_linux_binary(binary, 'ELF')
 root = pathlib.Path(__file__).resolve().parent.parent
 out = pathlib.Path(destination)
 out.mkdir(parents=True, exist_ok=False)
@@ -41,16 +47,12 @@ for name in paths:
 shutil.copyfile(binary, out / 'prebuilt/zeroclaw')
 (out / 'prebuilt/zeroclaw').chmod(0o755)
 digest = hashlib.sha256((out / 'prebuilt/zeroclaw').read_bytes()).hexdigest()
-launcher_data = pathlib.Path(launcher_binary).read_bytes()
-if launcher_data[:6] != b'\x7fELF\x02\x01' or launcher_data[18:20] != b'\x3e\x00':
-    raise SystemExit('Expected a Linux x86_64 launcher executable')
+launcher_data = read_linux_binary(launcher_binary, 'launcher')
 shutil.copyfile(launcher_binary, out / 'prebuilt/heimdall-launcher')
 (out / 'prebuilt/heimdall-launcher').chmod(0o755)
 launcher_digest = hashlib.sha256(launcher_data).hexdigest()
 (out / 'deploy/bot/runtime.sha256').write_text(f'{digest}  /usr/local/bin/zeroclaw\n{launcher_digest}  /usr/local/bin/heimdall-launcher\n')
-executor_data = pathlib.Path(executor_binary).read_bytes()
-if executor_data[:6] != b'\x7fELF\x02\x01' or executor_data[18:20] != b'\x3e\x00':
-    raise SystemExit('Expected a Linux x86_64 executor executable')
+executor_data = read_linux_binary(executor_binary, 'executor')
 executor_out = out / 'executor'
 executor_out.mkdir(exist_ok=True)
 shutil.copyfile(executor_binary, executor_out / 'heimdall-executor')

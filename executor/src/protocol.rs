@@ -3,6 +3,8 @@ use serde_json::Value;
 
 pub const LIMIT: usize = 65536;
 pub const BODY_LIMIT: usize = 131072;
+pub const BINARY_LIMIT: usize = 49152;
+pub const COMMAND_LIMIT: usize = 32768;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reply {
     pub id: String,
@@ -64,7 +66,7 @@ impl Job {
         }
         match self.tool.as_str() {
             "bash" => match self.arguments["command"].as_str() {
-                Some(s) if !s.is_empty() && s.len() <= 32768 => Ok(()),
+                Some(s) if !s.is_empty() && s.len() <= COMMAND_LIMIT => Ok(()),
                 _ => Err("Command must contain 1–32768 bytes"),
             },
             "file_read" | "file_write" | "file_read_base64" | "file_write_base64" => {
