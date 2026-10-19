@@ -577,15 +577,16 @@ async fn proxy(
 ) -> Result<Response<Body>, hyper::Error> {
     // A loopback proxy must not turn a remote request into local administration.
     let path = req.uri().path();
-    if [
-        "/admin/shutdown",
-        "/admin/reload",
-        "/admin/paircode",
-        "/admin/paircode/new",
-        "/pair/code",
-    ]
-    .iter()
-    .any(|route| path.ends_with(route))
+    if path.starts_with("/admin/")
+        || [
+            "/admin/shutdown",
+            "/admin/reload",
+            "/admin/paircode",
+            "/admin/paircode/new",
+            "/pair/code",
+        ]
+        .iter()
+        .any(|route| path.ends_with(route))
     {
         return Ok(response(StatusCode::FORBIDDEN, "Local administration only"));
     }

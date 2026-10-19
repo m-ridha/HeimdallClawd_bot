@@ -352,7 +352,7 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
     let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_address = backend.local_addr().unwrap().to_string();
     let remote = tokio::spawn(async move {
-        for _ in 0..3 {
+        for _ in 0..4 {
             let (socket, _) = backend.accept().await.unwrap();
             tokio::spawn(async move {
                 let _ = hyper::server::conn::http1::Builder::new()
@@ -394,7 +394,7 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
         }
     });
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    for path in ["/", "/pair", "/acp?session=fixture"] {
+    for path in ["/", "/pair", "/acp?session=fixture", "/api/sops/runs"] {
         let result = client
             .post(format!("{url}{path}"))
             .header("Authorization", "Bearer fixture_client")
@@ -410,16 +410,23 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
         "/admin/reload",
         "/admin/paircode",
         "/pair/code",
+        "/admin/sop/pending",
+        "/admin/sop/logs?run_id=fixture",
+        "/admin/sop/approve",
+        "/admin/sop/deny",
     ] {
-        assert_eq!(
-            client
-                .post(format!("{url}{path}"))
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            403
-        );
+        for method in [reqwest::Method::GET, reqwest::Method::POST] {
+            assert_eq!(
+                client
+                    .request(method, format!("{url}{path}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                403,
+                "blocked local-admin route: {path}"
+            );
+        }
     }
     remote.await.unwrap();
     front.abort();
