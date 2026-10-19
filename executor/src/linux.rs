@@ -1,4 +1,7 @@
 use std::io;
+/// Unprivileged helper identity, independently pinned by image and isolation tests.
+pub const HELPER_UID: libc::uid_t = 64173;
+pub const HELPER_GID: libc::gid_t = 64173;
 /// Virtual address space, not resident memory: LLVM's shared library alone
 /// cannot map within 96 MiB. Container memory remains capped separately.
 pub const HELPER_ADDRESS_SPACE: u64 = 1024 * 1024 * 1024;
@@ -10,7 +13,7 @@ pub fn restrict() -> io::Result<()> {
     };
     use std::collections::BTreeMap;
     // Helpers start as an unprivileged UID in their own process group.
-    if unsafe { libc::geteuid() } != 64173 {
+    if unsafe { libc::geteuid() } != HELPER_UID {
         return Err(io::Error::other("Execution UID is not isolated"));
     }
     if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
