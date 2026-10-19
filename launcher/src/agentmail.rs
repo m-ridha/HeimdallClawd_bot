@@ -27,7 +27,8 @@ use tokio::{
 };
 
 const ROUTE: &str = "/agentmail/events";
-const BACKEND: &str = "127.0.0.1:3887";
+const BACKEND_HOST: &str = "127.0.0.1";
+const BACKEND_PORT: u16 = 3887;
 const STATE: &str = "/data/zeroclaw/agentmail-state.json";
 const BODY_LIMIT: usize = 131_072;
 const EVENT_LIMIT: usize = 10_000;
@@ -166,7 +167,7 @@ impl Settings {
             state: PathBuf::from(STATE),
             paired_tokens,
             authorization,
-            gateway: format!("http://{BACKEND}"),
+            gateway: format!("http://{BACKEND_HOST}:{BACKEND_PORT}"),
             telegram: Some((owner, bot)),
             gateway_secret,
         }))
@@ -649,9 +650,15 @@ async fn proxy(
 pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Result<()> {
     use std::os::unix::process::CommandExt;
     command
-        .args(["daemon", "--host", "127.0.0.1", "--port", "3887"])
-        .env("ZEROCLAW_gateway__host", "127.0.0.1")
-        .env("ZEROCLAW_gateway__port", "3887")
+        .args([
+            "daemon",
+            "--host",
+            BACKEND_HOST,
+            "--port",
+            &BACKEND_PORT.to_string(),
+        ])
+        .env("ZEROCLAW_gateway__host", BACKEND_HOST)
+        .env("ZEROCLAW_gateway__port", BACKEND_PORT.to_string())
         .env("ZEROCLAW_gateway__trust_forwarded_headers", "true")
         .env("ZEROCLAW_gateway__paired_tokens", &settings.paired_tokens);
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -659,7 +666,7 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        if port == 3887 { return Err(failure()) }
+        if port == BACKEND_PORT { return Err(failure()) }
         let settings = Arc::new(settings);
         async_state(settings.clone(), |_| Ok(())).await?;
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
@@ -690,7 +697,7 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
                         let permit = permit.clone();
                         async move {
                             if req.uri().path() == ROUTE { Ok(receive(req, settings, jobs).await) }
-                            else { proxy(req, peer, BACKEND, Some(permit)).await }
+                            else { proxy(req, peer, &format!("{BACKEND_HOST}:{BACKEND_PORT}"), Some(permit)).await }
                         }
                     });
                     let _ = hyper::server::conn::http1::Builder::new().timer(hyper_util::rt::TokioTimer::new()).header_read_timeout(Duration::from_secs(10)).max_buf_size(32768).serve_connection(TokioIo::new(stream), service).with_upgrades().await;

@@ -293,7 +293,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
         state: path.clone(),
         paired_tokens: "[]".into(),
         authorization: None,
-        gateway: format!("http://{BACKEND}"),
+        gateway: "http://127.0.0.1:3887".into(),
         telegram: None,
         gateway_secret: String::new(),
     })
