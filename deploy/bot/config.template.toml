@@ -36,7 +36,7 @@ model_provider = "openai.codex"
 transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
-mcp_bundles = ["workspace", "skills", "transfer", "codespace"]
+mcp_bundles = ["workspace", "skills", "transfer", "codespace", "mail"]
 skill_bundles = ["managed"]
 cron_jobs = []
 acp_enable_mcp = true
@@ -126,6 +126,8 @@ allowed_tools = [
 	"memory_store",
 	"memory_recall",
 	"memory_forget",
+	"mail__filters",
+	"mail__set_enabled",
 ]
 auto_approve = [
 	"workspace__bash",
@@ -184,6 +186,8 @@ auto_approve = [
 	"memory_store",
 	"memory_recall",
 	"memory_forget",
+	"mail__filters",
+	"mail__set_enabled",
 ]
 excluded_tools = [
 	"shell",
@@ -247,8 +251,19 @@ deferred_loading = false
 	tool_timeout_secs = 90
 	max_response_bytes = 131_072
 
+	[[mcp.servers]]
+	name = "mail"
+	transport = "stdio"
+	command = "/usr/local/bin/heimdall-launcher"
+	args = ["--mail-mcp"]
+	tool_timeout_secs = 10
+	max_response_bytes = 32_768
+
 [mcp_bundles.skills]
 servers = ["skills"]
+
+[mcp_bundles.mail]
+servers = ["mail"]
 
 [mcp_bundles.workspace]
 servers = ["workspace"]

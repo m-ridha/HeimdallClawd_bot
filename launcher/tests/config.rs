@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        56
+        58
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -308,6 +308,28 @@ fn agentmail_auth_is_an_environment_reference_not_a_persisted_key() {
     );
 }
 
+#[test]
+fn email_management_grants_are_explicit_and_bundled() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    let profile = &cfg["risk_profiles"]["primary"];
+    for key in ["allowed_tools", "auto_approve"] {
+        let names = tool_names(profile, key);
+        assert!(names.contains(&"mail__filters"));
+        assert!(names.contains(&"mail__set_enabled"));
+    }
+    assert_eq!(
+        cfg["mcp_bundles"]["mail"]["servers"][0].as_str(),
+        Some("mail")
+    );
+    let servers = cfg["mcp"]["servers"].as_array().unwrap();
+    let server = servers
+        .iter()
+        .find(|s| s["name"].as_str() == Some("mail"))
+        .unwrap();
+    assert_eq!(server["args"][0].as_str(), Some("--mail-mcp"));
+}
+
 fn tool_names<'a>(profile: &'a toml::Value, field: &str) -> Vec<&'a str> {
     profile[field]
         .as_array()
@@ -364,7 +386,7 @@ fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        5
     );
 }
 

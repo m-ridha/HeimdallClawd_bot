@@ -1,0 +1,492 @@
+use super::*;
+const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:"}]"#;
+fn signed(secret: &[u8], body: &[u8], stamp: u64) -> hyper::HeaderMap {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
+    mac.update(format!("msg_fixture.{stamp}.").as_bytes());
+    mac.update(body);
+    let mut headers = hyper::HeaderMap::new();
+    headers.insert("svix-id", "msg_fixture".parse().unwrap());
+    headers.insert("svix-timestamp", stamp.to_string().parse().unwrap());
+    headers.insert(
+        "svix-signature",
+        format!("v1,{}", STANDARD.encode(mac.finalize().into_bytes()))
+            .parse()
+            .unwrap(),
+    );
+    headers
+}
+#[test]
+fn sender_and_content_are_both_required() {
+    let filters = parse_filters(FILTERS).unwrap();
+    for from in [
+        "notifications@github.com",
+        "GitHub <notifications@github.com>",
+        "NOTIFICATIONS@GITHUB.COM",
+    ] {
+        assert!(
+            filters[0].matches(&json!({"from":from,"text":"Alice REQUESTED YOUR REVIEW ON: test"}))
+        );
+    }
+    for from in [
+        "notifications@github.com.attacker.test",
+        "notifications@github.com <other@example.com>",
+        "other@example.com",
+        "notifications@github.com, other@example.com",
+    ] {
+        assert!(!filters[0].matches(&json!({"from":from,"text":"requested your review on:"})));
+    }
+    assert!(
+        !filters[0].matches(
+            &json!({"from":"notifications@github.com","text":"commented on a pull request"})
+        )
+    );
+    assert!(!filters[0].matches(&Value::Null));
+    assert!(parse_filters("[]").is_err());
+    assert!(parse_filters(r#"[{"name":"x","sender":"x@example.com","contains":""}]"#).is_err());
+}
+#[test]
+fn svix_authenticates_raw_body_timestamp_and_rotation_signatures() {
+    let secret = b"fixture_signature_key_0123456789";
+    let body = b"{\"event_type\":\"message.received\"}";
+    let mut headers = signed(secret, body, 1000);
+    assert!(verify(secret, &headers, body, 1000));
+    assert!(!verify(secret, &headers, body, 1301));
+    assert!(!verify(secret, &headers, body, 699));
+    assert!(!verify(secret, &headers, b"tampered", 1000));
+    assert!(!verify(b"wrong", &headers, body, 1000));
+    headers.insert(
+        "svix-signature",
+        format!("v1,invalid {}", headers["svix-signature"].to_str().unwrap())
+            .parse()
+            .unwrap(),
+    );
+    assert!(verify(secret, &headers, body, 1000));
+    headers.remove("svix-timestamp");
+    assert!(!verify(secret, &headers, body, 1000));
+}
+#[test]
+fn state_persists_disabled_defaults_and_rejects_symlink_or_corruption() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |s| {
+        assert!(s["enabled"].as_object().unwrap().is_empty());
+        s["enabled"]["github-review-request"] = json!(true);
+        Ok(())
+    })
+    .unwrap();
+    state(&path, |s| {
+        assert_eq!(s["enabled"]["github-review-request"], true);
+        Ok(())
+    })
+    .unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&path, &link).unwrap();
+    assert!(state(&link, |_| Ok(())).is_err());
+    fs::write(&path, "broken").unwrap();
+    assert!(state(&path, |_| Ok(())).is_err());
+}
+#[test]
+fn native_token_override_contains_only_adapter_digest_and_preserves_clients() {
+    let raw = "fixture_adapter_bearer_01234567890123456789";
+    let result = paired_tokens(Some(r#"["existing-client"]"#), raw).unwrap();
+    assert!(!result.contains(raw));
+    assert!(result.contains("existing-client"));
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&result).unwrap().len(),
+        2
+    );
+    assert!(paired_tokens(Some("invalid"), raw).is_err());
+}
+#[test]
+fn management_enables_only_known_rules_and_survives_reload() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = Settings {
+        secret: vec![],
+        token: String::new(),
+        filters: parse_filters(FILTERS).unwrap(),
+        state: dir.path().join("state"),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        gateway: String::new(),
+        telegram: None,
+        gateway_secret: String::new(),
+    };
+    let status: Value =
+        serde_json::from_str(&manage(&settings, "filters", &json!({})).unwrap()).unwrap();
+    assert_eq!(status["filters"][0]["enabled"], false);
+    manage(
+        &settings,
+        "set_enabled",
+        &json!({"name":"github-review-request","enabled":true}),
+    )
+    .unwrap();
+    let status: Value =
+        serde_json::from_str(&manage(&settings, "filters", &json!({})).unwrap()).unwrap();
+    assert_eq!(status["filters"][0]["enabled"], true);
+    assert!(
+        manage(
+            &settings,
+            "set_enabled",
+            &json!({"name":"unknown","enabled":true})
+        )
+        .is_err()
+    );
+    assert!(
+        manage(
+            &settings,
+            "set_enabled",
+            &json!({"name":"github-review-request","enabled":"true"})
+        )
+        .is_err()
+    );
+    manage(
+        &settings,
+        "set_enabled",
+        &json!({"name":"github-review-request","enabled":false}),
+    )
+    .unwrap();
+    let status: Value =
+        serde_json::from_str(&manage(&settings, "filters", &json!({})).unwrap()).unwrap();
+    assert_eq!(status["filters"][0]["enabled"], false);
+}
+async fn ingress(settings: Settings) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let settings = Arc::new(settings);
+    let jobs = Arc::new(Semaphore::new(2));
+    let task = tokio::spawn(async move {
+        loop {
+            let (socket, _) = listener.accept().await.unwrap();
+            let settings = settings.clone();
+            let jobs = jobs.clone();
+            tokio::spawn(async move {
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(
+                        TokioIo::new(socket),
+                        service_fn(move |req| {
+                            let settings = settings.clone();
+                            let jobs = jobs.clone();
+                            async move { Ok::<_, Infallible>(receive(req, settings, jobs).await) }
+                        }),
+                    )
+                    .await;
+            });
+        }
+    });
+    (url, task)
+}
+#[tokio::test]
+async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    let key = b"fixture_signature_key_0123456789";
+    let (url, task) = ingress(Settings {
+        secret: key.to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters: parse_filters(FILTERS).unwrap(),
+        state: path.clone(),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        gateway: format!("http://{BACKEND}"),
+        telegram: None,
+        gateway_secret: String::new(),
+    })
+    .await;
+    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_fixture","message":{"from":"notifications@github.com","text":"requested your review on:"}})).unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(key, &body, now()))
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    state(&path, |s| {
+        assert!(s["events"].as_object().unwrap().is_empty());
+        s["enabled"]["github-review-request"] = json!(true);
+        s["events"]["evt_fixture"] = json!({"status":"reserved","time":1000});
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(key, &body, now()))
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    let unrelated = br#"{"event_type":"message.received","event_id":"evt_other","message":{"from":"other@example.com","text":"requested your review on:"}}"#;
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(key, unrelated, now()))
+            .body(unrelated.to_vec())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    state(&path, |s| {
+        assert_eq!(s["events"].as_object().unwrap().len(), 1);
+        Ok(())
+    })
+    .unwrap();
+    task.abort();
+}
+#[tokio::test]
+async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let backend_address = backend.local_addr().unwrap().to_string();
+    let remote = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (socket, _) = backend.accept().await.unwrap();
+            tokio::spawn(async move {
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(
+                        TokioIo::new(socket),
+                        service_fn(|req: Request<Incoming>| async move {
+                            assert_eq!(req.headers()["authorization"], "Bearer fixture_client");
+                            assert_ne!(req.headers()["x-forwarded-for"], "attacker");
+                            let uri = req.uri().to_string();
+                            let body = req.into_body().collect().await.unwrap().to_bytes();
+                            Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(format!(
+                                "{uri}:{}",
+                                String::from_utf8_lossy(&body)
+                            )))))
+                        }),
+                    )
+                    .await;
+            });
+        }
+    });
+    let public = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", public.local_addr().unwrap());
+    let front = tokio::spawn(async move {
+        loop {
+            let (socket, peer) = public.accept().await.unwrap();
+            let backend = backend_address.clone();
+            tokio::spawn(async move {
+                let _ = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(
+                        TokioIo::new(socket),
+                        service_fn(move |req| {
+                            let backend = backend.clone();
+                            async move { proxy(req, peer, &backend, None).await }
+                        }),
+                    )
+                    .with_upgrades()
+                    .await;
+            });
+        }
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for path in ["/", "/pair", "/acp?session=fixture"] {
+        let result = client
+            .post(format!("{url}{path}"))
+            .header("Authorization", "Bearer fixture_client")
+            .header("X-Forwarded-For", "attacker")
+            .body("fixture body")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(result.text().await.unwrap(), format!("{path}:fixture body"));
+    }
+    for path in [
+        "/admin/shutdown",
+        "/admin/reload",
+        "/admin/paircode",
+        "/pair/code",
+    ] {
+        assert_eq!(
+            client
+                .post(format!("{url}{path}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            403
+        );
+    }
+    remote.await.unwrap();
+    front.abort();
+}
+
+#[tokio::test]
+async fn matching_event_dispatches_once_and_retains_only_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |s| {
+        s["enabled"]["github-review-request"] = json!(true);
+        Ok(())
+    })
+    .unwrap();
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gateway = format!("http://{}", backend.local_addr().unwrap());
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let model = tokio::spawn(async move {
+        let (socket, _) = backend.accept().await.unwrap();
+        let tx = Arc::new(std::sync::Mutex::new(Some(done_tx)));
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(
+                TokioIo::new(socket),
+                service_fn(move |req: Request<Incoming>| {
+                    let tx = tx.clone();
+                    async move {
+                        let uri = req.uri().to_string();
+                        let body = req.into_body().collect().await.unwrap().to_bytes();
+                        let value: Value = serde_json::from_slice(&body).unwrap();
+                        if let Some(tx) = tx.lock().unwrap().take() {
+                            let _ = tx.send((uri, value));
+                        }
+                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(
+                            br#"{"response":"Fixture review notification"}"#,
+                        ))))
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+    });
+    let key = b"fixture_signature_key_0123456789";
+    let (url, front) = ingress(Settings {
+        secret: key.to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters: parse_filters(FILTERS).unwrap(),
+        state: path.clone(),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        gateway,
+        telegram: None,
+        gateway_secret: String::new(),
+    })
+    .await;
+    let body=serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_new","message":{"from":"notifications@github.com","text":"Alice requested your review on: PRIVATE_BODY","subject":"Fixture subject"}})).unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(key, &body, now()))
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    let (uri, prompt) = tokio::time::timeout(Duration::from_secs(3), done_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(uri, "/webhook?agent=primary");
+    assert!(
+        prompt["message"]
+            .as_str()
+            .unwrap()
+            .contains("github-review-request")
+    );
+    assert!(!prompt.to_string().contains("PRIVATE_BODY"));
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(key, &body, now()))
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    let saved = fs::read_to_string(path).unwrap();
+    assert!(!saved.contains("PRIVATE_BODY"));
+    assert!(!saved.contains("Fixture subject"));
+    assert!(!saved.contains("fixture_not_a_live_token"));
+    model.abort();
+    front.abort();
+}
+
+#[tokio::test]
+async fn proxy_relays_upgraded_connections_bidirectionally() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let target = backend.local_addr().unwrap().to_string();
+    let server = tokio::spawn(async move {
+        let (socket, _) = backend.accept().await.unwrap();
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(
+                TokioIo::new(socket),
+                service_fn(|mut req: Request<Incoming>| async move {
+                    let upgrade = hyper::upgrade::on(&mut req);
+                    tokio::spawn(async move {
+                        let mut io = TokioIo::new(upgrade.await.unwrap());
+                        let mut data = [0; 4];
+                        io.read_exact(&mut data).await.unwrap();
+                        assert_eq!(&data, b"ping");
+                        io.write_all(b"pong").await.unwrap();
+                    });
+                    let mut r = response(StatusCode::SWITCHING_PROTOCOLS, "");
+                    r.headers_mut()
+                        .insert("connection", "upgrade".parse().unwrap());
+                    r.headers_mut()
+                        .insert("upgrade", "fixture".parse().unwrap());
+                    Ok::<_, Infallible>(r)
+                }),
+            )
+            .with_upgrades()
+            .await
+            .unwrap();
+    });
+    let public = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = public.local_addr().unwrap();
+    let front = tokio::spawn(async move {
+        let (socket, peer) = public.accept().await.unwrap();
+        hyper::server::conn::http1::Builder::new()
+            .serve_connection(
+                TokioIo::new(socket),
+                service_fn(move |req| {
+                    let target = target.clone();
+                    async move { proxy(req, peer, &target, None).await }
+                }),
+            )
+            .with_upgrades()
+            .await
+            .unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let response = client
+        .get(format!("http://{address}/ws/chat?session=fixture"))
+        .header("Connection", "upgrade")
+        .header("Upgrade", "fixture")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 101);
+    let mut io = response.upgrade().await.unwrap();
+    io.write_all(b"ping").await.unwrap();
+    let mut data = [0; 4];
+    tokio::time::timeout(Duration::from_secs(3), io.read_exact(&mut data))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&data, b"pong");
+    server.await.unwrap();
+    front.await.unwrap();
+}

@@ -14,6 +14,7 @@ Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/op
 - Named skills from the official ZeroClaw registry through restricted `skills__install` and `skills__list` tools. Script-containing skills run in the executor, never beside provider credentials.
 - Bounded Telegram file transfer between the executor workspace and allowlisted users.
 - WASM plugin and hook frameworks are enabled; no plugin is bundled.
+- Optional signed AgentMail email events with sender/content filters and Telegram-controlled rule enable/disable. See [email event setup](docs/operations.md#agentmail-email-events).
 - Native host shell, filesystem, git, shell-only scheduling and delegation tools stay blocked.
 
 Release deployment is automatic only when a stable GitHub Release is published. Owner-directed heartbeat is enabled; headless browser automation is not configured.
@@ -36,7 +37,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 | `tools/`, `tools/tests/` | Release packaging, deployment and token-scope scripts with their unit tests |
 | `docs/` | Operations, releases, IaC, capabilities, verification and project walkthrough |
 
-The launcher regenerates `config.toml` on every start; secrets reach ZeroClaw only as environment overrides and are never written to TOML. The executor holds no Telegram or provider credentials. See the [project walkthrough](docs/project-guide.md) and the [executor README](executor/README.md) for details.
+The launcher regenerates `config.toml` on every start; secrets reach ZeroClaw only as environment overrides and are never written to TOML. When email ingress is enabled, the launcher supervises ZeroClaw behind one HTTP listener, filtering `/agentmail/events` and proxying other gateway traffic, including upgrades. The executor holds no Telegram or provider credentials. See the [project walkthrough](docs/project-guide.md) and the [executor README](executor/README.md) for details.
 
 ## Prerequisites
 

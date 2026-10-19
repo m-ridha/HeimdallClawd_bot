@@ -117,6 +117,10 @@ ZeroClaw resolves the reference from its inherited Railway environment when `htt
 
 For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes` using that named auth secret and report success or a sanitized error. Use the secret only at `https://api.agentmail.to`. If the reference variable is absent, unrelated features can still start; AgentMail calls fail until it is configured. The template is regenerated at startup, so manual edits to the deployed TOML are not persistent.
 
+## AgentMail email events
+
+Optional signed email ingress uses the existing agent container and ZeroClaw's authenticated webhook endpoint. Rules start disabled and can be enabled/disabled through `mail__filters` and `mail__set_enabled`. See [email event setup, filters and recovery](agentmail-events.md) for Railway variables, webhook registration, the one public listener and delivery limits. This does not provision public access automatically.
+
 ## GitHub access
 
 Use a dedicated GitHub account and keep its token only in the **heimdallclawd** Railway service. Never add it to the executor, Git, GitHub Actions variables or chat.

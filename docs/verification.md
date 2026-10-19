@@ -1,5 +1,11 @@
 # Verification
 
+## AgentMail email adapter preparation — 2026-10-19
+
+Added opt-in signed email ingress inside the existing agent container, sender/content rules, durable disabled-by-default rule management, duplicate reservations, native gateway dispatch and owner-only Telegram response delivery. Portable fixtures exercise sender spoofing, Svix body/timestamp authentication, disabled/duplicate admission, one matching task dispatch, management state, ordinary HTTP forwarding and bidirectional upgrade traffic. Both Cargo suites, strict Clippy checks and Python helper checks passed locally on macOS (the pinned Railway SDK-dependent test was skipped). The configuration-library fixture also passed against pinned ZeroClaw v0.8.6, checking the extra MCP bundle and environment-only gateway bearer authentication without secret persistence.
+
+Linux-specific confinement tests do not run meaningfully on macOS. Native Actions validation and real AgentMail-to-Railway/Telegram verification remain separate; no webhook, public domain, Railway variable, deployment or email was created during these local checks. See [activation and delivery limits](agentmail-events.md).
+
 Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance were recorded in the historical artifact provenance; current hashes/provenance are generated into each release package.
 
 ## Passed

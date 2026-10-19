@@ -20,14 +20,18 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         std::env::set_var("ZEROCLAW_providers__models__openrouter__free__api_key",openrouter_key);
         std::env::set_var("ZEROCLAW_channels__telegram__home__bot_token",token);
         std::env::set_var("ZEROCLAW_mcp__servers__workspace__headers__authorization",&authorization);
+        std::env::set_var("ZEROCLAW_gateway__paired_tokens",serde_json::json!([zeroclaw_config::pairing::PairingGuard::token_hash("fixture_adapter_bearer_01234567890123456789")]).to_string());
     }
     let config = zeroclaw_config::schema::Config::load_or_init().await.unwrap();
     assert_eq!(config.gateway.host,"0.0.0.0");
+    let pairing = zeroclaw_config::pairing::PairingGuard::new(true, &config.gateway.paired_tokens, Default::default());
+    assert!(pairing.token_is_paired("fixture_adapter_bearer_01234567890123456789"));
+    assert!(!pairing.token_is_paired("wrong_fixture_token"));
     assert!(zeroclaw_infra::parse_gateway_bind_socket_addr(&config.gateway.host,config.gateway.port).is_ok());
     assert_eq!(config.data_dir,temp.path().join("data"));
     assert_eq!(config.channels.telegram["home"].bot_token,token);
     assert_eq!(config.mcp.servers[0].headers.get("authorization"),Some(&authorization));
-    assert_eq!(config.mcp_servers_for_agent("primary").len(),4);
+    assert_eq!(config.mcp_servers_for_agent("primary").len(),5);
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(config.providers.models.find("openrouter","free").unwrap().api_key.as_deref(),Some(openrouter_key));
     assert_eq!(config.model_routes.iter().find(|r| r.hint == "free").unwrap().model_provider,"openrouter.free");
@@ -57,4 +61,5 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(!saved.contains(cohere_key));
     assert!(!saved.contains(token));
     assert!(!saved.contains(&authorization));
+    assert!(!saved.contains("fixture_adapter_bearer_01234567890123456789"));
 }
