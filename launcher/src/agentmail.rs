@@ -289,8 +289,12 @@ fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io
     {
         return Err(failure());
     }
+    let original = serde_json::to_vec(&data).map_err(|_| failure())?;
     let result = update(&mut data)?;
     let bytes = serde_json::to_vec(&data).map_err(|_| failure())?;
+    if !raw.is_empty() && bytes == original {
+        return Ok(result);
+    }
     // Keep the lock on the same inode across all participants. A partial write
     // fails closed on the next read, rather than dropping deduplication state.
     use std::io::{Seek, SeekFrom};
@@ -299,6 +303,25 @@ fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io
     file.set_len(bytes.len() as u64)?;
     file.sync_all()?;
     Ok(result)
+}
+
+/// Volume locks and fsync must never occupy a gateway worker thread.
+async fn async_state<T: Send + 'static>(
+    settings: Arc<Settings>,
+    update: impl FnOnce(&mut Value) -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
+    tokio::task::spawn_blocking(move || state(&settings.state, update))
+        .await
+        .map_err(|_| failure())?
+}
+
+fn needs_body(filters: &[Filter], message: &Value) -> bool {
+    message["body_url"].is_string()
+        && !message["extracted_text"].is_string()
+        && !message["text"].is_string()
+        && filters
+            .iter()
+            .any(|f| f.sender_matches(message) && !f.matches(message))
 }
 
 fn response(status: StatusCode, text: &'static str) -> Response<Body> {
@@ -348,17 +371,19 @@ async fn receive(
     let Some(id) = event["event_id"].as_str().filter(|s| valid_id(s)) else {
         return response(StatusCode::BAD_REQUEST, "Missing event ID");
     };
-    let active = state(&settings.state, |data| {
-        if data["events"].get(id).is_some() {
+    let event_id = id.to_owned();
+    let filters = settings.filters.clone();
+    let active = async_state(settings.clone(), move |data| {
+        if data["events"].get(&event_id).is_some() {
             return Ok(Vec::new());
         }
-        Ok(settings
-            .filters
+        Ok(filters
             .iter()
             .filter(|f| data["enabled"][&f.name].as_bool().unwrap_or(false))
             .cloned()
             .collect::<Vec<_>>())
-    });
+    })
+    .await;
     let active = match active {
         Ok(active) => active,
         Err(_) => {
@@ -375,26 +400,28 @@ async fn receive(
     let Ok(permit) = jobs.try_acquire_owned() else {
         return response(StatusCode::SERVICE_UNAVAILABLE, "Busy; retry later");
     };
-    if active.iter().any(|f| f.sender_matches(&message))
-        && !active.iter().any(|f| f.matches(&message))
-        && message.get("body_url").is_some()
-    {
+    if needs_body(&active, &message) {
         match fetch_message(&settings, &message).await {
             Ok(fetched) => message = fetched,
             Err(_) => return response(StatusCode::SERVICE_UNAVAILABLE, "Message body unavailable"),
         }
     }
-    let matched: Vec<_> = active.iter().filter(|f| f.matches(&message)).collect();
+    let matched: Vec<_> = active
+        .iter()
+        .filter(|f| f.matches(&message))
+        .map(|f| f.name.clone())
+        .collect();
     if matched.is_empty() {
         return response(StatusCode::OK, "Ignored");
     }
-    let reserve = state(&settings.state, |data| {
+    let event_id = id.to_owned();
+    let reserve = async_state(settings.clone(), move |data| {
         let selected: Vec<_> = matched
             .iter()
-            .filter(|f| data["enabled"][&f.name].as_bool().unwrap_or(false))
-            .map(|f| f.name.clone())
+            .filter(|name| data["enabled"][name.as_str()].as_bool().unwrap_or(false))
+            .cloned()
             .collect();
-        if selected.is_empty() || data["events"].get(id).is_some() {
+        if selected.is_empty() || data["events"].get(&event_id).is_some() {
             return Ok(Vec::new());
         }
         let events = data["events"].as_object_mut().ok_or_else(failure)?;
@@ -402,9 +429,10 @@ async fn receive(
         if events.len() >= EVENT_LIMIT {
             return Err(failure());
         }
-        events.insert(id.into(), json!({"time":now(),"status":"reserved"}));
+        events.insert(event_id, json!({"time":now(),"status":"reserved"}));
         Ok(selected)
-    });
+    })
+    .await;
     let selected = match reserve {
         Ok(v) if v.is_empty() => return response(StatusCode::OK, "Ignored or duplicate"),
         Ok(v) => v,
@@ -444,10 +472,15 @@ async fn receive(
         } else {
             false
         };
-        let _ = state(&settings.state, |data| {
+        if async_state(settings.clone(), move |data| {
             data["events"][&event_id]["status"] = json!(if ok { "accepted" } else { "uncertain" });
             Ok(())
-        });
+        })
+        .await
+        .is_err()
+        {
+            eprintln!("AgentMail completion state unavailable; reservation retained");
+        }
         if !ok {
             eprintln!("AgentMail dispatch uncertain; automatic retry suppressed");
         }
@@ -616,7 +649,8 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
         .build()?;
     runtime.block_on(async move {
         if port == 3887 { return Err(failure()) }
-        state(&settings.state, |_| Ok(()))?;
+        let settings = Arc::new(settings);
+        async_state(settings.clone(), |_| Ok(())).await?;
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         command.process_group(0);
         struct RuntimeChild(std::process::Child);
@@ -626,7 +660,6 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
             let _ = self.0.wait();
         }}
         let mut child = RuntimeChild(command.spawn()?);
-        let settings = Arc::new(settings);
         let connections = Arc::new(Semaphore::new(64));
         let jobs = Arc::new(Semaphore::new(2));
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;

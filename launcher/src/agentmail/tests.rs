@@ -1,5 +1,100 @@
 use super::*;
 const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:"}]"#;
+
+#[test]
+fn omitted_body_is_fetched_for_each_unresolved_sender_rule() {
+    let filters = parse_filters(
+        r#"[
+        {"name":"subject-rule","sender":"notifications@github.com","contains":"subject match"},
+        {"name":"body-rule","sender":"notifications@github.com","contains":"body match"}
+    ]"#,
+    )
+    .unwrap();
+    let mut message = json!({"from":"notifications@github.com","subject":"subject match","body_url":"https://unused.example/body"});
+    assert!(filters[0].matches(&message));
+    assert!(!filters[1].matches(&message));
+    assert!(needs_body(&filters, &message));
+    assert!(!needs_body(&filters[..1], &message));
+    message["extracted_text"] = json!("body match");
+    assert!(!needs_body(&filters, &message));
+    let selected: Vec<_> = filters
+        .iter()
+        .filter(|f| f.matches(&message))
+        .map(|f| f.name.as_str())
+        .collect();
+    assert_eq!(selected, ["subject-rule", "body-rule"]);
+    message["extracted_text"] = json!("unmatched but already available body");
+    assert!(!needs_body(&filters, &message));
+    message.as_object_mut().unwrap().remove("extracted_text");
+    message["from"] = json!("unrelated@example.com");
+    assert!(!needs_body(&filters, &message));
+}
+
+#[test]
+fn reading_ledger_does_not_rewrite_or_normalize_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |_| Ok(())).unwrap();
+    let original = "{\n  \"enabled\": {},\n  \"events\": {}\n}\n";
+    fs::write(&path, original).unwrap();
+    state(&path, |s| {
+        assert!(s["events"].as_object().unwrap().is_empty());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    state(&path, |s| {
+        s["enabled"]["subject-rule"] = json!(true);
+        Ok(())
+    })
+    .unwrap();
+    assert_ne!(fs::read_to_string(path).unwrap(), original);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn held_ledger_lock_does_not_block_the_async_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |_| Ok(())).unwrap();
+    let settings = Arc::new(Settings {
+        secret: vec![],
+        token: String::new(),
+        filters: vec![],
+        state: path.clone(),
+        paired_tokens: String::new(),
+        authorization: None,
+        gateway: String::new(),
+        telegram: None,
+        gateway_secret: String::new(),
+    });
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        // SAFETY: valid owned fixture descriptor; dropping it releases the lock.
+        assert_eq!(unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) }, 0);
+        ready_tx.send(()).unwrap();
+        release_rx.recv_timeout(Duration::from_secs(5))
+    });
+    ready_rx.await.unwrap();
+    let waiting = tokio::spawn(async_state(settings, |_| Ok("read complete")));
+    tokio::task::yield_now().await;
+    // With a synchronous state call, this worker cannot resume until the holder
+    // times out. Sending then fails, and the holder's returned result fails too.
+    let released = release_tx.send(());
+    let read = tokio::time::timeout(Duration::from_secs(3), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    let held = holder.join().unwrap();
+    assert!(released.is_ok());
+    assert!(held.is_ok());
+    assert_eq!(read.unwrap(), "read complete");
+}
 fn signed(secret: &[u8], body: &[u8], stamp: u64) -> hyper::HeaderMap {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
     mac.update(format!("msg_fixture.{stamp}.").as_bytes());
