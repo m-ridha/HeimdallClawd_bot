@@ -54,6 +54,7 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 | --- | --- |
 | `launcher/src/main.rs` | Root-only identity preparation (symlink-safe, `O_NOFOLLOW`), config rendering, auth validation, `exec` into ZeroClaw |
 | `launcher/src/config.rs` | Allowlist parsing, template rendering, secret overrides (portable, no I/O) |
+| `launcher/src/agentmail.rs` | Opt-in signed email admission, deterministic filters, gateway proxy/supervisor and narrow rule-management MCP; tests under `launcher/src/agentmail/` |
 | `launcher/src/skills_mcp.rs`, `transfer_mcp.rs` | Narrow stdio MCP servers: registry skill install/list; bounded Telegram file transfer |
 | `executor/src/` | `main` (helper dispatch and startup probe), `server` (axum routes, auth, admission), `mcp` (JSON-RPC adapter), `process` (supervisor), `linux` (seccomp, rlimits, probe), `files` (fd-relative workspace I/O), `protocol` (jobs, limits) |
 | `executor/tests/`, `executor/contract/` | API, filesystem, MCP and Linux isolation tests; real ZeroClaw MCP client contract |

@@ -4,6 +4,8 @@ The single authoring file is `railway.py`. Both service names, volume names/moun
 
 Service variables are **unmanaged**. IaC does not read, create, change or delete them. Keep Telegram tokens/IDs, API keys, executor credentials and future model variables exclusively in Railway. The existing two volumes remain attached with their original names, sizes and paths.
 
+The agent's generated Railway HTTPS domain is platform-managed and targets container port **3888**. Generated `*.up.railway.app` domains are intentionally omitted from IaC; the SDK's `domains` field manages custom domains instead. Keep the executor without public domains or TCP proxies. If adopting a custom agent domain later, specify its target port explicitly as 3888 (the SDK otherwise defaults to 8080). See [Railway's domain reference](https://docs.railway.com/infrastructure-as-code/reference#custom-domains) and [AgentMail activation](../docs/agentmail-events.md).
+
 Use Python 3.10+ and Railway CLI 5.68.0:
 
 ```sh

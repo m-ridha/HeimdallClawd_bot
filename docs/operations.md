@@ -9,7 +9,7 @@ HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher and a separate Rus
 | heimdallclawd | `/data` (500 MB) | 3888 | 0.5 GB, 0.5 vCPU |
 | heimdall-executor | `/data/workspace` (200 MB) | 3889 | 0.25 GB, 0.25 vCPU |
 
-Keep one replica per service and sleeping disabled. Monitor costs and use an operator-selected budget; favor frugal infrastructure. Set `PORT` explicitly in Railway: its injected port takes precedence over Docker's environment default. Neither service needs a public domain. The executor listens on IPv6 for Railway private networking.
+Keep one replica per service and sleeping disabled. Monitor costs and use an operator-selected budget; favor frugal infrastructure. Set `PORT` explicitly in Railway: its injected port takes precedence over Docker's environment default. The agent's public domain serves authenticated clients and signed email events; Telegram polling alone needs no public domain. The executor stays private and listens on IPv6 for Railway private networking.
 
 ## Variables
 
@@ -117,6 +117,10 @@ ZeroClaw resolves the reference from its inherited Railway environment when `htt
 
 For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes` using that named auth secret and report success or a sanitized error. Use the secret only at `https://api.agentmail.to`. If the reference variable is absent, unrelated features can still start; AgentMail calls fail until it is configured. The template is regenerated at startup, so manual edits to the deployed TOML are not persistent.
 
+## AgentMail email events
+
+Optional signed email ingress uses the existing agent container and ZeroClaw's authenticated webhook endpoint. Rules start disabled and can be enabled/disabled through `mail__filters` and `mail__set_enabled`. See [email event setup, filters and recovery](agentmail-events.md) for Railway variables, webhook registration, the one public listener and delivery limits. This does not provision public access automatically.
+
 ## GitHub access
 
 Use a dedicated GitHub account and keep its token only in the **heimdallclawd** Railway service. Never add it to the executor, Git, GitHub Actions variables or chat.
@@ -184,7 +188,7 @@ Cohere uses `custom:https://api.cohere.ai/compatibility/v1`, which ZeroClaw reso
 
 Voice audio is sent to Deepgram, and memory/query text is sent to Cohere. Their quotas/billing are separate from ChatGPT subscriptions and Railway billing. Provider errors are not evidence of a working integration; after deployment, send a short voice message and verify its transcription, then store and recall a synthetic fact with different wording. Check provider usage to confirm embedding requests; keyword recall alone does not prove embeddings worked.
 
-The embedded dashboard and ACP endpoint use the existing gateway on port 3888 with pairing required. No public route is provisioned. Establish an owner-controlled private access path before connecting a browser/editor. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor.
+The embedded dashboard and ACP endpoint share the agent's HTTPS domain, targeting port 3888 with pairing required. Dashboard daemon reload and SOP administration require `gateway.allow_remote_admin=true` and a current paired bearer, enforced by the native gateway even behind the email adapter. Pair in the browser using a code obtained from the Railway console; `/pair/code` exposes status only. Shutdown and reading/generating pairing codes stay console-only. Deploy the configuration and runtime change before retrying a reload rejected by the old policy. Reload applies the runtime's current configuration; it does not deploy a new image or replace the launcher's startup rendering. Dashboard changes to managed settings can be overwritten on the next deployment; keep durable settings in the repository or Railway variables. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor. See [public networking ownership](../.railway/README.md).
 
 WebAuthn activation needs `ZEROCLAW_webauthn__enabled`, `ZEROCLAW_webauthn__rp_id` and `ZEROCLAW_webauthn__rp_origin` matching the actual HTTPS client origin. Remote nodes need `ZEROCLAW_nodes__auth_token` as a Railway secret and a configured private client before enabling `ZEROCLAW_nodes__enabled`. Leave both inactive until those prerequisites are met.
 
@@ -245,7 +249,7 @@ These are credential-access profiles, not isolated tenants or a complete native-
 
 The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. This upgrade retains the existing provider variable names, subscription sign-in, persistent volume paths and executor protocol. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
 
-The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. Five Heimdall patches remain: private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, native child isolation and remote skill scripts. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
+The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. Six Heimdall patches remain: private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, native child isolation, remote skill scripts and paired administration behind the dashboard proxy. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
 
 `[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager so script skills can find the connected workspace executor. The launcher still regenerates configuration at startup: dashboard, RPC or CLI config edits are not durable deployment configuration. Use Railway overrides or a reviewed template change for settings that must survive restart.
 

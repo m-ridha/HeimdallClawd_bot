@@ -1,0 +1,183 @@
+--- a/crates/zeroclaw-gateway/src/lib.rs
++++ b/crates/zeroclaw-gateway/src/lib.rs
+@@ -4939,6 +4939,13 @@
+     ForbiddenNoPairing,
+ }
+
++// A trusted loopback proxy forwards remote clients over a local socket. Its
++// forwarding marker must never grant the CLI's unauthenticated local authority,
++// even when the forwarded address itself claims to be loopback.
++fn admin_request_is_local(peer: &SocketAddr, trust_forwarded: bool, headers: &HeaderMap) -> bool {
++    peer.ip().is_loopback() && !(trust_forwarded && headers.contains_key("x-forwarded-for"))
++}
++
+ fn admin_reload_gate(
+     is_loopback: bool,
+     allow_remote_admin: bool,
+@@ -4969,7 +4976,11 @@
+     // raw config field, so the gate's `RequireAuth` decision can never
+     // diverge from what `require_auth` will actually enforce.
+     let require_pairing = state.pairing.require_pairing();
+-    match admin_reload_gate(peer.ip().is_loopback(), allow_remote, require_pairing) {
++    match admin_reload_gate(
++        admin_request_is_local(&peer, state.trust_forwarded_headers, &headers),
++        allow_remote,
++        require_pairing,
++    ) {
+         AdminReloadGate::Allow => {}
+         AdminReloadGate::RequireAuth => api::require_auth(&state, &headers)?,
+         AdminReloadGate::Forbidden => {
+@@ -12185,6 +12196,89 @@
+         );
+     }
+
++    #[tokio::test]
++    async fn heimdall_forwarded_reload_enforces_live_pairing_and_policy() {
++        let tmp = tempfile::tempdir().unwrap();
++        let token = "fixture_dashboard_client";
++        let mut state = admin_reload_state(&tmp, true, true, &[token.to_string()]);
++        state.trust_forwarded_headers = true;
++        let mut headers = HeaderMap::new();
++        // Even a claimed loopback address is a forwarded client, not the CLI.
++        headers.insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
++        assert!(!admin_request_is_local(&loopback_peer(), true, &headers));
++        assert!(admin_request_is_local(
++            &loopback_peer(),
++            true,
++            &HeaderMap::new()
++        ));
++        assert!(admin_request_is_local(&loopback_peer(), false, &headers));
++        let error = handle_admin_reload(
++            State(state.clone()),
++            ConnectInfo(loopback_peer()),
++            headers.clone(),
++        )
++        .await
++        .err()
++        .unwrap();
++        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
++        headers.extend(bearer_headers("invalid_fixture"));
++        let error = handle_admin_reload(
++            State(state.clone()),
++            ConnectInfo(loopback_peer()),
++            headers.clone(),
++        )
++        .await
++        .err()
++        .unwrap();
++        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
++        headers.extend(bearer_headers(token));
++        let result = handle_admin_reload(
++            State(state.clone()),
++            ConnectInfo(loopback_peer()),
++            headers.clone(),
++        )
++        .await
++        .unwrap()
++        .into_response();
++        assert_eq!(result.status(), StatusCode::OK);
++        state.publish_test_config(|c| c.gateway.allow_remote_admin = false);
++        let error = handle_admin_reload(
++            State(state.clone()),
++            ConnectInfo(loopback_peer()),
++            headers.clone(),
++        )
++        .await
++        .err()
++        .unwrap();
++        assert_eq!(error.0, StatusCode::FORBIDDEN);
++        state.publish_test_config(|c| c.gateway.allow_remote_admin = true);
++        state.pairing.revoke_token(token);
++        let error =
++            handle_admin_reload(State(state), ConnectInfo(loopback_peer()), headers.clone())
++                .await
++                .err()
++                .unwrap();
++        assert_eq!(error.0, StatusCode::UNAUTHORIZED);
++        let mut no_pairing = admin_reload_state(&tmp, true, false, &[]);
++        no_pairing.trust_forwarded_headers = true;
++        let error = handle_admin_reload(State(no_pairing), ConnectInfo(loopback_peer()), headers)
++            .await
++            .err()
++            .unwrap();
++        assert_eq!(error.0, StatusCode::FORBIDDEN);
++    }
++
++    #[tokio::test]
++    async fn heimdall_public_pairing_status_never_discloses_code() {
++        let tmp = tempfile::tempdir().unwrap();
++        let state = admin_paircode_state(&tmp, true, false);
++        assert!(state.pairing.pairing_code().is_some());
++        let (status, body) = json_of(handle_pair_code(State(state)).await.into_response()).await;
++        assert_eq!(status, StatusCode::OK);
++        assert_eq!(body["pairing_required"], true);
++        assert!(body["pairing_code"].is_null());
++    }
++
+     #[test]
+     fn allow_remote_admin_defaults_off() {
+         // Security default: remote admin reload is disabled until opted in.
+--- a/crates/zeroclaw-gateway/src/api_sop.rs
++++ b/crates/zeroclaw-gateway/src/api_sop.rs
+@@ -21,7 +21,7 @@
+ use axum::response::IntoResponse;
+ use serde::Deserialize;
+
+-use crate::{AdminReloadGate, AppState, admin_reload_gate};
++use crate::{AdminReloadGate, AppState, admin_reload_gate, admin_request_is_local};
+ use zeroclaw_runtime::sop::approval::{
+     ApprovalDecision, ApprovalPrincipal, BrokerOutcome, ResolveOutcome,
+ };
+@@ -73,7 +73,11 @@
+ ) -> Result<ApprovalPrincipal, JsonErr> {
+     let allow_remote = state.config.read().gateway.allow_remote_admin;
+     let require_pairing = state.pairing.require_pairing();
+-    match admin_reload_gate(peer.ip().is_loopback(), allow_remote, require_pairing) {
++    match admin_reload_gate(
++        admin_request_is_local(peer, state.trust_forwarded_headers, headers),
++        allow_remote,
++        require_pairing,
++    ) {
+         AdminReloadGate::Allow => {
+             // A loopback caller is always allowed, but if pairing is actually
+             // REQUIRED and it ALSO presents a valid paired bearer token, capture
+@@ -335,6 +339,39 @@
+     use super::*;
+
+     #[test]
++    fn heimdall_forwarded_sop_requires_paired_http_principal() {
++        let token = "fixture_dashboard_client";
++        let (mut state, _) = state_with_policied_gate(token);
++        state.trust_forwarded_headers = true;
++        let peer = SocketAddr::from(([127, 0, 0, 1], 40000));
++        let mut headers = HeaderMap::new();
++        headers.insert("x-forwarded-for", "203.0.113.50".parse().unwrap());
++        assert_eq!(
++            authorize(&state, &peer, &headers).err().unwrap().0,
++            StatusCode::UNAUTHORIZED
++        );
++        headers.extend(bearer(token));
++        let principal = authorize(&state, &peer, &headers).unwrap();
++        assert_eq!(
++            principal,
++            ApprovalPrincipal::http(Some(zeroclaw_config::pairing::PairingGuard::token_hash(
++                token
++            )))
++        );
++        state.publish_test_config(|c| c.gateway.allow_remote_admin = false);
++        assert_eq!(
++            authorize(&state, &peer, &headers).err().unwrap().0,
++            StatusCode::FORBIDDEN
++        );
++        state.publish_test_config(|c| c.gateway.allow_remote_admin = true);
++        state.pairing.revoke_token(token);
++        assert_eq!(
++            authorize(&state, &peer, &headers).err().unwrap().0,
++            StatusCode::UNAUTHORIZED
++        );
++    }
++
++    #[test]
+     fn outcome_response_maps_status_codes() {
+         assert_eq!(
+             outcome_response(&ResolveOutcome::Denied),

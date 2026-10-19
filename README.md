@@ -14,6 +14,7 @@ Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/op
 - Named skills from the official ZeroClaw registry through restricted `skills__install` and `skills__list` tools. Script-containing skills run in the executor, never beside provider credentials.
 - Bounded Telegram file transfer between the executor workspace and allowlisted users.
 - WASM plugin and hook frameworks are enabled; no plugin is bundled.
+- Optional signed AgentMail email events with sender/content filters and Telegram-controlled rule enable/disable. See [email event setup](docs/operations.md#agentmail-email-events).
 - Native host shell, filesystem, git, shell-only scheduling and delegation tools stay blocked.
 
 Release deployment is automatic only when a stable GitHub Release is published. Owner-directed heartbeat is enabled; headless browser automation is not configured.
@@ -27,7 +28,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 
 | Path | Responsibility |
 | --- | --- |
-| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the `--skills-mcp`, `--transfer-mcp` and `--codespace-mcp` stdio servers |
+| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the skills, transfer, Codespaces and email-filter stdio servers |
 | `executor/` | Rust private MCP service and Linux-restricted helpers (`src/`), API/filesystem/isolation tests (`tests/`), and a real ZeroClaw MCP client contract (`contract/`) |
 | `deploy/bot/` | Dockerfiles, ZeroClaw config template, pinned runtime lock and checksums, maintained patches, managed agent instructions (`TOOLS.md`, `IDENTITY.md`), licenses |
 | `deploy/executor/`, `deploy/tests/` | Executor artifact Dockerfile; integration tests installed into the pinned ZeroClaw source during the build |
@@ -36,7 +37,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 | `tools/`, `tools/tests/` | Release packaging, deployment and token-scope scripts with their unit tests |
 | `docs/` | Operations, releases, IaC, capabilities, verification and project walkthrough |
 
-The launcher regenerates `config.toml` on every start; secrets reach ZeroClaw only as environment overrides and are never written to TOML. The executor holds no Telegram or provider credentials. See the [project walkthrough](docs/project-guide.md) and the [executor README](executor/README.md) for details.
+The launcher regenerates `config.toml` on every start; secrets reach ZeroClaw only as environment overrides and are never written to TOML. When email ingress is enabled, the launcher supervises ZeroClaw behind one HTTP listener, filtering `/agentmail/events` and proxying other gateway traffic, including upgrades. The executor holds no Telegram or provider credentials. See the [project walkthrough](docs/project-guide.md) and the [executor README](executor/README.md) for details.
 
 ## Prerequisites
 
@@ -106,7 +107,7 @@ Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a pro
 
 Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with Railway CLI 5.68.0 and Python SDK 0.7.0. Service variables are unmanaged by IaC and volumes are preserved. See [IaC operations](docs/railway-iac.md) and [.railway/README.md](.railway/README.md).
 
-Keep one replica per service and sleeping disabled. Operate frugally, monitor usage, and configure budgets to suit the deployment. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
+Keep one replica per service and sleeping disabled. Operate frugally, monitor usage, and configure budgets to suit the deployment. Telegram polling needs no public domain; [AgentMail events](docs/agentmail-events.md) use the agent's authenticated public gateway. The executor stays private and listens on IPv6 for Railway private networking.
 
 See [GitHub access setup](docs/operations.md#github-access) for token permissions, Codespaces limits and verification.
 

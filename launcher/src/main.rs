@@ -103,6 +103,9 @@ fn runtime(vars: &[(String, String)]) -> Command {
     command
 }
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--mail-mcp") {
+        return heimdall_launcher::agentmail::serve_mcp();
+    }
     if std::env::args().nth(1).as_deref() == Some("browser-child") {
         return heimdall_launcher::child_policy::browser();
     }
@@ -154,6 +157,7 @@ fn main() -> io::Result<()> {
     let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
         .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
     let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
+    let mail_settings = heimdall_launcher::agentmail::Settings::from_env()?;
     match std::env::var("GITHUB_TOKEN") {
         Ok(token) => vars.push((
             "HEIMDALL_GITHUB_AUTHORIZATION".into(),
@@ -204,5 +208,8 @@ fn main() -> io::Result<()> {
         ids.len()
     );
     use std::os::unix::process::CommandExt;
+    if let Some(settings) = mail_settings {
+        return heimdall_launcher::agentmail::supervise(runtime(&vars), port, settings);
+    }
     Err(heimdall_launcher::startup::configure_daemon(&mut runtime(&vars), port).exec())
 }

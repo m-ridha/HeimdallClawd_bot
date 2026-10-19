@@ -8,7 +8,7 @@ These changes describe the next release, not a verified live deployment. Heartbe
 | Parallel tools | Enabled for independent actions. Executor accepts two concurrent jobs; scheduler and SOP concurrency are capped at one. Further simultaneous executor work can report busy; retry after the running work completes. |
 | SOPs | Definitions persist under `/data/zeroclaw/shared/sops`; list/execute/advance/status/approve/workshop tools are allowed. Reusable procedures must be created before execution. |
 | Pipelines | execute_pipeline enabled with twelve-step maximum and an explicit subtool allowlist. |
-| Hooks | Lifecycle hook framework enabled. No custom hook handler or webhook endpoint is installed. |
+| Hooks / email ingress | Lifecycle hook framework enabled. Optional signed AgentMail adapter uses the native gateway webhook. Configurable sender/content rules start disabled; mail__filters and mail__set_enabled manage durable rule state. See [setup and limits](operations.md#agentmail-email-events). |
 | WASM plugins | Cranelift WASM runtime included, plugin loading/discovery enabled under `/data/zeroclaw/shared/plugins`. Maximum four logical instances, 32 MiB linear memory per store and ten-second calls. No plugin is bundled. Plugin-specific configuration, egress and exact tool grants are still required when installing a package; plugin limits do not cap total process memory. |
 | Open Skills | Bulk community collection sync enabled in `/data/zeroclaw/shared/open-skills`. Compact prompting reads individual skill instructions with read_skill. First synchronization consumes disk/network and can slow startup. |
 | Skill scripts | Script-containing skills allowed. Shell/script manifest tools copy up to 32 regular UTF-8 files, 64 KiB each / 256 KiB total, into the executor and run there. Symlinks are rejected. Operating-system dependencies and interpreter availability still matter; arbitrary downloaded packages are not installed automatically. |
@@ -21,7 +21,7 @@ These changes describe the next release, not a verified live deployment. Heartbe
 
 ## Extended native capabilities (not live-verified)
 
-The primary profile contains 56 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
+The primary profile contains 58 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the private executor and gateway authentication. Some supported features still require operator configuration; build support alone does not make an integration functional.
 
 | Capability | Status and limits |
 | --- | --- |
@@ -36,7 +36,7 @@ The primary profile contains 56 exact policy grants; this is not the exposed Tel
 | Project intelligence | `project_intel` and `report_template` granted. Analyze supplied Git/issue summaries and produce reports; they do not automatically connect a project or tracker. |
 | Cloud / security | `cloud_ops`, `cloud_patterns`, `security_ops` granted. Advisory analysis, vulnerability parsing and playbook guidance; no cloud credentials or automatic infrastructure remediation added. Approval gates retained. |
 | ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Client and private connectivity still need setup. |
-| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. No public domain or remote-admin access is added. |
+| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. Shares the agent's public listener with pairing required. Native authentication permits paired daemon reload and SOP administration with remote administration enabled; the proxy preserves pairing status and HTTP upgrades. Shutdown and pairing-code secrets remain console-only. |
 | Remote nodes | Configuration prepared for two nodes; disabled until a shared authentication token and remote client are configured. LAN mDNS stays off on Railway. No tunnel service is installed. |
 | Diagnostics | Rotating diagnostics: 1 MiB rotation threshold, three archives, three-day archive retention. Tool I/O and LLM payload capture remain off, per owner preference. The threshold is a rotation trigger, not a strict per-event/disk quota. |
 | WebAuthn | Compiled support included; inactive until the actual HTTPS relying-party domain/origin and client access are configured. Existing subscription sign-in remains the model authentication. |

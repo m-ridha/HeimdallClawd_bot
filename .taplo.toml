@@ -17,6 +17,6 @@ trailing_newline = true
 # Keys that should be sorted
 keys = ["dependencies", "dev-dependencies", "features"]
 
-	[rule.formatting]
-	# Sort array values
-	reorder_arrays = true
+[rule.formatting]
+# Sort array values
+reorder_arrays = true

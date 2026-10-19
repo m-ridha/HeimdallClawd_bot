@@ -19,6 +19,8 @@ def main(ctx=None):
     executor_data = volume("executor-workspace", {"region": REGION, "sizeMB": 200})
     # Source is disconnected in Railway; release uploads supply each Docker context.
     # Omit normalized platform defaults (ON_FAILURE and sleeping=false) to avoid drift.
+    # The generated agent HTTPS domain targets 3888 and stays platform-managed;
+    # Railway IaC's domains field is for custom domains, not *.up.railway.app.
     agent = service(
         "heimdallclawd",
         build={"dockerfilePath": "Dockerfile"},

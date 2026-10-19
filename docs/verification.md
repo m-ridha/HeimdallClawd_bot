@@ -1,5 +1,25 @@
 # Verification
 
+## Paired public dashboard administration — 2026-10-19
+
+The native gateway patch now treats trusted-proxy requests as remote for reload and SOP administration, replacing the earlier blanket proxy block. The proxy preserves dashboard routes and pairing status while still rejecting shutdown and pairing-code secret routes. All six patches applied with zero fuzz to a fresh checksum-verified v0.8.6 source extraction. Three new native gateway unit tests passed on macOS: current paired reload with revocation/policy checks, HTTP identity for SOP authorization, and pairing status without code disclosure. The full portable launcher/executor suites, both strict Clippy checks, all 18 Python checks with the SDK, pinned configuration-library contract, formatting, diff and redacted secret checks passed. A Rust 1.99 incremental-fingerprint compiler error on the final native test rerun was avoided with `CARGO_INCREMENTAL=0`; no toolchain or production compiler setting changed. Native Linux and live browser reload/session-continuity checks remain separate; no production deployment or console-only secret access was exercised.
+
+## Public proxy security review — 2026-10-19
+
+Review of the pinned native gateway found four `/admin/sop/*` routes that authorize loopback callers independently of forwarded headers. The adapter now blocks the entire `/admin/` namespace before forwarding. GET/POST regressions cover all four routes; ordinary SOP API forwarding and bidirectional upgrades remain covered. The full portable launcher and executor suites, strict Clippy for both crates, the pinned native configuration-library test, all 18 Python checks with the IaC SDK, formatting and diff checks passed. A redacted Gitleaks scan of the complete PR diff detected no secrets. Native Linux validation [39181448667](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/39181448667) passed for the preceding commit; this follow-up still requires its own Linux run. No live email delivery or native SOP mutation was performed.
+
+## Public agent networking — 2026-10-19
+
+Created a platform-managed generated HTTPS domain for the existing agent service, targeting port 3888. Live HTTPS `/health` returned 200; anonymous `/api/config` returned 401. The executor had no public domain or TCP proxy. Using `.railway/.venv`, all 18 Python checks passed with no SDK skip, and the production read-only `railway config plan` reported the configuration already up to date after domain creation. Generated domains remain outside IaC; no apply or application deployment was needed. This verifies routing and anonymous-access rejection, not AgentMail adapter activation or delivery.
+
+## AgentMail email adapter preparation — 2026-10-19
+
+Review corrections: omitted-body retrieval considers every enabled sender rule even when another rule already matches the subject. All asynchronous ledger access uses Tokio's blocking pool; unchanged ledger reads do not rewrite/fsync the file. Regressions cover both matched rule IDs after hydration, a held file lock with a responsive current-thread async runtime, and byte-preserving read-only ledger access.
+
+Added opt-in signed email ingress inside the existing agent container, sender/content rules, durable disabled-by-default rule management, duplicate reservations, native gateway dispatch and owner-only Telegram response delivery. Portable fixtures exercise sender spoofing, Svix body/timestamp authentication, disabled/duplicate admission, one matching task dispatch, management state, ordinary HTTP forwarding and bidirectional upgrade traffic. Both Cargo suites, strict Clippy checks and Python helper checks passed locally on macOS (the pinned Railway SDK-dependent test was skipped). The configuration-library fixture also passed against pinned ZeroClaw v0.8.6, checking the extra MCP bundle and environment-only gateway bearer authentication without secret persistence.
+
+Linux-specific confinement tests do not run meaningfully on macOS. Native Actions validation and real AgentMail-to-Railway/Telegram verification remain separate; no webhook, public domain, Railway variable, deployment or email was created during these local checks. See [activation and delivery limits](agentmail-events.md).
+
 Observed on 14 October 2026. Runtime: ZeroClaw 0.8.5, revision `cb2b20a9fe59004b7ef03e123942d31f29236d15`. Linux executable hashes and compiler provenance were recorded in the historical artifact provenance; current hashes/provenance are generated into each release package.
 
 ## Passed

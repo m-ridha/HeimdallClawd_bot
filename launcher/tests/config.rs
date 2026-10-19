@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        56
+        58
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -308,6 +308,28 @@ fn agentmail_auth_is_an_environment_reference_not_a_persisted_key() {
     );
 }
 
+#[test]
+fn email_management_grants_are_explicit_and_bundled() {
+    let cfg: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    let profile = &cfg["risk_profiles"]["primary"];
+    for key in ["allowed_tools", "auto_approve"] {
+        let names = tool_names(profile, key);
+        assert!(names.contains(&"mail__filters"));
+        assert!(names.contains(&"mail__set_enabled"));
+    }
+    assert_eq!(
+        cfg["mcp_bundles"]["mail"]["servers"][0].as_str(),
+        Some("mail")
+    );
+    let servers = cfg["mcp"]["servers"].as_array().unwrap();
+    let server = servers
+        .iter()
+        .find(|s| s["name"].as_str() == Some("mail"))
+        .unwrap();
+    assert_eq!(server["args"][0].as_str(), Some("--mail-mcp"));
+}
+
 fn tool_names<'a>(profile: &'a toml::Value, field: &str) -> Vec<&'a str> {
     profile[field]
         .as_array()
@@ -364,7 +386,7 @@ fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        5
     );
 }
 
@@ -443,7 +465,7 @@ fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
         Some("off")
     );
     assert_eq!(cfg["gateway"]["require_pairing"].as_bool(), Some(true));
-    assert_eq!(cfg["gateway"]["allow_remote_admin"].as_bool(), Some(false));
+    assert_eq!(cfg["gateway"]["allow_remote_admin"].as_bool(), Some(true));
     for section in ["nodes", "webauthn"] {
         assert_eq!(cfg[section]["enabled"].as_bool(), Some(false));
     }
@@ -496,6 +518,14 @@ fn managed_instructions_use_full_bootstrap_budget() {
 fn primary_turn_budget_supports_multi_step_github_work() {
     let cfg: toml::Value =
         toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["max_context_tokens"].as_integer(),
+        Some(64_000)
+    );
+    assert_eq!(
+        cfg["channels"]["telegram"]["home"]["ack_reactions"].as_bool(),
+        Some(true)
+    );
     assert_eq!(
         cfg["runtime_profiles"]["primary"]["max_tool_iterations"].as_integer(),
         Some(48)

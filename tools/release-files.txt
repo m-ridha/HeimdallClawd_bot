@@ -29,12 +29,15 @@ launcher/src/codespace_mcp.rs
 launcher/src/config.rs
 launcher/src/instructions.rs
 launcher/src/lib.rs
+launcher/src/agentmail.rs
+launcher/src/agentmail/tests.rs
 launcher/src/main.rs
 launcher/src/skills_mcp.rs
 launcher/src/startup.rs
 launcher/src/transfer_mcp.rs
 launcher/tests/codespace_mcp.rs
 launcher/tests/config.rs
+launcher/tests/agentmail.rs
 launcher/tests/linux.rs
 launcher/tests/skills_mcp.rs
 launcher/tests/startup.rs
@@ -42,5 +45,6 @@ launcher/tests/startup.rs
 executor/entrypoint.sh
 launcher/src/child_policy.rs
 deploy/bot/patches/native-child.patch
+deploy/bot/patches/gateway-admin-auth.patch
 launcher/tests/child_policy.rs
 deploy/tests/native-child.rs

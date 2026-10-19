@@ -1,3 +1,4 @@
+pub mod agentmail;
 pub mod child_policy;
 pub mod codespace_mcp;
 pub mod config;
