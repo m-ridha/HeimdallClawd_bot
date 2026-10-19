@@ -10,9 +10,9 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class PackageTests(unittest.TestCase):
-    def package(self, temp, launcher_machine=b'\x3e\x00'):
+    def package(self, temp, launcher_machine=b'\x3e\x00', runtime_machine=b'\x3e\x00', executor_machine=b'\x3e\x00'):
         inputs = []
-        for name, machine in [('runtime', b'\x3e\x00'), ('launcher', launcher_machine), ('executor', b'\x3e\x00')]:
+        for name, machine in [('runtime', runtime_machine), ('launcher', launcher_machine), ('executor', executor_machine)]:
             path = pathlib.Path(temp) / name
             content = bytearray(64)
             content[:6] = b'\x7fELF\x02\x01'
@@ -53,6 +53,7 @@ class PackageTests(unittest.TestCase):
             self.assertFalse(list(output.rglob('railway.toml')))
             self.assertFalse((output / '.git').exists())
             self.assertFalse((output / 'launcher/target').exists())
+            self.assertTrue((output / 'launcher/src/mcp_stdio.rs').is_file())
 
     def test_unlisted_files_and_symlinks_are_not_packaged(self):
         # Run a synthetic checkout so no repository files are mutated.
@@ -91,6 +92,13 @@ class PackageTests(unittest.TestCase):
             result, _ = self.package(temp, b'\xb7\x00')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Linux x86_64 launcher', result.stderr)
+
+    def test_rejects_wrong_runtime_and_executor_architecture(self):
+        for component, expected in [('runtime', 'ELF'), ('executor', 'executor')]:
+            with self.subTest(component=component), tempfile.TemporaryDirectory() as temp:
+                result, _ = self.package(temp, **{component + '_machine': b'\xb7\x00'})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f'Linux x86_64 {expected} executable', result.stderr)
 
 if __name__ == '__main__':
     unittest.main()
