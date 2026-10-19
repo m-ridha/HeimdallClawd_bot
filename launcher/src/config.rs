@@ -44,7 +44,14 @@ pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError>
     config["peer_groups"]["telegram_home"]["external_peers"] =
         toml::Value::Array(ids.iter().cloned().map(toml::Value::String).collect());
     config["heartbeat"]["to"] = toml::Value::String(ids[0].clone());
-    config["providers"]["models"]["openai"]["codex"]["model"] = toml::Value::String(model.into());
+    let codex = config["providers"]["models"]["openai"]["codex"]
+        .as_table_mut()
+        .ok_or("Invalid embedded Codex provider")?;
+    if codex.get("model").and_then(toml::Value::as_str) != Some(model) {
+        // Capacity belongs to the configured model, never to an arbitrary override.
+        codex.remove("context_window");
+    }
+    codex.insert("model".into(), toml::Value::String(model.into()));
     if let Some(routes) = config["model_routes"].as_array_mut() {
         for route in routes {
             if route["hint"].as_str() == Some("codex") {

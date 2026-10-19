@@ -8,7 +8,9 @@ allow_public_bind = true
 allow_remote_admin = true
 
 [providers.models.openai.codex]
+# Conservative Codex input allowance; recheck when changing this model.
 model = "gpt-6.1-sol"
+context_window = 475_000
 wire_api = "responses"
 requires_openai_auth = true
 
@@ -210,7 +212,7 @@ compact_context = false
 agentic = true
 max_tool_iterations = 48
 max_actions_per_hour = 120
-max_context_tokens = 64_000
+max_context_tokens = 192_000
 parallel_tools = true
 # Discover built-in schemas on demand; MCP stays eager for remote skill dispatch.
 deferred_builtin_tools = true

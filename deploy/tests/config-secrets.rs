@@ -52,6 +52,24 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert_eq!(config.memory.embedding_provider, "custom:https://api.cohere.ai/compatibility/v1");
     assert_eq!(config.memory.embedding_model, "embed-v5.0-fast");
     assert_eq!(config.memory.embedding_dimensions, 2048);
+    let limits = config.resolved_context_limits_for_route(
+        "primary", "openai.codex", "gpt-6.1-sol",
+    );
+    assert_eq!(limits.model_context_window, 475_000);
+    assert_eq!(limits.context_token_budget, 192_000);
+    assert_eq!(
+        limits.model_context_window_source,
+        zeroclaw_config::schema::ModelContextWindowSource::Configured,
+    );
+    assert_eq!(
+        config.model_provider_context_window_opt("openai.codex", "fixture-other-model"),
+        None,
+    );
+    assert_eq!(
+        config.model_provider_context_window_opt("openrouter.free", "openrouter/free"),
+        None,
+        "The router must not inherit the Codex capacity",
+    );
     config.save().await.unwrap();
     let saved = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(!saved.contains("sk-ant-fixture-private"));
