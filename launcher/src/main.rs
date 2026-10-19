@@ -1,5 +1,5 @@
 use heimdall_launcher::config::{
-    github_authorization, parse_allowed_ids, render_config, secret_overrides,
+    EXECUTOR_ORIGIN, github_authorization, parse_allowed_ids, render_config, secret_overrides,
 };
 use std::{
     fs,
@@ -167,7 +167,7 @@ fn main() -> io::Result<()> {
         Err(std::env::VarError::NotUnicode(_)) => return Err(fail("Invalid GITHUB_TOKEN")),
     }
     if let Ok(url) = std::env::var("HEIMDALL_EXECUTOR_URL")
-        && url != "http://heimdall-executor.railway.internal:3889"
+        && url != EXECUTOR_ORIGIN
     {
         return Err(fail(
             "HEIMDALL_EXECUTOR_URL must use the configured private executor",

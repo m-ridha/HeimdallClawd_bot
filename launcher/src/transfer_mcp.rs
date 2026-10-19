@@ -125,6 +125,7 @@ struct Bridge {
     client: Client,
     token: String,
     executor: String,
+    endpoint: String,
     peers: Vec<String>,
 }
 impl Bridge {
@@ -142,6 +143,7 @@ impl Bridge {
             token: std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| "Telegram token is required")?,
             executor: std::env::var("HEIMDALL_EXECUTOR_TOKEN")
                 .map_err(|_| "Executor token is required")?,
+            endpoint: crate::config::workspace_mcp_url()?,
             peers,
         })
     }
@@ -151,7 +153,7 @@ impl Bridge {
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
-        let response = self.client.post("http://heimdall-executor.railway.internal:3889/mcp")
+        let response = self.client.post(&self.endpoint)
             .timeout(Duration::from_secs(35))
             .bearer_auth(&self.executor)
             .json(&json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}}))

@@ -92,3 +92,66 @@ pub fn github_authorization(token: &str) -> Result<String, ConfigError> {
     }
     Ok(format!("Bearer {token}"))
 }
+
+/// The only supported executor origin; credentials must never follow a configurable host.
+pub const EXECUTOR_ORIGIN: &str = "http://heimdall-executor.railway.internal:3889";
+
+/// Resolve the workspace MCP endpoint from the immutable, embedded template.
+pub fn workspace_mcp_url() -> Result<String, ConfigError> {
+    workspace_url(include_str!("../../deploy/bot/config.template.toml"))
+}
+
+fn workspace_url(template: &str) -> Result<String, ConfigError> {
+    let config: toml::Value =
+        toml::from_str(template).map_err(|_| "Invalid embedded runtime configuration")?;
+    let servers = config
+        .get("mcp")
+        .and_then(|mcp| mcp.get("servers"))
+        .and_then(toml::Value::as_array)
+        .ok_or("Missing workspace MCP server")?;
+    let mut workspace = servers
+        .iter()
+        .filter(|server| server.get("name").and_then(toml::Value::as_str) == Some("workspace"));
+    let server = workspace.next().ok_or("Missing workspace MCP server")?;
+    if workspace.next().is_some()
+        || server.get("transport").and_then(toml::Value::as_str) != Some("http")
+    {
+        return Err("Invalid workspace MCP server");
+    }
+    let url = server
+        .get("url")
+        .and_then(toml::Value::as_str)
+        .ok_or("Missing workspace MCP URL")?;
+    if url.strip_suffix("/mcp") != Some(EXECUTOR_ORIGIN) {
+        return Err("Workspace MCP URL must use the configured private executor");
+    }
+    Ok(url.to_owned())
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+    #[test]
+    fn embedded_workspace_endpoint_is_fixed_and_unambiguous() {
+        assert_eq!(
+            workspace_mcp_url().unwrap(),
+            "http://heimdall-executor.railway.internal:3889/mcp"
+        );
+        for url in [
+            "https://example.com/mcp",
+            "http://heimdall-executor.railway.internal:3889/other",
+            "http://heimdall-executor.railway.internal:3889/mcp?redirect=x",
+        ] {
+            assert!(
+                workspace_url(&format!(
+                    "[[mcp.servers]]\nname='workspace'\ntransport='http'\nurl='{url}'"
+                ))
+                .is_err()
+            );
+        }
+        let server = "[[mcp.servers]]\nname='workspace'\ntransport='http'\nurl='http://heimdall-executor.railway.internal:3889/mcp'\n";
+        assert!(workspace_url(&(server.to_owned() + server)).is_err());
+        assert!(workspace_url("").is_err());
+        assert!(workspace_url(&server.replace("transport='http'", "transport='stdio'")).is_err());
+    }
+}
