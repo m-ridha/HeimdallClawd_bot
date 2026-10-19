@@ -5,7 +5,7 @@ host = "0.0.0.0"
 port = 3888
 require_pairing = true
 allow_public_bind = true
-allow_remote_admin = false
+allow_remote_admin = true
 
 [providers.models.openai.codex]
 model = "gpt-6.1-sol"

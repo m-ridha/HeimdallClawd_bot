@@ -465,7 +465,7 @@ fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
         Some("off")
     );
     assert_eq!(cfg["gateway"]["require_pairing"].as_bool(), Some(true));
-    assert_eq!(cfg["gateway"]["allow_remote_admin"].as_bool(), Some(false));
+    assert_eq!(cfg["gateway"]["allow_remote_admin"].as_bool(), Some(true));
     for section in ["nodes", "webauthn"] {
         assert_eq!(cfg[section]["enabled"].as_bool(), Some(false));
     }

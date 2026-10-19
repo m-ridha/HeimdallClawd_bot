@@ -45,5 +45,6 @@ launcher/tests/startup.rs
 executor/entrypoint.sh
 launcher/src/child_policy.rs
 deploy/bot/patches/native-child.patch
+deploy/bot/patches/gateway-admin-auth.patch
 launcher/tests/child_policy.rs
 deploy/tests/native-child.rs

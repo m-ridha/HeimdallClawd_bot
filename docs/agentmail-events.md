@@ -1,6 +1,6 @@
 # AgentMail email events
 
-The optional Rust adapter runs inside the existing agent service. It uses ZeroClaw's authenticated `/webhook?agent=primary`; no upstream patch, extra Railway service or additional channel feature is required. The launcher owns public `PORT` (normally 3888), binds ZeroClaw at `127.0.0.1:3887`, and proxies dashboard, pairing, WebSocket and ACP traffic. Local-only admin routes remain blocked from the proxy. Pairing remains required. Without the opt-in flag, the original direct gateway starts.
+The optional Rust adapter runs inside the existing agent service. It uses ZeroClaw's authenticated `/webhook?agent=primary`; no extra Railway service or additional channel feature is required. The launcher owns public `PORT` (normally 3888), binds ZeroClaw at `127.0.0.1:3887`, and proxies dashboard, pairing, WebSocket and ACP traffic. Pairing remains required. The gateway admin authentication patch treats forwarded reload and SOP administration as remote requests: native authentication validates the current paired bearer and requires remote administration to be enabled, including after token revocation or policy changes. The proxy forwards these dashboard routes and `/pair/code`, which reports status without revealing a code. Shutdown and pairing-code secret routes stay console-only. Without the opt-in flag, the original direct gateway starts.
 
 ## Setup
 

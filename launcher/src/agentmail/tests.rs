@@ -352,7 +352,7 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
     let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let backend_address = backend.local_addr().unwrap().to_string();
     let remote = tokio::spawn(async move {
-        for _ in 0..4 {
+        for _ in 0..10 {
             let (socket, _) = backend.accept().await.unwrap();
             tokio::spawn(async move {
                 let _ = hyper::server::conn::http1::Builder::new()
@@ -361,10 +361,11 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
                         service_fn(|req: Request<Incoming>| async move {
                             assert_eq!(req.headers()["authorization"], "Bearer fixture_client");
                             assert_ne!(req.headers()["x-forwarded-for"], "attacker");
+                            let method = req.method().clone();
                             let uri = req.uri().to_string();
                             let body = req.into_body().collect().await.unwrap().to_bytes();
                             Ok::<_, Infallible>(Response::new(Full::new(Bytes::from(format!(
-                                "{uri}:{}",
+                                "{method} {uri}:{}",
                                 String::from_utf8_lossy(&body)
                             )))))
                         }),
@@ -394,27 +395,39 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
         }
     });
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    for path in ["/", "/pair", "/acp?session=fixture", "/api/sops/runs"] {
+    for path in [
+        "/",
+        "/pair",
+        "/pair/code",
+        "/acp?session=fixture",
+        "/api/sops/runs",
+        "/admin/reload",
+        "/admin/sop/pending",
+        "/admin/sop/logs?run_id=fixture",
+        "/admin/sop/approve",
+        "/admin/sop/deny",
+    ] {
+        let method = if matches!(path, "/" | "/pair/code" | "/admin/sop/pending")
+            || path.starts_with("/admin/sop/logs?")
+        {
+            reqwest::Method::GET
+        } else {
+            reqwest::Method::POST
+        };
         let result = client
-            .post(format!("{url}{path}"))
+            .request(method.clone(), format!("{url}{path}"))
             .header("Authorization", "Bearer fixture_client")
             .header("X-Forwarded-For", "attacker")
             .body("fixture body")
             .send()
             .await
             .unwrap();
-        assert_eq!(result.text().await.unwrap(), format!("{path}:fixture body"));
+        assert_eq!(
+            result.text().await.unwrap(),
+            format!("{method} {path}:fixture body")
+        );
     }
-    for path in [
-        "/admin/shutdown",
-        "/admin/reload",
-        "/admin/paircode",
-        "/pair/code",
-        "/admin/sop/pending",
-        "/admin/sop/logs?run_id=fixture",
-        "/admin/sop/approve",
-        "/admin/sop/deny",
-    ] {
+    for path in ["/admin/shutdown", "/admin/paircode", "/admin/paircode/new"] {
         for method in [reqwest::Method::GET, reqwest::Method::POST] {
             assert_eq!(
                 client

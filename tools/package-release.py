@@ -68,6 +68,7 @@ provenance = {
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
     'native_child_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/native-child.patch').read_bytes()).hexdigest(),
+    'gateway_admin_auth_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest(),
     'http_diagnostics_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-diagnostics.patch').read_bytes()).hexdigest(),
     'http_secret_origins_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
     'remote_skills_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/remote-skills.patch').read_bytes()).hexdigest(),

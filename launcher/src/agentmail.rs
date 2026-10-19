@@ -575,16 +575,10 @@ async fn proxy(
     backend: &str,
     lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 ) -> Result<Response<Body>, hyper::Error> {
-    // A loopback proxy must not turn a remote request into local administration.
+    // Pairing-code secrets and shutdown remain host-only. Dashboard reload and
+    // SOP routes use the patched native gateway's paired remote-admin policy.
     let path = req.uri().path();
-    if path.starts_with("/admin/")
-        || [
-            "/admin/shutdown",
-            "/admin/reload",
-            "/admin/paircode",
-            "/admin/paircode/new",
-            "/pair/code",
-        ]
+    if ["/admin/shutdown", "/admin/paircode", "/admin/paircode/new"]
         .iter()
         .any(|route| path.ends_with(route))
     {
