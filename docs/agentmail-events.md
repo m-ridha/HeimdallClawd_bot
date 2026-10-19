@@ -15,7 +15,7 @@ Set these variables in the **agent Railway service**, never GitHub or Git:
 | `HEIMDALL_AGENTMAIL_FILTERS` | Optional complete JSON array of rules; absent uses the GitHub rule below |
 
 1. Deploy a release containing this feature through the normal release workflow.
-2. If no HTTPS domain exists, configure one for the existing agent service/public `PORT` in Railway. This change does not provision domains or modify IaC. The authenticated dashboard/gateway share that domain; retain pairing.
+2. Use the existing agent HTTPS domain, targeting container port 3888. Generated Railway domains stay platform-managed outside IaC; see [public networking ownership](../.railway/README.md). The authenticated dashboard/gateway share that domain; retain pairing. Keep the executor private.
 3. In AgentMail, create an inbox-scoped webhook for `message.received` with URL `https://YOUR_AGENT_DOMAIN/agentmail/events`. Copy its signing secret directly into Railway, never into Telegram or logs. See [webhook registration](https://docs.agentmail.to/webhooks-overview) and [Svix verification](https://docs.agentmail.to/webhook-verification).
 4. Configure the variables and deploy the variable change. Internal port 3887 is reserved.
 5. Tell Heimdall “List the email filters,” then “Enable github-review-request.” The management tool arguments are `{"name":"github-review-request","enabled":true}`; disabling uses `false`. All rules initially default to disabled.

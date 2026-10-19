@@ -1,5 +1,13 @@
 # Verification
 
+## Public proxy security review — 2026-10-19
+
+Review of the pinned native gateway found four `/admin/sop/*` routes that authorize loopback callers independently of forwarded headers. The adapter now blocks the entire `/admin/` namespace before forwarding. GET/POST regressions cover all four routes; ordinary SOP API forwarding and bidirectional upgrades remain covered. The full portable launcher and executor suites, strict Clippy for both crates, the pinned native configuration-library test, all 18 Python checks with the IaC SDK, formatting and diff checks passed. A redacted Gitleaks scan of the complete PR diff detected no secrets. Native Linux validation [39181448667](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/39181448667) passed for the preceding commit; this follow-up still requires its own Linux run. No live email delivery or native SOP mutation was performed.
+
+## Public agent networking — 2026-10-19
+
+Created a platform-managed generated HTTPS domain for the existing agent service, targeting port 3888. Live HTTPS `/health` returned 200; anonymous `/api/config` returned 401. The executor had no public domain or TCP proxy. Using `.railway/.venv`, all 18 Python checks passed with no SDK skip, and the production read-only `railway config plan` reported the configuration already up to date after domain creation. Generated domains remain outside IaC; no apply or application deployment was needed. This verifies routing and anonymous-access rejection, not AgentMail adapter activation or delivery.
+
 ## AgentMail email adapter preparation — 2026-10-19
 
 Review corrections: omitted-body retrieval considers every enabled sender rule even when another rule already matches the subject. All asynchronous ledger access uses Tokio's blocking pool; unchanged ledger reads do not rewrite/fsync the file. Regressions cover both matched rule IDs after hydration, a held file lock with a responsive current-thread async runtime, and byte-preserving read-only ledger access.

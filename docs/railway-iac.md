@@ -11,3 +11,5 @@ On each stable release, GitHub Actions installs the pinned Python SDK, links to 
 To inspect locally, activate a Python 3.10+ virtual environment with `.railway/requirements.txt` installed, link to production and run `railway config plan`. Do not pass `--include-variables`, `--decrypt-variables` or `--show-values` in routine checks. Keep local plan artifacts and state files out of Git.
 
 Infrastructure changes do not speed Rust compilation. The separate cached build workflow handles binary compilation and validation.
+
+The agent's generated HTTPS domain is managed outside the authoring graph; see [public networking ownership](../.railway/README.md). It does not require an IaC apply. The executor remains private.

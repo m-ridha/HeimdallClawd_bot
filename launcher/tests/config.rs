@@ -519,6 +519,14 @@ fn primary_turn_budget_supports_multi_step_github_work() {
     let cfg: toml::Value =
         toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
     assert_eq!(
+        cfg["runtime_profiles"]["primary"]["max_context_tokens"].as_integer(),
+        Some(64_000)
+    );
+    assert_eq!(
+        cfg["channels"]["telegram"]["home"]["ack_reactions"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
         cfg["runtime_profiles"]["primary"]["max_tool_iterations"].as_integer(),
         Some(48)
     );

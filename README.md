@@ -28,7 +28,7 @@ Telegram ─► heimdallclawd (launcher ► ZeroClaw) ──private MCP──►
 
 | Path | Responsibility |
 | --- | --- |
-| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the `--skills-mcp`, `--transfer-mcp` and `--codespace-mcp` stdio servers |
+| `launcher/` | Rust startup wrapper: validates the owner/allowlist, renders non-secret config, checks ChatGPT auth, starts ZeroClaw, and hosts the skills, transfer, Codespaces and email-filter stdio servers |
 | `executor/` | Rust private MCP service and Linux-restricted helpers (`src/`), API/filesystem/isolation tests (`tests/`), and a real ZeroClaw MCP client contract (`contract/`) |
 | `deploy/bot/` | Dockerfiles, ZeroClaw config template, pinned runtime lock and checksums, maintained patches, managed agent instructions (`TOOLS.md`, `IDENTITY.md`), licenses |
 | `deploy/executor/`, `deploy/tests/` | Executor artifact Dockerfile; integration tests installed into the pinned ZeroClaw source during the build |
@@ -107,7 +107,7 @@ Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a pro
 
 Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with Railway CLI 5.68.0 and Python SDK 0.7.0. Service variables are unmanaged by IaC and volumes are preserved. See [IaC operations](docs/railway-iac.md) and [.railway/README.md](.railway/README.md).
 
-Keep one replica per service and sleeping disabled. Operate frugally, monitor usage, and configure budgets to suit the deployment. The executor and bot need no public domain; the executor listens on IPv6 for Railway private networking.
+Keep one replica per service and sleeping disabled. Operate frugally, monitor usage, and configure budgets to suit the deployment. Telegram polling needs no public domain; [AgentMail events](docs/agentmail-events.md) use the agent's authenticated public gateway. The executor stays private and listens on IPv6 for Railway private networking.
 
 See [GitHub access setup](docs/operations.md#github-access) for token permissions, Codespaces limits and verification.
 

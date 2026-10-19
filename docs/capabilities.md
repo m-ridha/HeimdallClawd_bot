@@ -21,7 +21,7 @@ These changes describe the next release, not a verified live deployment. Heartbe
 
 ## Extended native capabilities (not live-verified)
 
-The primary profile contains 58 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the separate executor and the private gateway. Some supported features still require operator configuration; build support alone does not make an integration functional.
+The primary profile contains 58 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the private executor and gateway authentication. Some supported features still require operator configuration; build support alone does not make an integration functional.
 
 | Capability | Status and limits |
 | --- | --- |
@@ -36,7 +36,7 @@ The primary profile contains 58 exact policy grants; this is not the exposed Tel
 | Project intelligence | `project_intel` and `report_template` granted. Analyze supplied Git/issue summaries and produce reports; they do not automatically connect a project or tracker. |
 | Cloud / security | `cloud_ops`, `cloud_patterns`, `security_ops` granted. Advisory analysis, vulnerability parsing and playbook guidance; no cloud credentials or automatic infrastructure remediation added. Approval gates retained. |
 | ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Client and private connectivity still need setup. |
-| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. No public domain or remote-admin access is added. |
+| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. Shares the agent's public listener with pairing required; remote administration stays disabled. |
 | Remote nodes | Configuration prepared for two nodes; disabled until a shared authentication token and remote client are configured. LAN mDNS stays off on Railway. No tunnel service is installed. |
 | Diagnostics | Rotating diagnostics: 1 MiB rotation threshold, three archives, three-day archive retention. Tool I/O and LLM payload capture remain off, per owner preference. The threshold is a rotation trigger, not a strict per-event/disk quota. |
 | WebAuthn | Compiled support included; inactive until the actual HTTPS relying-party domain/origin and client access are configured. Existing subscription sign-in remains the model authentication. |

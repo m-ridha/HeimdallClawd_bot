@@ -9,7 +9,7 @@ HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher and a separate Rus
 | heimdallclawd | `/data` (500 MB) | 3888 | 0.5 GB, 0.5 vCPU |
 | heimdall-executor | `/data/workspace` (200 MB) | 3889 | 0.25 GB, 0.25 vCPU |
 
-Keep one replica per service and sleeping disabled. Monitor costs and use an operator-selected budget; favor frugal infrastructure. Set `PORT` explicitly in Railway: its injected port takes precedence over Docker's environment default. Neither service needs a public domain. The executor listens on IPv6 for Railway private networking.
+Keep one replica per service and sleeping disabled. Monitor costs and use an operator-selected budget; favor frugal infrastructure. Set `PORT` explicitly in Railway: its injected port takes precedence over Docker's environment default. The agent's public domain serves authenticated clients and signed email events; Telegram polling alone needs no public domain. The executor stays private and listens on IPv6 for Railway private networking.
 
 ## Variables
 
@@ -188,7 +188,7 @@ Cohere uses `custom:https://api.cohere.ai/compatibility/v1`, which ZeroClaw reso
 
 Voice audio is sent to Deepgram, and memory/query text is sent to Cohere. Their quotas/billing are separate from ChatGPT subscriptions and Railway billing. Provider errors are not evidence of a working integration; after deployment, send a short voice message and verify its transcription, then store and recall a synthetic fact with different wording. Check provider usage to confirm embedding requests; keyword recall alone does not prove embeddings worked.
 
-The embedded dashboard and ACP endpoint use the existing gateway on port 3888 with pairing required. No public route is provisioned. Establish an owner-controlled private access path before connecting a browser/editor. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor.
+The embedded dashboard and ACP endpoint share the agent's HTTPS domain, targeting port 3888 with pairing required. Local administration remains inaccessible through the email adapter's public proxy. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor. See [public networking ownership](../.railway/README.md).
 
 WebAuthn activation needs `ZEROCLAW_webauthn__enabled`, `ZEROCLAW_webauthn__rp_id` and `ZEROCLAW_webauthn__rp_origin` matching the actual HTTPS client origin. Remote nodes need `ZEROCLAW_nodes__auth_token` as a Railway secret and a configured private client before enabling `ZEROCLAW_nodes__enabled`. Leave both inactive until those prerequisites are met.
 
