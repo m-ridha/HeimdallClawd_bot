@@ -1,6 +1,6 @@
 //! Authenticated MCP adapter with client-scoped execution and cancellation.
 use crate::{
-    protocol::Job,
+    protocol::{COMMAND_LIMIT, Job, LIMIT},
     server::{App, execute_formatted},
 };
 use axum::{
@@ -39,11 +39,11 @@ fn scoped_key(session: uuid::Uuid, id: &Value) -> Option<String> {
 }
 fn tools() -> Value {
     json!([
-    {"name":"bash","description":"Run a command in the writable isolated /data/workspace executor: up to 3 seconds admission wait, then 30-second execution timeout, 64 KiB combined output, two concurrent jobs. Networking and control credentials unavailable. Use relative paths; include cd in the same command because each call is a fresh process. Bash result text is JSON with exit_code (null for signals), termination_reason (completed, timeout, cancelled, output_limit), truncated, stdout and stderr. Only completed with exit_code 0 is success; output shares one raw-byte limit. Launch failures remain generic errors.","inputSchema":{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":32768}},"required":["command"],"additionalProperties":false}},
+    {"name":"bash","description":"Run a command in the writable isolated /data/workspace executor: up to 3 seconds admission wait, then 30-second execution timeout, 64 KiB combined output, two concurrent jobs. Networking and control credentials unavailable. Use relative paths; include cd in the same command because each call is a fresh process. Bash result text is JSON with exit_code (null for signals), termination_reason (completed, timeout, cancelled, output_limit), truncated, stdout and stderr. Only completed with exit_code 0 is success; output shares one raw-byte limit. Launch failures remain generic errors.","inputSchema":{"type":"object","properties":{"command":{"type":"string","minLength":1,"maxLength":COMMAND_LIMIT}},"required":["command"],"additionalProperties":false}},
     {"name":"file_read","description":"Read a UTF-8 file relative to the isolated workspace, at most 64 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
     {"name":"file_read_base64","description":"Read a binary file as base64, at most 48 KiB.","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}},
-    {"name":"file_write_base64","description":"Write a base64-encoded binary file, at most 48 KiB decoded.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":65536}},"required":["path","content"],"additionalProperties":false}},
-    {"name":"file_write","description":"Write a file relative to the isolated workspace, at most 64 KiB. This remote workspace is writable.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":65536}},"required":["path","content"],"additionalProperties":false}}
+    {"name":"file_write_base64","description":"Write a base64-encoded binary file, at most 48 KiB decoded.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":LIMIT}},"required":["path","content"],"additionalProperties":false}},
+    {"name":"file_write","description":"Write a file relative to the isolated workspace, at most 64 KiB. This remote workspace is writable.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","maxLength":LIMIT}},"required":["path","content"],"additionalProperties":false}}
     ])
 }
 pub(crate) async fn handle(

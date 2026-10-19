@@ -1,7 +1,7 @@
 use heimdall_executor::{
     files::Workspace,
     linux, process,
-    protocol::Job,
+    protocol::{BINARY_LIMIT, BODY_LIMIT, Job},
     server::{App, listen_address, router},
 };
 use std::{
@@ -10,8 +10,10 @@ use std::{
 };
 fn helper() -> io::Result<()> {
     let mut input = String::new();
-    io::stdin().take(131073).read_to_string(&mut input)?;
-    if input.len() > 131072 {
+    io::stdin()
+        .take((BODY_LIMIT + 1) as u64)
+        .read_to_string(&mut input)?;
+    if input.len() > BODY_LIMIT {
         return Err(io::Error::other("Input too large"));
     }
     let job: Job = serde_json::from_str(&input).map_err(io::Error::other)?;
@@ -38,7 +40,7 @@ fn helper() -> io::Result<()> {
             use base64::Engine;
             let bytes = Workspace::open(Path::new("/data/workspace"))?
                 .read_binary(job.arguments["path"].as_str().unwrap())?;
-            if bytes.len() > 49152 {
+            if bytes.len() > BINARY_LIMIT {
                 return Err(io::Error::other("Transfer exceeds 48 KiB"));
             }
             io::stdout().write_all(
@@ -52,7 +54,7 @@ fn helper() -> io::Result<()> {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(job.arguments["content"].as_str().unwrap())
                 .map_err(io::Error::other)?;
-            if bytes.len() > 49152 {
+            if bytes.len() > BINARY_LIMIT {
                 return Err(io::Error::other("Transfer exceeds 48 KiB"));
             }
             Workspace::open(Path::new("/data/workspace"))?
