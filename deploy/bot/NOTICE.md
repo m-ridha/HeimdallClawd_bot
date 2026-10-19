@@ -8,4 +8,6 @@ The HTTP origin patch binds Heimdall named GitHub and AgentMail secrets to their
 
 The gateway admin authentication patch treats requests marked by a trusted proxy as remote for daemon reload and SOP administration, requiring the native paired bearer and remote-admin policy instead of granting loopback CLI authority. Genuine host CLI requests keep their existing behavior; pairing-code generation still requires the host admin secret.
 
-ZeroClaw v0.8.6 supplies canonical typed transcription initialization and crate-local WIT interface paths upstream; no local patch is needed for either. The retained patches enforce private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, isolated native children, remote skill execution and paired proxy administration.
+ZeroClaw v0.8.6 supplies canonical typed transcription initialization and crate-local WIT interface paths upstream; no local patch is needed for either. The retained patches enforce private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, isolated native children, remote skill execution, paired proxy administration and actionable SOP workshop guidance.
+
+The SOP workshop guidance patch corrects action-specific parameter descriptions and reports the required Markdown step syntax without echoing the rejected procedure. Proposal validation and explicit application remain upstream behavior.

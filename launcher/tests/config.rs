@@ -520,7 +520,7 @@ fn primary_turn_budget_supports_multi_step_github_work() {
         toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
     assert_eq!(
         cfg["runtime_profiles"]["primary"]["max_context_tokens"].as_integer(),
-        Some(64_000)
+        Some(192_000)
     );
     assert_eq!(
         cfg["channels"]["telegram"]["home"]["ack_reactions"].as_bool(),
@@ -562,4 +562,25 @@ fn memory_reranking_has_a_small_local_candidate_pool() {
     assert_eq!(cfg["memory"]["rerank_enabled"].as_bool(), Some(true));
     assert_eq!(cfg["memory"]["rerank_strategy"].as_str(), Some("mmr"));
     assert_eq!(cfg["memory"]["candidate_multiplier"].as_integer(), Some(2));
+}
+
+#[test]
+fn codex_capacity_is_not_borrowed_by_another_model() {
+    let configured: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    assert_eq!(
+        configured["providers"]["models"]["openai"]["codex"]["context_window"].as_integer(),
+        Some(475_000)
+    );
+    let alternate: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "fixture-other-model").unwrap()).unwrap();
+    assert_eq!(
+        alternate["providers"]["models"]["openai"]["codex"]["model"].as_str(),
+        Some("fixture-other-model")
+    );
+    assert!(
+        alternate["providers"]["models"]["openai"]["codex"]
+            .get("context_window")
+            .is_none()
+    );
 }

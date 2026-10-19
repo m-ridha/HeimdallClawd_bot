@@ -1,0 +1,46 @@
+--- a/crates/zeroclaw-runtime/src/tools/sop_workshop.rs
++++ b/crates/zeroclaw-runtime/src/tools/sop_workshop.rs
+@@ -128,7 +128,7 @@
+                 },
+                 "description": {
+                     "type": "string",
+-                    "description": "SOP description for propose when manifest_toml is omitted"
++                    "description": "Required for action=propose, including when manifest_toml is supplied"
+                 },
+                 "manifest_toml": {
+                     "type": "string",
+@@ -136,7 +136,7 @@
+                 },
+                 "procedure_markdown": {
+                     "type": "string",
+-                    "description": "Proposed SOP.md content"
++                    "description": "Required for action=propose. Include a literal ## Steps heading followed by numbered steps, e.g. 1. **Inspect** - Read the current diff."
+                 },
+                 "source_run_id": {
+                     "type": "string",
+@@ -194,7 +194,11 @@
+
+     fn propose(&self, args: &serde_json::Value) -> anyhow::Result<String> {
+         let sop_name = required_str(args, "sop_name")?;
+-        let description = required_str(args, "description")?;
++        let description = required_str(args, "description").map_err(|_| {
++            anyhow::Error::msg(
++                "SOP propose requires a string 'description', even when manifest_toml is supplied",
++            )
++        })?;
+         let procedure_markdown = required_str(args, "procedure_markdown")?;
+         let manifest_toml = args
+             .get("manifest_toml")
+--- a/crates/zeroclaw-runtime/src/sop/procedural_memory.rs
++++ b/crates/zeroclaw-runtime/src/sop/procedural_memory.rs
+@@ -248,7 +248,9 @@
+         );
+     }
+     if sops[0].steps.is_empty() {
+-        bail!("candidate SOP has no parsed steps");
++        bail!(
++            "candidate SOP has no parsed steps; procedure_markdown must include a literal ## Steps heading followed by numbered steps, e.g. 1. **Inspect** - Read the current diff."
++        );
+     }
+     Ok(())
+ }

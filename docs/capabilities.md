@@ -74,3 +74,5 @@ Native subprocess confinement preserves the tool grants. See [native child-proce
 The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native Linux CI validation passed with the updated confinement policy; live deployment verification remains pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
 
 For the runtime migration, retained patches, persistent-state checks and new integration prerequisites, see [the v0.8.6 upgrade procedure](operations.md#upgrading-to-zeroclaw-v086).
+
+Complex tasks use the managed checkpoint/SOP-authoring workflow and a separate model capacity and working context budget. See [context budgets and long tasks](operations.md#context-budgets-and-long-tasks) for defaults, provider-route caveats and recovery.
