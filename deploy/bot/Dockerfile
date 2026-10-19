@@ -43,7 +43,7 @@ COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
 COPY deploy/bot/patches/native-child.patch /tmp/native-child.patch
 RUN patch --fuzz=0 -p1 < /tmp/native-child.patch && patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/remote-skills.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
-FROM node:24-bookworm-slim AS dashboard-node
+FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web
 COPY --from=dashboard-node /usr/local/ /usr/local/
 RUN cd web && npm ci --ignore-scripts && cd .. && cargo web build
