@@ -42,7 +42,8 @@ COPY deploy/bot/patches/http-secret-origins.patch /tmp/http-secret-origins.patch
 COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
 COPY deploy/bot/patches/native-child.patch /tmp/native-child.patch
 COPY deploy/bot/patches/gateway-admin-auth.patch /tmp/gateway-admin-auth.patch
-RUN patch --fuzz=0 -p1 < /tmp/native-child.patch && patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/remote-skills.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch
+COPY deploy/bot/patches/sop-workshop-guidance.patch /tmp/sop-workshop-guidance.patch
+RUN patch --fuzz=0 -p1 < /tmp/native-child.patch && patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/remote-skills.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web
@@ -68,6 +69,7 @@ COPY deploy/tests/remote-skills.rs crates/zeroclaw-runtime/tests/heimdall_remote
 COPY deploy/tests/telegram-transcription.rs crates/zeroclaw-channels/tests/heimdall_transcription.rs
 COPY deploy/tests/logging-privacy.rs crates/zeroclaw-channels/tests/heimdall_logging.rs
 COPY deploy/tests/tool-inventory.rs crates/zeroclaw-runtime/tests/heimdall_inventory.rs
+COPY deploy/tests/sop-workshop.rs crates/zeroclaw-runtime/tests/heimdall_sop_workshop.rs
 COPY deploy/tests/http-secret-origins.rs crates/zeroclaw-tools/tests/heimdall_http_origins.rs
 COPY deploy/tests/native-child.rs crates/zeroclaw-tools/tests/heimdall_native_child.rs
 COPY deploy/tests/skills-mcp.rs crates/zeroclaw-tools/tests/heimdall_skills_stdio.rs
@@ -80,7 +82,7 @@ RUN cargo test --locked -p zeroclaw-channels --no-default-features --features ch
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_native_child --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets --no-run \
-    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel --test heimdall_remote_skills --test heimdall_inventory --no-run
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel --test heimdall_remote_skills --test heimdall_inventory --test heimdall_sop_workshop --no-run
 
 FROM native-test-compile AS runtime-build
 COPY executor/entrypoint.sh /tmp/executor-entrypoint.sh
@@ -97,7 +99,7 @@ RUN cargo test --locked -p zeroclaw-channels --no-default-features --features ch
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_native_child \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
-    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel --test heimdall_remote_skills --test heimdall_inventory \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel --test heimdall_remote_skills --test heimdall_inventory --test heimdall_sop_workshop \
     && /runtime/target/release/zeroclaw eval run --suite /tmp/heimdall-evals --mode replay \
     && touch /contract-passed
 

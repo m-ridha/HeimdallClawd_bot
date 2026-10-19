@@ -49,3 +49,5 @@ deploy/bot/patches/gateway-admin-auth.patch
 launcher/tests/child_policy.rs
 deploy/tests/native-child.rs
 launcher/src/mcp_stdio.rs
+deploy/bot/patches/sop-workshop-guidance.patch
+deploy/tests/sop-workshop.rs
