@@ -48,18 +48,34 @@ impl Filter {
         let Some(from) = message["from"].as_str() else {
             return false;
         };
-        if from.bytes().any(|b| b",;\r\n".contains(&b)) {
+        if from.contains(['\r', '\n']) {
             return false;
         }
+        let from = from.trim();
         let mailbox = if let Some((prefix, rest)) = from.split_once('<') {
-            if prefix.contains(['<', '>']) {
+            // Delimiters inside a quoted display name are text, not additional
+            // mailboxes. Quoted-pair escapes must not close that name early.
+            let mut quoted = false;
+            let mut escaped = false;
+            for byte in prefix.bytes() {
+                if escaped {
+                    escaped = false;
+                } else if quoted && byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    quoted = !quoted;
+                } else if !quoted && b",;<>".contains(&byte) {
+                    return false;
+                }
+            }
+            if quoted || escaped {
                 return false;
             }
             rest.strip_suffix('>').unwrap_or("")
         } else {
             from
         };
-        mailbox.trim().eq_ignore_ascii_case(&self.sender)
+        !mailbox.contains([',', ';']) && mailbox.trim().eq_ignore_ascii_case(&self.sender)
     }
     fn matches(&self, message: &Value) -> bool {
         self.sender_matches(message)

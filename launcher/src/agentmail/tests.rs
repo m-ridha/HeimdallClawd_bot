@@ -117,6 +117,10 @@ fn sender_and_content_are_both_required() {
         "notifications@github.com",
         "GitHub <notifications@github.com>",
         "NOTIFICATIONS@GITHUB.COM",
+        "\"GitHub, Reviews\" <notifications@github.com>",
+        "  \"GitHub, Reviews\" <notifications@github.com>  ",
+        "\"GitHub; Reviews\" <notifications@github.com>",
+        "\"GitHub \\\"Reviews\\\", Team\" <notifications@github.com>",
     ] {
         assert!(
             filters[0].matches(&json!({"from":from,"text":"Alice REQUESTED YOUR REVIEW ON: test"}))
@@ -127,6 +131,13 @@ fn sender_and_content_are_both_required() {
         "notifications@github.com <other@example.com>",
         "other@example.com",
         "notifications@github.com, other@example.com",
+        "other@example.com, GitHub <notifications@github.com>",
+        "\"Other\", GitHub <notifications@github.com>",
+        "\"Other\"; GitHub <notifications@github.com>",
+        "\"Unclosed, Team <notifications@github.com>",
+        "\"GitHub, Reviews\" <notifications@github.com>, other@example.com",
+        "\"GitHub, Reviews\" <notifications@github.com;other@example.com>",
+        "\"GitHub,\r\n Reviews\" <notifications@github.com>",
     ] {
         assert!(!filters[0].matches(&json!({"from":from,"text":"requested your review on:"})));
     }
