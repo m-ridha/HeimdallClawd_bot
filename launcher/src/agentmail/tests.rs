@@ -1,5 +1,5 @@
 use super::*;
-const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:"}]"#;
+const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:","sop":"github-pr-review"}]"#;
 
 #[test]
 fn omitted_body_is_fetched_for_each_unresolved_sender_rule() {
@@ -458,6 +458,46 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
 
 #[tokio::test]
 async fn matching_event_dispatches_once_and_retains_only_metadata() {
+    event_dispatch_case(
+        StatusCode::OK,
+        br#"{"response":"Fixture review notification"}"#,
+        "accepted",
+        "complete",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dispatch_failures_retain_safe_diagnostics_and_suppress_replay() {
+    event_dispatch_case(
+        StatusCode::REQUEST_TIMEOUT,
+        b"PRIVATE_ERROR fixture_not_a_live_token",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    event_dispatch_case(
+        StatusCode::UNAUTHORIZED,
+        b"PRIVATE_ERROR",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    event_dispatch_case(
+        StatusCode::OK,
+        br#"{"error":"PRIVATE_ERROR"}"#,
+        "uncertain",
+        "gateway",
+    )
+    .await;
+}
+
+async fn event_dispatch_case(
+    status: StatusCode,
+    response_body: &'static [u8],
+    expected_status: &str,
+    expected_stage: &str,
+) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state");
     state(&path, |s| {
@@ -483,9 +523,12 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
                         if let Some(tx) = tx.lock().unwrap().take() {
                             let _ = tx.send((uri, value));
                         }
-                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(
-                            br#"{"response":"Fixture review notification"}"#,
-                        ))))
+                        Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(status)
+                                .body(Full::new(Bytes::from_static(response_body)))
+                                .unwrap(),
+                        )
                     }
                 }),
             )
@@ -530,6 +573,40 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
             .contains("github-review-request")
     );
     assert!(!prompt.to_string().contains("PRIVATE_BODY"));
+    let instruction = prompt["message"].as_str().unwrap();
+    assert!(instruction.contains("github-pr-review"));
+    assert!(instruction.contains("sop_execute"));
+    assert!(instruction.contains("sop_advance"));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let finished = state(
+                &path,
+                |s| Ok(s["events"]["evt_new"]["status"] != "reserved"),
+            )
+            .unwrap();
+            if finished {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    state(&path, |s| {
+        assert_eq!(s["events"]["evt_new"]["status"], expected_status);
+        assert_eq!(
+            s["events"]["evt_new"]["diagnostic"]["stage"],
+            expected_stage
+        );
+        if !status.is_success() {
+            assert_eq!(
+                s["events"]["evt_new"]["diagnostic"]["http_status"],
+                status.as_u16()
+            );
+        }
+        Ok(())
+    })
+    .unwrap();
     assert_eq!(
         client
             .post(&url)
@@ -543,6 +620,7 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
     );
     let saved = fs::read_to_string(path).unwrap();
     assert!(!saved.contains("PRIVATE_BODY"));
+    assert!(!saved.contains("PRIVATE_ERROR"));
     assert!(!saved.contains("Fixture subject"));
     assert!(!saved.contains("fixture_not_a_live_token"));
     model.abort();
@@ -636,4 +714,88 @@ fn digest_hex_matches_sha256_vectors_and_paired_token_format() {
         .unwrap(),
         [expected]
     );
+}
+
+#[test]
+fn optional_sop_is_strict_operator_configuration() {
+    assert_eq!(
+        parse_filters(FILTERS).unwrap()[0].sop.as_deref(),
+        Some("github-pr-review")
+    );
+    let legacy = r#"[{"name":"notice","sender":"sender@example.com","contains":"text"}]"#;
+    assert!(parse_filters(legacy).unwrap()[0].sop.is_none());
+    for name in ["", "../review", "review --unsafe", "review\n", "a.b"] {
+        let value =
+            json!([{"name":"notice","sender":"sender@example.com","contains":"text","sop":name}]);
+        assert!(parse_filters(&value.to_string()).is_err());
+    }
+    let unknown =
+        r#"[{"name":"notice","sender":"sender@example.com","contains":"text","action":"unsafe"}]"#;
+    assert!(parse_filters(unknown).is_err());
+}
+
+#[test]
+fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
+    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(630));
+    assert_eq!(
+        DispatchError::GatewayHttp(408).diagnostic(),
+        json!({"stage":"gateway","kind":"http","http_status":408,"gateway_completed":false})
+    );
+    assert_eq!(
+        DispatchError::TelegramHttp(403).diagnostic(),
+        json!({"stage":"telegram","kind":"http","http_status":403,"gateway_completed":true})
+    );
+    assert_eq!(
+        DispatchError::GatewayTransport(true).diagnostic()["kind"],
+        "timeout"
+    );
+    assert_eq!(
+        DispatchError::GatewayTransport(false).diagnostic()["kind"],
+        "transport"
+    );
+    assert_eq!(
+        DispatchError::TelegramResponse.diagnostic()["gateway_completed"],
+        true
+    );
+}
+
+#[test]
+fn filter_status_exposes_ten_recent_safe_diagnostics_without_raw_event_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |data| {
+        for n in 1..=12 {
+            data["events"][format!("fixture{n}")] = json!({"time":n,"status":"uncertain","diagnostic":{"stage":"gateway","kind":"http","http_status":408,"gateway_completed":false}});
+        }
+        Ok(())
+    }).unwrap();
+    let before = fs::read(&path).unwrap();
+    let settings = Settings {
+        secret: vec![],
+        token: String::new(),
+        filters: parse_filters(FILTERS).unwrap(),
+        state: path.clone(),
+        paired_tokens: String::new(),
+        authorization: None,
+        gateway: String::new(),
+        telegram: None,
+        gateway_secret: String::new(),
+    };
+    let text = manage(&settings, "filters", &json!({})).unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["recent_events"].as_array().unwrap().len(), 10);
+    assert_eq!(value["recent_events"][0]["time"], 12);
+    assert_eq!(value["recent_events"][9]["time"], 3);
+    assert_eq!(value["recent_events"][0]["diagnostic"]["http_status"], 408);
+    assert_eq!(
+        value["recent_events"][0]["event_ref"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(value["filters"][0]["sop"], "github-pr-review");
+    assert_eq!(value["events"]["uncertain"], 12);
+    assert!(!text.contains("fixture12"));
+    assert_eq!(before, fs::read(path).unwrap());
 }

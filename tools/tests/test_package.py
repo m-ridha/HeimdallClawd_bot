@@ -36,6 +36,7 @@ class PackageTests(unittest.TestCase):
                 self.assertNotRegex(dockerfile.read_text(), r'\bcargo\s+(?:build|test|install|check)\b')
                 self.assertIn('sha256sum -c', dockerfile.read_text())
             self.assertEqual(lock['native_child_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/native-child.patch').read_bytes()).hexdigest())
+            self.assertEqual(lock['webhook_timeout_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/webhook-timeout.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['sop_workshop_guidance_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/sop-workshop-guidance.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['gateway_admin_auth_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest())
@@ -46,7 +47,7 @@ class PackageTests(unittest.TestCase):
             self.assertEqual({p.name for p in (output / 'deploy/bot/patches').iterdir()}, {
                 'native-child.patch', 'http-secret-origins.patch', 'http-diagnostics.patch',
                 'private-telegram.patch', 'remote-skills.patch',
-                'gateway-admin-auth.patch', 'sop-workshop-guidance.patch', 'responses-tool-history.patch',
+                'gateway-admin-auth.patch', 'sop-workshop-guidance.patch', 'responses-tool-history.patch', 'webhook-timeout.patch',
             })
             self.assertEqual(lock['features'], 'agent-runtime,tools-external,tool-project-intel,channel-telegram,gateway,schema-export,plugins-wasm-cranelift,embedded-web,webauthn,channel-acp-server')
             self.assertIn('--features ' + lock['features'] + ' --bin zeroclaw', (ROOT / 'deploy/bot/Dockerfile').read_text())
