@@ -11,3 +11,5 @@ The gateway admin authentication patch treats requests marked by a trusted proxy
 ZeroClaw v0.8.6 supplies canonical typed transcription initialization and crate-local WIT interface paths upstream; no local patch is needed for either. The retained patches enforce private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, isolated native children, remote skill execution, paired proxy administration and actionable SOP workshop guidance.
 
 The SOP workshop guidance patch corrects action-specific parameter descriptions and reports the required Markdown step syntax without echoing the rejected procedure. Proposal validation and explicit application remain upstream behavior.
+
+The Responses tool-history patch reconciles provider replay with canonical retained calls, supplies explicit unknown-outcome error results for missing outputs, and avoids retrying the same provider-rejected tool-history shape. The shared builder covers OpenAI Responses and Codex. It does not execute tools or rewrite persisted sessions.

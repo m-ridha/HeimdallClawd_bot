@@ -1,5 +1,9 @@
 # Verification
 
+## Responses tool-history recovery — 2026-10-20
+
+Railway stdout confirmed repeated provider failures after a healthy deployment; the user supplied the underlying dashboard diagnostic identifying a missing function-call output. Two synthetic pairing regressions failed against the original pinned source and passed after the request-builder fix. Local macOS checks passed for four targeted regressions (including mock HTTP dispatch and typed failure classification), all 54 Codex provider tests, all 112 OpenAI provider tests with `--test-threads=1`, and 27 existing non-retryable tests. The initial parallel OpenAI run had two shared-proxy fixture failures; serial execution passed without changing those tests. Both portable Cargo suites, both strict Clippy checks and all 19 Python checks passed. All eight patches apply with zero fuzz to a fresh checksum-verified source extraction. Native Linux validation and deployed recovery remain unverified here; no production variables, credentials or persisted conversation records were changed.
+
 ## Context budget and SOP authoring — 2026-10-19
 
 Local macOS checks passed for both portable Cargo test suites, both strict Clippy checks and all 19 Python checks with the IaC SDK. Targeted contracts against the pinned v0.8.6 source passed for configured capacity/budget resolution and secret exclusion, Telegram/ACP tool admission and complete managed-guide prompt assembly, and SOP rejection/correction/inspection/explicit application. All seven patches applied with zero fuzz to a fresh checksum-verified source extraction. These are local results; Linux confinement and deployed subscription capacity remain separate checks. The checkpoint workflow is managed guidance, not automatic continuation. The user reports a successful AgentMail review-request trigger before this change; the updated SOP/task workflow has not been deployed or live-verified.

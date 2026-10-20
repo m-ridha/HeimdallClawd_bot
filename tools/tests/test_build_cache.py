@@ -15,7 +15,8 @@ class NativeTestCacheTests(unittest.TestCase):
             self.assertIn(volatile, executed)
         compile_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in compiled.splitlines() if 'cargo test ' in line]
         run_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in executed.splitlines() if 'cargo test ' in line]
-        self.assertEqual(len(compile_commands), 6)
+        self.assertEqual(len(compile_commands), 7)
+        self.assertIn('cargo test --locked -p zeroclaw-providers --lib heimdall --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run', compile_commands)
         self.assertTrue(all(command.endswith(' --no-run') for command in compile_commands))

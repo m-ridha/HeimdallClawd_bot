@@ -1,0 +1,348 @@
+--- a/crates/zeroclaw-providers/src/openai_codex.rs
++++ b/crates/zeroclaw-providers/src/openai_codex.rs
+@@ -358,6 +358,37 @@
+     })
+ }
+
++// Persisted or interrupted histories can contain calls whose results were lost.
++// Supply an explicit unknown outcome, never a fabricated success or a tool replay.
++fn complete_responses_tool_pairs(input: Vec<Value>) -> Vec<Value> {
++    let mut pending: Vec<String> = Vec::new();
++    let mut output = Vec::with_capacity(input.len());
++    let flush = |pending: &mut Vec<String>, output: &mut Vec<Value>| {
++        for id in pending.drain(..) {
++            output.push(serde_json::json!({
++                "type": "function_call_output", "call_id": id,
++                "output": "ERROR: Tool output is missing from retained history. Execution outcome is unknown; verify external state before retrying any action.",
++            }));
++        }
++    };
++    for item in input {
++        // A result from a later user turn must not resolve an earlier gap.
++        if response_item_type(&item) == Some("message") && item["role"] == "user" {
++            flush(&mut pending, &mut output);
++        }
++        if let Some(id) = item.get("call_id").and_then(Value::as_str) {
++            match response_item_type(&item) {
++                Some("function_call") => pending.push(id.to_owned()),
++                Some("function_call_output") => pending.retain(|pending_id| pending_id != id),
++                _ => {}
++            }
++        }
++        output.push(item);
++    }
++    flush(&mut pending, &mut output);
++    output
++}
++
+ pub(crate) fn build_responses_input(messages: &[ChatMessage]) -> (String, Vec<Value>) {
+     let mut system_parts: Vec<&str> = Vec::new();
+     let mut input: Vec<Value> = Vec::new();
+@@ -409,7 +440,23 @@
+                         .and_then(Value::as_str)
+                         .and_then(decode_responses_history_items);
+
+-                    if let Some(items) = responses_history_items {
++                    if let Some(mut items) =
++                        responses_history_items.filter(|_| !parsed_calls.is_empty())
++                    {
++                        // Canonical retained calls own pairing. Raw provider replay must
++                        // not resurrect pruned calls or preserve IDs rewritten upstream.
++                        let canonical: HashSet<&str> =
++                            parsed_calls.iter().map(|call| call.id.as_str()).collect();
++                        let mut replayed = HashSet::new();
++                        items.retain(|item| {
++                            response_item_type(item) != Some("function_call")
++                                || item
++                                    .get("call_id")
++                                    .and_then(Value::as_str)
++                                    .is_some_and(|id| {
++                                        canonical.contains(id) && replayed.insert(id.to_owned())
++                                    })
++                        });
+                         if let Some(content) = content
+                             && !items
+                                 .iter()
+@@ -425,6 +472,11 @@
+                         }
+
+                         input.extend(items);
++                        for call in parsed_calls {
++                            if !replayed.contains(&call.id) {
++                                input.push(build_function_call_item(call));
++                            }
++                        }
+                         continue;
+                     }
+
+@@ -488,7 +540,7 @@
+         system_parts.join("\n\n")
+     };
+
+-    (instructions, input)
++    (instructions, complete_responses_tool_pairs(input))
+ }
+
+ fn clamp_reasoning_effort(model: &str, effort: &str) -> String {
+@@ -2674,13 +2726,20 @@
+         )];
+         let (_, input) = build_responses_input(&messages);
+
+-        assert_eq!(input.len(), 2);
++        assert_eq!(input.len(), 3);
+         assert_eq!(input[0]["type"], "message");
+         assert_eq!(input[0]["role"], "assistant");
+         assert_eq!(input[0]["content"][0]["type"], "output_text");
+         assert_eq!(input[1]["type"], "function_call");
+         assert_eq!(input[1]["call_id"], "call_abc");
+         assert_eq!(input[1]["name"], "shell");
++        assert_eq!(input[2]["call_id"], "call_abc");
++        assert!(
++            input[2]["output"]
++                .as_str()
++                .unwrap()
++                .contains("outcome is unknown")
++        );
+     }
+
+     #[test]
+@@ -2885,4 +2944,156 @@
+         let item = build_function_call_item(call);
+         assert_eq!(item["arguments"], r#"{"command":"pwd"}"#);
+     }
+-}
++
++    fn heimdall_history_message(ids: &[&str], raw_ids: &[&str]) -> ChatMessage {
++        let mut items = vec![
++            serde_json::json!({"type":"reasoning","id":"rs_fixture","encrypted_content":"fixture_ciphertext","summary":[]}),
++        ];
++        items.extend(raw_ids.iter().map(|id| serde_json::json!({"type":"function_call","id":format!("fc_{id}"),"call_id":id,"name":"fixture_tool","arguments":"{}"})));
++        ChatMessage::assistant(serde_json::json!({
++            "content":null,
++            "tool_calls":ids.iter().map(|id| serde_json::json!({"id":id,"name":"fixture_tool","arguments":"{}"})).collect::<Vec<_>>(),
++            "reasoning_content":encode_responses_history_items(&items, true),
++        }).to_string())
++    }
++
++    fn heimdall_tool_result(id: &str) -> ChatMessage {
++        ChatMessage {
++            role: "tool".into(),
++            content: serde_json::json!({"tool_call_id":id,"content":"actual fixture result"})
++                .to_string(),
++        }
++    }
++
++    #[test]
++    fn heimdall_replay_cannot_resurrect_pruned_or_rekeyed_calls() {
++        for (canonical, raw) in [
++            (vec!["call_kept"], vec!["call_kept", "call_pruned"]),
++            (vec!["call_rekeyed"], vec!["call_old"]),
++        ] {
++            let messages = vec![
++                heimdall_history_message(&canonical, &raw),
++                heimdall_tool_result(canonical[0]),
++            ];
++            let (_, input) = build_responses_input(&messages);
++            let calls: Vec<_> = input
++                .iter()
++                .filter(|item| item["type"] == "function_call")
++                .collect();
++            assert_eq!(calls.len(), 1);
++            assert_eq!(calls[0]["call_id"], canonical[0]);
++            assert_eq!(input[0]["encrypted_content"], "fixture_ciphertext");
++            let outputs: Vec<_> = input
++                .iter()
++                .filter(|item| item["type"] == "function_call_output")
++                .collect();
++            assert_eq!(outputs.len(), 1);
++            assert_eq!(outputs[0]["call_id"], canonical[0]);
++            assert_eq!(outputs[0]["output"], "actual fixture result");
++        }
++        let (_, input) = build_responses_input(&[
++            heimdall_history_message(&[], &["call_removed"]),
++            ChatMessage::user("Continue"),
++        ]);
++        assert!(
++            input
++                .iter()
++                .all(|item| item["type"] != "function_call" && item["type"] != "reasoning")
++        );
++    }
++
++    #[test]
++    fn heimdall_missing_results_are_explicit_unknowns_without_replacing_real_results() {
++        let messages = vec![
++            heimdall_history_message(
++                &["call_done", "call_interrupted"],
++                &["call_done", "call_interrupted"],
++            ),
++            heimdall_tool_result("call_done"),
++            ChatMessage::user("Continue"),
++        ];
++        let (_, input) = build_responses_input(&messages);
++        assert_eq!(input.len(), 6);
++        assert_eq!(input[3]["call_id"], "call_done");
++        assert_eq!(input[3]["output"], "actual fixture result");
++        assert_eq!(input[4]["type"], "function_call_output");
++        assert_eq!(input[4]["call_id"], "call_interrupted");
++        assert_eq!(
++            input[4]["output"],
++            "ERROR: Tool output is missing from retained history. Execution outcome is unknown; verify external state before retrying any action."
++        );
++        assert_eq!(input[5]["role"], "user");
++        let (_, input) = build_responses_input(&[
++            heimdall_history_message(&["call_reused"], &["call_reused"]),
++            ChatMessage::user("New turn"),
++            heimdall_history_message(&["call_reused"], &["call_reused"]),
++            heimdall_tool_result("call_reused"),
++        ]);
++        let outputs: Vec<_> = input
++            .iter()
++            .filter(|item| item["type"] == "function_call_output")
++            .collect();
++        assert_eq!(outputs.len(), 2);
++        assert!(
++            outputs[0]["output"]
++                .as_str()
++                .unwrap()
++                .contains("outcome is unknown")
++        );
++        assert_eq!(outputs[1]["output"], "actual fixture result");
++    }
++
++    #[tokio::test]
++    async fn heimdall_codex_dispatches_a_repaired_history_in_one_request() {
++        let (provider, captured, server, _temp, _guard) =
++            mock_codex_provider(vec![MockCodexReply::Json(
++                serde_json::json!({"output_text":"fixture reply","output":[]}),
++            )])
++            .await;
++        let messages = vec![
++            heimdall_history_message(
++                &["call_done", "call_interrupted"],
++                &["call_done", "call_interrupted", "call_stale"],
++            ),
++            heimdall_tool_result("call_done"),
++            ChatMessage::user("Continue"),
++        ];
++        let response = provider
++            .chat(
++                ProviderChatRequest {
++                    messages: &messages,
++                    tools: None,
++                    thinking: None,
++                },
++                "fixture-model",
++                None,
++            )
++            .await
++            .unwrap();
++        assert_eq!(response.text.as_deref(), Some("fixture reply"));
++        let requests = captured.lock().unwrap();
++        assert_eq!(requests.len(), 1);
++        let input = requests[0]["input"].as_array().unwrap();
++        let calls: Vec<_> = input
++            .iter()
++            .filter(|item| item["type"] == "function_call")
++            .collect();
++        assert_eq!(calls.len(), 2);
++        assert!(calls.iter().all(|item| item["call_id"] != "call_stale"));
++        let outputs: Vec<_> = input
++            .iter()
++            .filter(|item| item["type"] == "function_call_output")
++            .collect();
++        assert_eq!(outputs.len(), 2);
++        assert_eq!(outputs[0]["call_id"], "call_done");
++        assert_eq!(outputs[0]["output"], "actual fixture result");
++        assert_eq!(outputs[1]["call_id"], "call_interrupted");
++        assert!(
++            outputs[1]["output"]
++                .as_str()
++                .unwrap()
++                .contains("outcome is unknown")
++        );
++        server.abort();
++    }
++}
+--- a/crates/zeroclaw-providers/src/reliable.rs
++++ b/crates/zeroclaw-providers/src/reliable.rs
+@@ -679,6 +679,19 @@
+     embedded_status_code(message, |code| (400..500).contains(&code))
+ }
+
++// A Responses SSE request-shape error cannot be repaired by replaying the same input.
++fn is_missing_tool_output(err: &anyhow::Error) -> bool {
++    err.chain().any(|cause| {
++        cause
++            .downcast_ref::<crate::openai_codex::ResponsesStreamApiError>()
++            .is_some_and(|cause| {
++                cause
++                    .0
++                    .starts_with("No tool output found for function call ")
++            })
++    })
++}
++
+ /// Check if an error is non-retryable (client errors that won't resolve with retries).
+ pub fn is_non_retryable(err: &anyhow::Error) -> bool {
+     // A provider's typed classification is definitive. Check the full chain
+@@ -704,6 +717,10 @@
+             TurnStopCode::ProviderAuth => return true,
+             _ => {}
+         }
++    }
++
++    if is_missing_tool_output(err) {
++        return true;
+     }
+
+     // Context window errors are NOT non-retryable — they can be recovered
+@@ -772,7 +789,8 @@
+ /// hints), where the same wording can describe a transient server shed.
+ /// Centralising the precedence here means the four arms cannot drift.
+ fn is_terminal_provider_failure(err: &anyhow::Error) -> bool {
+-    has_typed_non_retryable_marker(err)
++    is_missing_tool_output(err)
++        || has_typed_non_retryable_marker(err)
+         || err.downcast_ref::<AnthropicRefusalError>().is_some()
+         || is_non_retryable_rate_limit(err)
+         || (is_non_retryable(err) && !is_overloaded(err))
+@@ -1355,6 +1373,15 @@
+
+     if let Some(status) = http_status.filter(|status| http_status_is_authoritative(*status)) {
+         return http_status_diagnostic(status, endpoint);
++    }
++
++    if is_missing_tool_output(err) {
++        return ProviderErrorDiagnostic {
++            kind: "client_error",
++            phase: "request_validation",
++            hint: "tool-call history has a missing result; repair retained history or start a fresh session",
++            endpoint,
++        };
+     }
+
+     if is_context_window_exceeded(err) {
+@@ -14401,4 +14428,22 @@
+         );
+         zeroclaw_log::clear_broadcast_hook();
+     }
++    #[test]
++    fn heimdall_missing_tool_output_is_terminal_without_echoing_provider_text() {
++        let error = anyhow::Error::new(crate::openai_codex::ResponsesStreamApiError(
++            "No tool output found for function call call_fixture. TEST_private_payload".into(),
++        ))
++        .context("provider wrapper");
++        assert!(is_non_retryable(&error));
++        assert!(is_terminal_provider_failure(&error));
++        let diagnostic = provider_error_diagnostic(&error);
++        assert_eq!(diagnostic.kind, "client_error");
++        assert_eq!(diagnostic.phase, "request_validation");
++        assert!(!diagnostic.hint.contains("TEST_private_payload"));
++        assert!(!diagnostic.hint.contains("call_fixture"));
++        let transient = anyhow::Error::new(crate::openai_codex::ResponsesStreamApiError(
++            "Temporary service failure".into(),
++        ));
++        assert!(!is_non_retryable(&transient));
++    }
+ }
