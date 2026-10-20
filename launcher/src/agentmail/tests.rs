@@ -616,3 +616,24 @@ async fn proxy_relays_upgraded_connections_bidirectionally() {
     server.await.unwrap();
     front.await.unwrap();
 }
+
+#[test]
+fn digest_hex_matches_sha256_vectors_and_paired_token_format() {
+    assert_eq!(
+        sha256_hex(""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    assert_eq!(sha256_hex("abc"), expected);
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(&paired_tokens(None, "abc").unwrap()).unwrap(),
+        [expected]
+    );
+    assert_eq!(
+        serde_json::from_str::<Vec<String>>(
+            &paired_tokens(Some(&format!("[\"{expected}\"]")), "abc").unwrap()
+        )
+        .unwrap(),
+        [expected]
+    );
+}
