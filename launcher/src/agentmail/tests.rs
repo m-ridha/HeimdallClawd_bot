@@ -95,6 +95,14 @@ async fn held_ledger_lock_does_not_block_the_async_worker() {
     assert!(held.is_ok());
     assert_eq!(read.unwrap(), "read complete");
 }
+// Ephemeral keys avoid embedding signing material; assertions still use fixed
+// messages/timestamps and share the same generated key within each fixture.
+fn test_signing_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("OS randomness unavailable for test fixture");
+    key
+}
+
 fn signed(secret: &[u8], body: &[u8], stamp: u64) -> hyper::HeaderMap {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
     mac.update(format!("msg_fixture.{stamp}.").as_bytes());
@@ -152,23 +160,25 @@ fn sender_and_content_are_both_required() {
 }
 #[test]
 fn svix_authenticates_raw_body_timestamp_and_rotation_signatures() {
-    let secret = b"fixture_signature_key_0123456789";
+    let secret = test_signing_key();
     let body = b"{\"event_type\":\"message.received\"}";
-    let mut headers = signed(secret, body, 1000);
-    assert!(verify(secret, &headers, body, 1000));
-    assert!(!verify(secret, &headers, body, 1301));
-    assert!(!verify(secret, &headers, body, 699));
-    assert!(!verify(secret, &headers, b"tampered", 1000));
-    assert!(!verify(b"wrong", &headers, body, 1000));
+    let mut headers = signed(&secret, body, 1000);
+    assert!(verify(&secret, &headers, body, 1000));
+    assert!(!verify(&secret, &headers, body, 1301));
+    assert!(!verify(&secret, &headers, body, 699));
+    assert!(!verify(&secret, &headers, b"tampered", 1000));
+    let mut wrong_key = secret;
+    wrong_key[0] ^= 1;
+    assert!(!verify(&wrong_key, &headers, body, 1000));
     headers.insert(
         "svix-signature",
         format!("v1,invalid {}", headers["svix-signature"].to_str().unwrap())
             .parse()
             .unwrap(),
     );
-    assert!(verify(secret, &headers, body, 1000));
+    assert!(verify(&secret, &headers, body, 1000));
     headers.remove("svix-timestamp");
-    assert!(!verify(secret, &headers, body, 1000));
+    assert!(!verify(&secret, &headers, body, 1000));
 }
 #[test]
 fn state_persists_disabled_defaults_and_rejects_symlink_or_corruption() {
@@ -285,7 +295,7 @@ async fn ingress(settings: Settings) -> (String, tokio::task::JoinHandle<()>) {
 async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state");
-    let key = b"fixture_signature_key_0123456789";
+    let key = test_signing_key();
     let (url, task) = ingress(Settings {
         secret: key.to_vec(),
         token: "fixture_not_a_live_token".into(),
@@ -313,7 +323,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body.clone())
             .send()
             .await
@@ -331,7 +341,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body)
             .send()
             .await
@@ -343,7 +353,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, unrelated, now()))
+            .headers(signed(&key, unrelated, now()))
             .body(unrelated.to_vec())
             .send()
             .await
@@ -535,7 +545,7 @@ async fn event_dispatch_case(
             .await
             .unwrap();
     });
-    let key = b"fixture_signature_key_0123456789";
+    let key = test_signing_key();
     let (url, front) = ingress(Settings {
         secret: key.to_vec(),
         token: "fixture_not_a_live_token".into(),
@@ -553,7 +563,7 @@ async fn event_dispatch_case(
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body.clone())
             .send()
             .await
@@ -610,7 +620,7 @@ async fn event_dispatch_case(
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body)
             .send()
             .await
