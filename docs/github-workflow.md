@@ -6,26 +6,26 @@ The GitHub token controls repository/API permissions. The Codespaces repository 
 | --- | --- |
 | Read repository files/history, inspect issues/PRs | `http_request`, `auth_secret="github"`, HTTPS api.github.com |
 | Create branches, file changes, multi-file commits and PRs | GitHub Contents/Git Database/Pulls APIs through the same HTTP tool |
-| Local status/diff/branches/commits | `workspace__bash` with offline Git, Python 3 and jq, included in the updated executor image |
+| Local status/diff/branches/commits | `workspace__bash` with offline Git, Python 3 and jq, included in the executor image |
 | Clone/fetch/push, install dependencies, run networked builds | GitHub Codespaces through existing `codespace__` tools, subject to GitHub access/billing/policy |
 | CI build/test without Codespaces | An appropriate repository GitHub Actions workflow through the API, with explicit authorization for its effects |
 
-The absence of Git/curl/wget/network in an older executor does not mean the bot cannot edit GitHub repositories. Root package installation belongs in maintained Docker recipes or a remote development environment, not in ordinary workspace commands. Offline workspace changes are not automatically uploaded; publish them through the GitHub API or a Codespace. Tests requiring uninstalled dependencies remain unverified until suitable remote compute/CI is available.
+Executor network isolation does not prevent GitHub API edits. Git, Python 3, jq and Rust tooling are available for offline work; curl, GitHub CLI and SSH-based network work belong in a compatible remote environment. Root package installation belongs in maintained Docker recipes or a remote development environment, not in ordinary workspace commands. Offline workspace changes are not automatically uploaded; publish them through the GitHub API or a Codespace. Tests requiring uninstalled dependencies remain unverified until suitable remote compute/CI is available.
 
 ## Setup
 
 Keep the existing raw `GITHUB_TOKEN` agent-service secret. The owner must give that account repository access, and give the token the necessary permissions. Successful metadata access does not prove write permissions. For fine-grained tokens, typical needs are Contents read/write, Pull requests read/write, Issues read/write when needed, and Actions read/write for dispatching workflows. Editing workflow files can additionally require Workflows permission. Codespaces has separate authorization requirements. Organization approval/SSO and branch protection can further constrain access; the bot cannot grant itself those permissions.
 
-After deploying the new code, choose `HEIMDALL_CODESPACE_REPOS`:
+Choose `HEIMDALL_CODESPACE_REPOS`:
 
 - `owner/repository,other/repository` retains an explicit compute allowlist.
 - A standalone `*` lets GitHub authorize repositories without that extra per-repository list. Mixed wildcard/list values are invalid. Repository syntax, authenticated account listing checks, token permissions and existing Codespaces resource limits remain enforced.
 
-Do not change this variable to `*` on older code expecting only repository names. The current setting remains untouched by these local changes. GitHub API operations already cover any repository the token is authorized to access, regardless of this variable.
+GitHub API operations cover any repository the token is authorized to access, regardless of this variable.
 
 The primary runtime explicitly disables compact context so the complete managed TOOLS.md fits the native 20,000-character per-file bootstrap budget. A pinned-runtime prompt contract checks that the complete guide survives assembly with the production-effective settings. This increases prompt size compared with compact mode; no host file reader is granted.
 
-The new managed TOOLS.md/IDENTITY.md instructions refresh at startup and explain API-first editing, offline Git, Codespaces and CI fallback. No external GitHub skill is required; CLI-oriented skill instructions must use a compatible remote environment instead of assuming a host shell exists.
+Managed TOOLS.md/IDENTITY.md instructions refresh at startup and explain API-first editing, offline Git, Codespaces and CI fallback. No external GitHub skill is required; CLI-oriented skill instructions must use a compatible remote environment instead of assuming a host shell exists.
 
 ## Diagnose before mutating
 
@@ -46,13 +46,13 @@ Respect API/tool response and file limits. A truncated recursive tree is not a c
 
 An owner-installed `/data/zeroclaw/.ssh/id_ed25519` persists while the same `/data` volume remains attached; redeployment alone does not erase it. The volume is not a backup. The private key must remain private and readable only by the intended runtime user. Registering its public key with GitHub and configuring SSH selection are separate prerequisites for direct SSH Git transport.
 
-Current REST operations authenticate with GITHUB_TOKEN. The Codespaces CLI uses HOME=/data/zeroclaw/codespace, not /data/zeroclaw, so it does not automatically select that key. The executor has neither the agent volume/key nor network access. No private key is copied into it. Adding an SSH key does not fix REST token permissions, API rate limits or Codespaces creation policy failures.
+REST operations authenticate with `GITHUB_TOKEN`. The Codespaces CLI uses `HOME=/data/zeroclaw/codespace`, not /data/zeroclaw, so it does not automatically select that key. The executor has neither the agent volume/key nor network access. No private key is copied into it. Adding an SSH key does not fix REST token permissions, API rate limits or Codespaces creation policy failures.
 
 For a Codespace, check `git`, `gh`, `curl`, `jq`, `python3` and `ssh` before choosing commands. This project does not control other repositories' devcontainers or guarantee their installed tools. Configure/install required dependencies in that remote environment for the requested task; installing them in the executor does not enable networking there.
 
 ## Diagnosing interrupted PR creation
 
-The primary runtime allows 48 tool-loop rounds per turn; the hourly action limit and loop detector remain enabled. Seven identical results from the same tool with differing arguments can trip the no-progress circuit breaker. This is not proof of a GitHub permissions failure. Missing Cargo in the offline executor does not block API-based PR creation.
+The primary runtime allows 48 tool-loop rounds per turn; the hourly action limit and loop detector remain enabled. Seven identical results from the same tool with differing arguments can trip the no-progress circuit breaker. This is not proof of a GitHub permissions failure. The executor bundles Cargo/rustc/rustfmt/Clippy for offline work; absent dependencies, resource limits or failed local checks do not block API-based PR creation, but must be disclosed. See [offline Rust tooling](../executor/README.md#offline-rust-tooling).
 
 Send JSON request bodies as serialized strings with `Content-Type: application/json`. For multi-file text edits, use inline `content` entries in one Git Trees request with `base_tree` to reduce round trips. Verify remote state before retrying a mutation after an ambiguous failure or resuming an interrupted turn.
 

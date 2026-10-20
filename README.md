@@ -1,6 +1,6 @@
 # HeimdallClawd
 
-A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) and two small Rust services on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on persistent volumes, and runs workspace file and command operations in a separate, network-disabled executor. Optional GitHub Codespaces commands run remotely in allowlisted repositories. It keeps working while your own computer is off.
+A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) and two small Rust services on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on persistent volumes, and runs workspace file and command operations in a separate, network-disabled executor. Optional GitHub Codespaces commands run remotely in repositories admitted by the configured policy and GitHub permissions. It keeps working while your own computer is off.
 
 Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/operations.md) for configuration, authentication, persistence and limits; [verification](docs/verification.md) for observed checks and what is not yet live-verified; and [capabilities](docs/capabilities.md) for activation limits and live tests.
 
@@ -8,13 +8,13 @@ Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/op
 
 - Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Additional permitted users are fully trusted operators: they share the workspace, accessible memory/sessions and configured credentialed tools. See the [privilege model](docs/operations.md#trusted-telegram-users) before adding anyone.
 - ChatGPT subscription sign-in with `gpt-6.1-sol` by default (`HEIMDALL_MODEL`), plus an optional OpenRouter free route. Switch in Telegram with `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
-- An isolated workspace executor reached over authenticated private MCP: `bash`, `file_read`, `file_write` and 48 KiB binary `file_read_base64`/`file_write_base64`. Helpers run as a separate UID with seccomp restrictions, no networking, a 30-second timeout and 64 KiB output/content bounds.
+- An isolated workspace executor reached over authenticated private MCP: `bash`, `file_read`, `file_write` and 48 KiB binary `file_read_base64`/`file_write_base64`. Helpers run as a separate UID with seccomp restrictions, no networking, a 30-second timeout and 64 KiB output/content bounds. Git, Python 3, jq and pinned Rust/Cargo/rustfmt/Clippy support offline repository work; dependency downloads require remote compute or authorized CI.
 - Tavily web search, bounded web fetch and HTTP requests, and a Lynx text browser. Tavily is search, not an interactive browser.
 - Scheduled agent tasks (reminders, recurring reports), SOPs and permitted multi-step pipelines.
 - Named skills from the official ZeroClaw registry through restricted `skills__install` and `skills__list` tools. Script-containing skills run in the executor, never beside provider credentials.
 - Bounded Telegram file transfer between the executor workspace and allowlisted users.
 - WASM plugin and hook frameworks are enabled; no plugin is bundled.
-- Optional signed AgentMail email events with sender/content filters and Telegram-controlled rule enable/disable. See [email event setup](docs/operations.md#agentmail-email-events).
+- Optional signed AgentMail email events with sender/content filters, per-rule SOP assignments, sanitized failure diagnostics and Telegram-controlled rule enable/disable. See [email event setup](docs/operations.md#agentmail-email-events).
 - Native host shell, filesystem, git, shell-only scheduling and delegation tools stay blocked.
 
 Release deployment is automatic only when a stable GitHub Release is published. Owner-directed heartbeat is enabled; headless browser automation is not configured.
@@ -41,7 +41,7 @@ The launcher regenerates `config.toml` on every start; secrets reach ZeroClaw on
 
 ## Prerequisites
 
-Install the Rust toolchain at **1.99** (edition 2024), Git and Python **3.10+** (CI uses 3.12). Docker with a running daemon is needed to reproduce native Linux builds. Node.js 24 is used only in CI to install the Railway CLI. Infrastructure work additionally needs Railway CLI **5.68.0** and the pinned Python SDK:
+Install the Rust toolchain at **1.99** (edition 2024), Git and Python **3.10+** (CI uses 3.12). Docker with a running daemon is needed to reproduce native Linux builds. Node.js is build tooling only: the Docker dashboard stage uses Node 26, and the deployment workflow uses Node 24 to install the Railway CLI. Neither is installed as the agent runtime. Infrastructure work additionally needs Railway CLI **5.68.0** and the pinned Python SDK:
 
 ```sh
 python3 -m venv /tmp/heimdall-iac
@@ -67,7 +67,7 @@ cargo clippy --locked --manifest-path launcher/Cargo.toml --all-targets -- -D wa
 cargo clippy --locked --manifest-path executor/Cargo.toml --all-targets -- -D warnings
 ```
 
-On macOS these run only the portable tests. Linux-only isolation, bootstrap and native MCP checks are gated with `cfg(target_os = "linux")`, require root, and are not counted as passing on macOS. They run in the release build workflow; to validate a branch without deploying, run **Actions → Build and verify release binaries → Run workflow** and enter the branch name. Its default `v0.0.0` label is only package metadata.
+On macOS these run only the portable tests. Linux-only isolation, bootstrap and native MCP checks are gated with `cfg(target_os = "linux")`, require root, and are not counted as passing on macOS. They run in the release build workflow; to validate a branch without deploying, run **Actions → Build and verify release binaries → Run workflow** and set the source ref to the exact branch name or full 40-character commit SHA. Prefer the SHA for reproducibility; the workflow selector and source-ref input are separate. Its default `v0.0.0` label is only package metadata.
 
 The IaC guard test is skipped unless `railway_sdk` is installed in the Python environment running the tests.
 
@@ -86,7 +86,7 @@ Runtime values live in Railway variables only. Never put them in Git, GitHub, re
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
 | heimdallclawd | `ZEROCLAW_providers__models__openrouter__free__api_key` | Optional key for the `openrouter/free` route |
 | heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token shared by HTTP requests and restricted Codespaces tools; no `Bearer` prefix |
-| heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` allowlist for Codespaces operations |
+| heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` list, or standalone `*` for GitHub-authorized repositories; see [GitHub setup](docs/operations.md#github-access) |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
 | heimdall-executor | `EXECUTOR_TOKEN` | Required secret, at least 32 characters |
 | heimdall-executor | `PORT` | Set explicitly (3889) |

@@ -1,15 +1,18 @@
-# Railway Python infrastructure
+# Railway infrastructure operations
 
-The project now uses `.railway/railway.py` with Railway CLI 5.68.0 and Python SDK 0.7.0. Python authoring is a Railway beta feature. See [Railway IaC](https://docs.railway.com/infrastructure-as-code) and [.railway/README.md](../.railway/README.md).
+Infrastructure is authored in [`.railway/railway.py`](../.railway/railway.py) using the pinned SDK and CLI. [.railway/README.md](../.railway/README.md) describes resource and networking ownership; [release deployment](releases.md) owns the apply/upload sequence.
 
-The October 15, 2026 migration was imported with `--variables unmanaged`, reviewed and applied to production. Legacy `railway.toml` files are removed, and release packaging no longer generates them. Both original services and volumes were preserved: `heimdall-data` at `/data` (500 MB), and `executor-workspace` at `/data/workspace` (200 MB). Replica counts, placement and CPU/memory limits are unchanged. Runtime variables are unmanaged; IaC neither reads nor writes them, including future provider keys or Telegram IDs.
+## Inspect a plan
 
-The agent's GitHub source and legacy root-directory override were cleared. Both services receive application code only through release upload contexts. A final live `railway config plan` reported the configuration already up to date; `railway config migrate status` reported no services reading Config as Code. Normalized platform defaults are omitted from authoring to avoid perpetual diffs: ON_FAILURE is the default restart policy, and application sleeping defaults to false.
+1. Create a Python 3.10+ virtual environment and install `.railway/requirements.txt`.
+2. For interactive account-based use, sign in/link the local CLI to the intended project and environment. The project-token release workflow does **not** use `railway link`.
+3. Run `PATH="/path/to/venv/bin:$PATH" railway config plan` from the repository. Treat it as a read-only check; a clean plan is evidence only for that environment at that time.
+4. Do not pass `--include-variables`, `--decrypt-variables` or `--show-values` in routine checks. Keep plan/state artifacts out of Git.
 
-On each stable release, GitHub Actions installs the pinned Python SDK, links to the production environment using its project token, generates a pinned plan and applies it without a destructive confirmation flag. A destructive plan must stop rather than silently delete resources. Then the workflow uploads and health-checks the executor followed by the agent.
+## Apply policy
 
-To inspect locally, activate a Python 3.10+ virtual environment with `.railway/requirements.txt` installed, link to production and run `railway config plan`. Do not pass `--include-variables`, `--decrypt-variables` or `--show-values` in routine checks. Keep local plan artifacts and state files out of Git.
+The published stable-release workflow verifies the project token, generates a plan with `--file .railway/railway.py`, then applies that exact plan without a destructive confirmation flag. Application uploads follow executor-first, agent-second, with exact-deployment health checks. Do not apply or redeploy production outside an explicitly authorized task. A destructive plan must stop for review; never detach/shrink a volume or delete a service to make a plan pass.
 
-Infrastructure changes do not speed Rust compilation. The separate cached build workflow handles binary compilation and validation.
+Keep variables unmanaged, repository sources disconnected, one replica per service, sleeping disabled, and existing placement, resource limits and volume attachments. `tools/tests/test_iac.py` pins these settings. Generated agent domains remain platform-managed; the executor has no public domain or TCP proxy. Infrastructure changes do not speed Rust compilation.
 
-The agent's generated HTTPS domain is managed outside the authoring graph; see [public networking ownership](../.railway/README.md). It does not require an IaC apply. The executor remains private.
+The original migration and observed production checks are historical evidence in [verification](verification.md#failed-build-correction-and-python-iac-migration), not proof that the current environment has no drift.

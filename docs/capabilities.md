@@ -1,6 +1,6 @@
 # Enabled capabilities
 
-These changes describe the next release, not a verified live deployment. Heartbeat is enabled for the owner; headless browser automation and browser delegation are not configured because Tavily provides search/content access rather than a WebDriver or browser-agent service.
+This catalog describes the checked-in template, build features and tool policy. Environment overrides and deployed images can differ; use the dated [verification record](verification.md) for evidence, not this catalog as a live-health claim. Heartbeat is enabled for the owner; headless browser automation and browser delegation are not configured because Tavily provides search/content access rather than a WebDriver or browser-agent service.
 
 | Capability | Configuration / use |
 | --- | --- |
@@ -8,18 +8,19 @@ These changes describe the next release, not a verified live deployment. Heartbe
 | Parallel tools | Enabled for independent actions. Executor accepts two concurrent jobs; scheduler and SOP concurrency are capped at one. Further simultaneous executor work can report busy; retry after the running work completes. |
 | SOPs | Definitions persist under `/data/zeroclaw/shared/sops`; list/execute/advance/status/approve/workshop tools are allowed. Reusable procedures must be created before execution. |
 | Pipelines | execute_pipeline enabled with twelve-step maximum and an explicit subtool allowlist. |
-| Hooks / email ingress | Lifecycle hook framework enabled. Optional signed AgentMail adapter uses the native gateway webhook. Configurable sender/content rules start disabled; mail__filters and mail__set_enabled manage durable rule state. See [setup and limits](operations.md#agentmail-email-events). |
+| Hooks / email ingress | Lifecycle hook framework enabled. Optional signed AgentMail adapter uses the native gateway webhook. Sender/content rules start disabled and can assign an installed SOP; mail__filters exposes enabled state and recent safe diagnostics, and mail__set_enabled changes flags. See [setup and limits](operations.md#agentmail-email-events). |
 | WASM plugins | Cranelift WASM runtime included, plugin loading/discovery enabled under `/data/zeroclaw/shared/plugins`. Maximum four logical instances, 32 MiB linear memory per store and ten-second calls. No plugin is bundled. Plugin-specific configuration, egress and exact tool grants are still required when installing a package; plugin limits do not cap total process memory. |
 | Open Skills | Bulk community collection sync enabled in `/data/zeroclaw/shared/open-skills`. Compact prompting reads individual skill instructions with read_skill. First synchronization consumes disk/network and can slow startup. |
 | Skill scripts | Script-containing skills allowed. Shell/script manifest tools copy up to 32 regular UTF-8 files, 64 KiB each / 256 KiB total, into the executor and run there. Symlinks are rejected. Operating-system dependencies and interpreter availability still matter; arbitrary downloaded packages are not installed automatically. |
 | Web access | Tavily search, bounded web_fetch and http_request, Lynx text_browser, and automatic enrichment of up to two incoming links. Public hosts allowed; private-host access remains restricted. |
-| GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN`; Codespaces supports an explicit repository list or standalone `*` for GitHub-authorized repositories; separate GitHub billing. See [setup](operations.md#github-access). Not live-verified. |
+| GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN`; Codespaces supports an explicit repository list or standalone `*` for GitHub-authorized repositories; separate GitHub billing. See [setup](operations.md#github-access) and the [repository workflow](github-workflow.md). |
 | Telegram messaging | Poll, reaction, channel_room, ask_user and send_via tools allowed. Actual operations depend on Telegram support, bot permissions and configured peers. No other chat channel is installed. |
 | File transfer | transfer__send delivers executor files to an explicitly specified allowlisted Telegram recipient. transfer__import imports incoming files from the primary agent's telegram_files directory. transfer__receive accepts a Telegram file_id. Binary transfers are capped at 48 KiB; larger files are rejected. Native deliver_file is ACP-oriented, and native file_upload/file_download tools still need owner-configured endpoints. |
+| Offline development | Executor Git, Python 3 standard library, jq and pinned Rust/Cargo/rustfmt/Clippy support local work within the same UID, memory, time/output and syscall limits. No credentials, networking, pip or automatic dependency downloads. See [offline Rust tooling](../executor/README.md#offline-rust-tooling); use Codespaces or authorized CI when dependencies/resources are unavailable. |
 | Tool discovery | Full built-in availability is selected explicitly; deferred built-in schemas are retrieved with `tool_search`. Exact execution grants still apply, and MCP tools remain eagerly connected for remote skill scripts. |
 | Extra MCP servers | MCP remains enabled and supports owner-configured additional servers/bundles. No unknown external service is connected automatically. |
 
-## Extended native capabilities (not live-verified)
+## Configurable native integrations
 
 The primary profile contains 58 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the private executor and gateway authentication. Some supported features still require operator configuration; build support alone does not make an integration functional.
 
@@ -35,7 +36,7 @@ The primary profile contains 58 exact policy grants; this is not the exposed Tel
 | Memory enhancements | SQLite fact extraction and hygiene snapshots enabled. Native recall reranking is enabled with MMR, duplicate collapse and a two-times candidate pool; it uses no separate reranking API. Bounded response cache: 128 disk / 16 hot entries, 15-minute TTL. Upstream bypasses response caching when tools are available. Memory store/recall/forget tools granted. Snapshots on the same volume are not backups. |
 | Project intelligence | `project_intel` and `report_template` granted. Analyze supplied Git/issue summaries and produce reports; they do not automatically connect a project or tracker. |
 | Cloud / security | `cloud_ops`, `cloud_patterns`, `security_ops` granted. Advisory analysis, vulnerability parsing and playbook guidance; no cloud credentials or automatic infrastructure remediation added. Approval gates retained. |
-| ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Client and private connectivity still need setup. |
+| ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Clients connect to the paired agent gateway; client-side editor/ACP integration still needs setup. |
 | Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. Shares the agent's public listener with pairing required. Native authentication permits paired daemon reload and SOP administration with remote administration enabled; the proxy preserves pairing status and HTTP upgrades. Shutdown and pairing-code secrets remain console-only. |
 | Remote nodes | Configuration prepared for two nodes; disabled until a shared authentication token and remote client are configured. LAN mDNS stays off on Railway. No tunnel service is installed. |
 | Diagnostics | Rotating diagnostics: 1 MiB rotation threshold, three archives, three-day archive retention. Tool I/O and LLM payload capture remain off, per owner preference. The threshold is a rotation trigger, not a strict per-event/disk quota. |
@@ -61,18 +62,11 @@ Do not edit `/data/zeroclaw/config.toml` expecting changes to survive startup: t
 
 Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. Monitor Railway costs separately and choose an appropriate budget for the deployment.
 
-GitHub repository edits do not depend on Codespaces. See the [repository workflow](github-workflow.md) for API commits/PRs, updated offline Git support and build/test paths.
+## Boundaries and further reading
 
-Operator-only authentication/storage recovery is documented in [operations](operations.md#authentication-and-storage-recovery). Recovery deliberately stops the assistant while providing a labeled health listener; it grants no additional agent tools.
-
-Additional Telegram accounts are fully trusted operators, with shared configured credentialed capabilities as well as session/workspace visibility; see the [privilege model](operations.md#trusted-telegram-users).
-
-The updated executor image includes offline Git, Python 3 (standard library) and jq. Third-party Python dependencies and pip are not bundled. These tools retain the existing memory, timeout, output and syscall limits and have no network or credentials. Codespaces supplies networked development; its terminal toolkit depends on the repository devcontainer and should be checked before use. See the [GitHub workflow](github-workflow.md).
-
-Native subprocess confinement preserves the tool grants. See [native child-process isolation](operations.md#native-child-process-isolation) for per-tool filesystem/credential access, kernel requirements, and remaining limitations.
-
-The executor bundles pinned Rust 1.99, Cargo, rustfmt, Clippy and native linking tools for offline work. Native Linux CI validation passed with the updated confinement policy; live deployment verification remains pending. See [offline Rust tooling](../executor/README.md#offline-rust-tooling) for commands, cache behavior and remote fallback.
-
-For the runtime migration, retained patches, persistent-state checks and new integration prerequisites, see [the v0.8.6 upgrade procedure](operations.md#upgrading-to-zeroclaw-v086).
-
-Complex tasks use the managed checkpoint/SOP-authoring workflow and a separate model capacity and working context budget. See [context budgets and long tasks](operations.md#context-budgets-and-long-tasks) for defaults, provider-route caveats and recovery.
+- [GitHub workflow](github-workflow.md): API-first repository edits, offline tools, remote compute and SSH-key behavior. A Codespaces failure does not establish GitHub API access failure.
+- [Trusted users](operations.md#trusted-telegram-users): every allowed account shares configured credentialed tools, memory/sessions and workspace visibility.
+- [Recovery](operations.md#authentication-and-storage-recovery): operator-only offline maintenance; a green recovery health check is not a working assistant.
+- [Native child isolation](operations.md#native-child-process-isolation): credential/filesystem profiles, kernel prerequisites and remaining limitations.
+- [Runtime upgrades](operations.md#upgrading-to-zeroclaw-v086): state safety and integration acceptance checks for the pinned release.
+- [Context budgets and long tasks](operations.md#context-budgets-and-long-tasks): bounded phases and checkpoints are guidance, not automatic continuation or guaranteed task completion.
