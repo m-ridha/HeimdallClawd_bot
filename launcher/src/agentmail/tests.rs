@@ -1,5 +1,5 @@
 use super::*;
-const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:"}]"#;
+const FILTERS: &str = r#"[{"name":"github-review-request","sender":"notifications@github.com","contains":"requested your review on:","sop":"github-pr-review"}]"#;
 
 #[test]
 fn omitted_body_is_fetched_for_each_unresolved_sender_rule() {
@@ -95,6 +95,14 @@ async fn held_ledger_lock_does_not_block_the_async_worker() {
     assert!(held.is_ok());
     assert_eq!(read.unwrap(), "read complete");
 }
+// Ephemeral keys avoid embedding signing material; assertions still use fixed
+// messages/timestamps and share the same generated key within each fixture.
+fn test_signing_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("OS randomness unavailable for test fixture");
+    key
+}
+
 fn signed(secret: &[u8], body: &[u8], stamp: u64) -> hyper::HeaderMap {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret).unwrap();
     mac.update(format!("msg_fixture.{stamp}.").as_bytes());
@@ -152,23 +160,25 @@ fn sender_and_content_are_both_required() {
 }
 #[test]
 fn svix_authenticates_raw_body_timestamp_and_rotation_signatures() {
-    let secret = b"fixture_signature_key_0123456789";
+    let secret = test_signing_key();
     let body = b"{\"event_type\":\"message.received\"}";
-    let mut headers = signed(secret, body, 1000);
-    assert!(verify(secret, &headers, body, 1000));
-    assert!(!verify(secret, &headers, body, 1301));
-    assert!(!verify(secret, &headers, body, 699));
-    assert!(!verify(secret, &headers, b"tampered", 1000));
-    assert!(!verify(b"wrong", &headers, body, 1000));
+    let mut headers = signed(&secret, body, 1000);
+    assert!(verify(&secret, &headers, body, 1000));
+    assert!(!verify(&secret, &headers, body, 1301));
+    assert!(!verify(&secret, &headers, body, 699));
+    assert!(!verify(&secret, &headers, b"tampered", 1000));
+    let mut wrong_key = secret;
+    wrong_key[0] ^= 1;
+    assert!(!verify(&wrong_key, &headers, body, 1000));
     headers.insert(
         "svix-signature",
         format!("v1,invalid {}", headers["svix-signature"].to_str().unwrap())
             .parse()
             .unwrap(),
     );
-    assert!(verify(secret, &headers, body, 1000));
+    assert!(verify(&secret, &headers, body, 1000));
     headers.remove("svix-timestamp");
-    assert!(!verify(secret, &headers, body, 1000));
+    assert!(!verify(&secret, &headers, body, 1000));
 }
 #[test]
 fn state_persists_disabled_defaults_and_rejects_symlink_or_corruption() {
@@ -285,7 +295,7 @@ async fn ingress(settings: Settings) -> (String, tokio::task::JoinHandle<()>) {
 async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state");
-    let key = b"fixture_signature_key_0123456789";
+    let key = test_signing_key();
     let (url, task) = ingress(Settings {
         secret: key.to_vec(),
         token: "fixture_not_a_live_token".into(),
@@ -313,7 +323,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body.clone())
             .send()
             .await
@@ -331,7 +341,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body)
             .send()
             .await
@@ -343,7 +353,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, unrelated, now()))
+            .headers(signed(&key, unrelated, now()))
             .body(unrelated.to_vec())
             .send()
             .await
@@ -458,6 +468,46 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
 
 #[tokio::test]
 async fn matching_event_dispatches_once_and_retains_only_metadata() {
+    event_dispatch_case(
+        StatusCode::OK,
+        br#"{"response":"Fixture review notification"}"#,
+        "accepted",
+        "complete",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dispatch_failures_retain_safe_diagnostics_and_suppress_replay() {
+    event_dispatch_case(
+        StatusCode::REQUEST_TIMEOUT,
+        b"PRIVATE_ERROR fixture_not_a_live_token",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    event_dispatch_case(
+        StatusCode::UNAUTHORIZED,
+        b"PRIVATE_ERROR",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    event_dispatch_case(
+        StatusCode::OK,
+        br#"{"error":"PRIVATE_ERROR"}"#,
+        "uncertain",
+        "gateway",
+    )
+    .await;
+}
+
+async fn event_dispatch_case(
+    status: StatusCode,
+    response_body: &'static [u8],
+    expected_status: &str,
+    expected_stage: &str,
+) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("state");
     state(&path, |s| {
@@ -483,16 +533,19 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
                         if let Some(tx) = tx.lock().unwrap().take() {
                             let _ = tx.send((uri, value));
                         }
-                        Ok::<_, Infallible>(Response::new(Full::new(Bytes::from_static(
-                            br#"{"response":"Fixture review notification"}"#,
-                        ))))
+                        Ok::<_, Infallible>(
+                            Response::builder()
+                                .status(status)
+                                .body(Full::new(Bytes::from_static(response_body)))
+                                .unwrap(),
+                        )
                     }
                 }),
             )
             .await
             .unwrap();
     });
-    let key = b"fixture_signature_key_0123456789";
+    let key = test_signing_key();
     let (url, front) = ingress(Settings {
         secret: key.to_vec(),
         token: "fixture_not_a_live_token".into(),
@@ -510,7 +563,7 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body.clone())
             .send()
             .await
@@ -530,10 +583,44 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
             .contains("github-review-request")
     );
     assert!(!prompt.to_string().contains("PRIVATE_BODY"));
+    let instruction = prompt["message"].as_str().unwrap();
+    assert!(instruction.contains("github-pr-review"));
+    assert!(instruction.contains("sop_execute"));
+    assert!(instruction.contains("sop_advance"));
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let finished = state(
+                &path,
+                |s| Ok(s["events"]["evt_new"]["status"] != "reserved"),
+            )
+            .unwrap();
+            if finished {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    state(&path, |s| {
+        assert_eq!(s["events"]["evt_new"]["status"], expected_status);
+        assert_eq!(
+            s["events"]["evt_new"]["diagnostic"]["stage"],
+            expected_stage
+        );
+        if !status.is_success() {
+            assert_eq!(
+                s["events"]["evt_new"]["diagnostic"]["http_status"],
+                status.as_u16()
+            );
+        }
+        Ok(())
+    })
+    .unwrap();
     assert_eq!(
         client
             .post(&url)
-            .headers(signed(key, &body, now()))
+            .headers(signed(&key, &body, now()))
             .body(body)
             .send()
             .await
@@ -543,6 +630,7 @@ async fn matching_event_dispatches_once_and_retains_only_metadata() {
     );
     let saved = fs::read_to_string(path).unwrap();
     assert!(!saved.contains("PRIVATE_BODY"));
+    assert!(!saved.contains("PRIVATE_ERROR"));
     assert!(!saved.contains("Fixture subject"));
     assert!(!saved.contains("fixture_not_a_live_token"));
     model.abort();
@@ -636,4 +724,189 @@ fn digest_hex_matches_sha256_vectors_and_paired_token_format() {
         .unwrap(),
         [expected]
     );
+}
+
+#[test]
+fn optional_sop_is_strict_operator_configuration() {
+    assert_eq!(
+        parse_filters(FILTERS).unwrap()[0].sop.as_deref(),
+        Some("github-pr-review")
+    );
+    let legacy = r#"[{"name":"notice","sender":"sender@example.com","contains":"text"}]"#;
+    assert!(parse_filters(legacy).unwrap()[0].sop.is_none());
+    for name in ["", "../review", "review --unsafe", "review\n", "a.b"] {
+        let value =
+            json!([{"name":"notice","sender":"sender@example.com","contains":"text","sop":name}]);
+        assert!(parse_filters(&value.to_string()).is_err());
+    }
+    let unknown =
+        r#"[{"name":"notice","sender":"sender@example.com","contains":"text","action":"unsafe"}]"#;
+    assert!(parse_filters(unknown).is_err());
+}
+
+#[test]
+fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
+    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(630));
+    assert_eq!(
+        DispatchError::GatewayHttp(408).diagnostic(),
+        json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false})
+    );
+    assert_eq!(
+        DispatchError::TelegramHttp(403).diagnostic(),
+        json!({"stage":"telegram","phase":"response_status","kind":"http","http_status":403,"gateway_completed":true})
+    );
+    assert_eq!(
+        DispatchError::GatewayTransport(true).diagnostic()["kind"],
+        "timeout"
+    );
+    assert_eq!(
+        DispatchError::GatewayTransport(false).diagnostic()["kind"],
+        "transport"
+    );
+    assert_eq!(
+        DispatchError::TelegramResponse(200).diagnostic()["gateway_completed"],
+        true
+    );
+}
+
+#[test]
+fn filter_status_exposes_ten_recent_safe_diagnostics_without_raw_event_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |data| {
+        for n in 1..=12 {
+            data["events"][format!("fixture{n}")] = json!({"time":n,"status":"uncertain","diagnostic":{"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false}});
+        }
+        Ok(())
+    }).unwrap();
+    let before = fs::read(&path).unwrap();
+    let settings = Settings {
+        secret: vec![],
+        token: String::new(),
+        filters: parse_filters(FILTERS).unwrap(),
+        state: path.clone(),
+        paired_tokens: String::new(),
+        authorization: None,
+        gateway: String::new(),
+        telegram: None,
+        gateway_secret: String::new(),
+    };
+    let text = manage(&settings, "filters", &json!({})).unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(value["recent_events"].as_array().unwrap().len(), 10);
+    assert_eq!(value["recent_events"][0]["time"], 12);
+    assert_eq!(value["recent_events"][9]["time"], 3);
+    assert_eq!(value["recent_events"][0]["diagnostic"]["http_status"], 408);
+    assert_eq!(
+        value["recent_events"][0]["event_ref"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(value["filters"][0]["sop"], "github-pr-review");
+    assert_eq!(value["events"]["uncertain"], 12);
+    assert!(!text.contains("fixture12"));
+    assert_eq!(before, fs::read(path).unwrap());
+}
+
+#[derive(Clone, Copy)]
+enum BodyFixture {
+    Timeout,
+    Disconnect,
+    InvalidJson,
+    TooLarge,
+}
+
+async fn response_body_fixture(
+    fixture: BodyFixture,
+) -> (
+    reqwest::Client,
+    reqwest::Response,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<io::Result<()>>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await?;
+        let mut headers = Vec::new();
+        let mut buffer = [0; 1024];
+        while !headers.windows(4).any(|b| b == b"\r\n\r\n") {
+            let n = socket.read(&mut buffer).await?;
+            if n == 0 || headers.len() + n > 16_384 {
+                return Err(io::Error::other("fixture request missing headers"));
+            }
+            headers.extend_from_slice(&buffer[..n]);
+        }
+        let body = match fixture {
+            BodyFixture::TooLarge => vec![b'x'; 65_537],
+            _ => b"PRIVATE_ERROR".to_vec(),
+        };
+        let length = match fixture {
+            BodyFixture::Timeout | BodyFixture::Disconnect => body.len() + 100,
+            _ => body.len(),
+        };
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 201 Created\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await?;
+        socket.write_all(&body).await?;
+        if matches!(fixture, BodyFixture::Timeout) {
+            let _ = released.await;
+        }
+        Ok(())
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .read_timeout(Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let response = client
+        .get(format!("http://{addr}/fixture"))
+        .send()
+        .await
+        .unwrap();
+    (client, response, release, server)
+}
+
+#[tokio::test]
+async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads() {
+    for (fixture, kind) in [
+        (BodyFixture::Timeout, "timeout"),
+        (BodyFixture::Disconnect, "transport"),
+        (BodyFixture::InvalidJson, "invalid_response"),
+        (BodyFixture::TooLarge, "response_too_large"),
+    ] {
+        for telegram in [false, true] {
+            let (client, response, release, server) = response_body_fixture(fixture).await;
+            let result = if telegram {
+                validate_telegram_response(response).await
+            } else {
+                deliver_response(&client, response, None).await
+            };
+            let diagnostic = result.unwrap_err().diagnostic();
+            assert_eq!(
+                diagnostic,
+                json!({
+                    "stage":if telegram { "telegram" } else { "gateway" },
+                    "phase":"response_body", "kind":kind, "http_status":201,
+                    "gateway_completed":telegram,
+                })
+            );
+            assert!(!diagnostic.to_string().contains("PRIVATE_ERROR"));
+            let _ = release.send(());
+            tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+    }
 }

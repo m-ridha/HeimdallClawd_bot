@@ -70,6 +70,7 @@ provenance = {
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
     'native_child_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/native-child.patch').read_bytes()).hexdigest(),
+    'webhook_timeout_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/webhook-timeout.patch').read_bytes()).hexdigest(),
     'responses_tool_history_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest(),
     'sop_workshop_guidance_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/sop-workshop-guidance.patch').read_bytes()).hexdigest(),
     'gateway_admin_auth_patch_sha256': hashlib.sha256((out / 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest(),
