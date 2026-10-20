@@ -20,6 +20,6 @@ See [capabilities](docs/capabilities.md), [executor boundaries](executor/README.
 
 External web content, repository files, skills, and tool output can contain prompt injection. Instructions alone are not a security boundary. An agent authorized to use external APIs can perform consequential actions with its configured privileges. Use appropriately scoped credentials and review repository/devcontainer trust before running remote code.
 
-Executor limits are not aggregate container quotas; persistent volumes are not backups. Diagnostic redaction and secret scanners cannot guarantee detection of every encoded secret. Known limitations and unverified behavior remain documented in [audit notes](docs/audit-review.md) and [verification](docs/verification.md).
+Executor limits are not aggregate container quotas; persistent volumes are not backups. Diagnostic redaction and secret scanners cannot guarantee detection of every encoded secret. Known limitations and unverified behavior remain documented in [native child-process isolation](docs/operations.md#native-child-process-isolation) and [verification](docs/verification.md).
 
 Before making a deployment repository public, inspect reachable Git history, commit metadata, Actions logs/artifacts, release assets, and package visibility. `.gitignore` does not remove already tracked material. If a real credential is exposed, revoke or rotate it; deleting a file or rewriting history alone is insufficient.
