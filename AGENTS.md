@@ -10,7 +10,7 @@ Read the user's current instructions first, then consult:
 - [Operations](docs/operations.md), [capabilities](docs/capabilities.md) and the [executor README](executor/README.md) for behavior, limits and the tool boundary.
 - [Releases](docs/releases.md) and [Railway IaC](docs/railway-iac.md) for deployment and infrastructure.
 - [Verification](docs/verification.md) for observed evidence and what is still unverified, and the [project walkthrough](docs/project-guide.md) for folder purposes.
-- The affected code and tests. Several docs describe earlier states (for example, older tool counts); the source and its tests win.
+- The affected code and tests. Dated verification and audit entries describe the state at that time; the current source and tests win.
 
 ## Stack, setup, and checks
 
@@ -30,7 +30,7 @@ python3 -B -m unittest discover -s tools/tests -v
 - Run the Cargo and Python checks above for implementation changes. Format Rust with rustfmt defaults; no `rustfmt.toml` exists, so do not add one without approval. Do not reformat unrelated code.
 - `tools/tests/test_iac.py` is skipped unless `railway_sdk` is installed. When touching `.railway/`, install `.railway/requirements.txt` into a virtual environment so it actually runs, then review `railway config plan` read-only.
 - Linux-only tests (`#![cfg(target_os = "linux")]`) assert root and exercise seccomp, UID changes, symlink bootstrap and the native MCP client. They do not run meaningfully on macOS, and an ARM64 Docker engine cannot compile the x86_64 seccomp list. Never report them as passing from a macOS run. Validate them with **Actions → Build and verify release binaries → Run workflow** on the branch (default `v0.0.0` label, no deployment), and report that run's result.
-- No workflow runs automatically on pull requests; `build.yml` is reusable and manually dispatched, and `release.yml` runs only on published releases. State which checks you actually ran. Report unavailable tools and exact commands/results; never present historical checks as a fresh run.
+- Neither repository build/release workflow runs automatically on pull requests. `build.yml` is reusable and manually dispatched; `release.yml` runs only on published releases. GitHub-managed code scanning can run separately. State which checks you actually ran. Report unavailable tools and exact commands/results; never present historical checks as a fresh run.
 - For documentation-only changes, check links/paths, consistency with the code, and `git diff --check`; runtime tests are unnecessary. For workflow changes, also run `actionlint` when available.
 - Keep `Cargo.lock` changes in the same commit as the `Cargo.toml` change that caused them. Docker builds and CI use `--locked`.
 
@@ -46,7 +46,7 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 - Keep infrastructure frugal and avoid unnecessary always-on services. Budget is operator-controlled rather than a fixed project constraint. Keep one replica per service, sleeping disabled, the existing IaC region, and the existing volume names, sizes and mounts: `heimdall-data` at `/data` (500 MB) and `executor-workspace` at `/data/workspace` (200 MB). Volumes are storage, not backups.
 - Public web access allows public hosts only (`allow_private_hosts = false`). The workspace executor stays network-disabled.
 - For reminders without an explicit timezone, use the timezone recorded in the agent’s `USER.md`; ask the requesting user if it is unknown. An explicit timezone in the request takes precedence (see `deploy/bot/TOOLS.md`).
-- Park unscheduled ideas in a new `docs/ideas.md` rather than implementing them. A backlog or capability list is not authorization to build it all.
+- Append unscheduled ideas to the existing `docs/ideas.md` rather than implementing them. A backlog or capability list is not authorization to build it all.
 
 ## Architecture
 
@@ -54,8 +54,9 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 | --- | --- |
 | `launcher/src/main.rs` | Root-only identity preparation (symlink-safe, `O_NOFOLLOW`), config rendering, auth validation, `exec` into ZeroClaw |
 | `launcher/src/config.rs` | Allowlist parsing, template rendering, secret overrides (portable, no I/O) |
-| `launcher/src/agentmail.rs` | Opt-in signed email admission, deterministic filters, gateway proxy/supervisor and narrow rule-management MCP; tests under `launcher/src/agentmail/` |
-| `launcher/src/skills_mcp.rs`, `transfer_mcp.rs` | Narrow stdio MCP servers: registry skill install/list; bounded Telegram file transfer |
+| `launcher/src/agentmail.rs` | Opt-in signed email admission, deterministic filters, SOP assignments, dispatch diagnostics, gateway proxy/supervisor and rule-management MCP; tests under `launcher/src/agentmail/` |
+| `launcher/src/skills_mcp.rs`, `transfer_mcp.rs`, `codespace_mcp.rs` | Narrow stdio MCP servers for registry skills, bounded Telegram transfers and GitHub Codespaces |
+| `launcher/src/startup.rs`, `child_policy.rs`, `mcp_stdio.rs` | Bounded auth/recovery startup, native child credential/filesystem profiles, shared bounded stdio framing |
 | `executor/src/` | `main` (helper dispatch and startup probe), `server` (axum routes, auth, admission), `mcp` (JSON-RPC adapter), `process` (supervisor), `linux` (seccomp, rlimits, probe), `files` (fd-relative workspace I/O), `protocol` (jobs, limits) |
 | `executor/tests/`, `executor/contract/` | API, filesystem, MCP and Linux isolation tests; real ZeroClaw MCP client contract |
 | `deploy/bot/` | `Dockerfile` (source build and validation), `Dockerfile.artifact` (prebuilt packaging), `config.template.toml`, `TOOLS.md`, `runtime.lock.json`, `patches/` and generated release provenance |
@@ -68,7 +69,7 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 - The executor service exposes exactly `bash`, `file_read`, `file_write`, `file_read_base64` and `file_write_base64`. Adding or removing a tool means updating `mcp.rs`, `Job::validate`, the helper dispatch in `main.rs`, the seccomp allowlist if needed, `executor/tests/mcp.rs`, `executor/contract/mcp-client.rs`, the config template and the docs that name the tool list.
 - `launcher/src/config.rs` edits fixed template paths (`peer_groups.telegram_home.external_peers`, the Codex provider model, the `codex` model route). Restructuring `config.template.toml` requires updating `render_config` and its tests together. The template, `TOOLS.md` and `IDENTITY.md` text are embedded with `include_str!`; if you add another embedded file, add it to the `launcher-build` `COPY` lines in `deploy/bot/Dockerfile`.
 - `TOOLS.md` and `IDENTITY.md` are managed by `launcher/src/instructions.rs` and refreshed at startup. Replaced copies are preserved as hidden .*.saved-* files; custom notes belong in USER.md, which is never changed. New embedded instruction files must be included in Docker COPY lines.
-- Telegram policy lives in `private-telegram.patch`, remote skill dispatch in `remote-skills.patch`; typed transcription and WIT paths use upstream implementations. Patches must apply with `patch -p1` to the pinned source and carry their own tests. Do not edit a patch by hand without re-running the build workflow, and do not remove the production WASM feature to speed builds.
+- Telegram policy lives in `private-telegram.patch`, remote skill dispatch in `remote-skills.patch`; typed transcription and WIT paths use upstream implementations. Patches must apply with `patch --fuzz=0 -p1` to the pinned source and carry their own tests. Do not edit a patch by hand without re-running the build workflow, and do not remove the production WASM feature to speed builds.
 - The pinned ZeroClaw revision and source SHA-256 appear in `deploy/bot/runtime.lock.json`, `deploy/bot/Dockerfile` (`runtime-source`), `executor/Dockerfile` (`contract`), `deploy/bot/NOTICE.md`, the image labels and the docs. Upgrading the runtime changes all of them together, rebases the patches, and needs a full native build; never bypass the checksum check.
 - The runtime-compile layer must depend only on the pinned source, patches and compiler settings, not on launcher or configuration files, so configuration-only releases reuse the compile cache. Preserve the separate `runtime-binary` and `support-binaries` targets and the GHCR registry cache. Release compilation uses LTO off, 16 codegen units and optimization level 1; change this only with measured evidence.
 - `.dockerignore` excludes `docs/` and `.railway/` from build contexts, and executables are never committed (`prebuilt/` and `target/` are ignored).
@@ -126,7 +127,7 @@ Preserve these accepted behaviors; each has a regression test that must keep pas
 - Add focused regression tests for observable contracts, edge cases, cancellation, concurrency and failure paths, and keep exact expectations explicit (pinned tool lists and counts, error text that must not leak, boundary-case literals) so tests do not derive their expected result from the implementation.
 - Keep portable tests portable and Linux tests gated with `#![cfg(target_os = "linux")]` that assert root. Do not relax a root, UID or seccomp assertion to make a test pass elsewhere. Tests that need the runtime binary read `HEIMDALL_TEST_RUNTIME` and skip with a message when it is absent.
 - Tests under `deploy/tests/` and `executor/contract/` are copied into the pinned ZeroClaw workspace by `deploy/bot/Dockerfile` or `executor/Dockerfile` and compiled against its APIs. When adding one, add the `COPY` line and its `cargo test` invocation, and keep it consistent with the pinned revision. They cannot be built from this repository alone.
-- Use temporary directories, fixed IDs, synthetic data, loopback listeners on port 0 and fake secrets. Tests must not require real Telegram, ChatGPT, Tavily, OpenRouter or Railway credentials or network services. A panic inside a spawned task does not fail the test, so return results from spawned tasks and assert them in the test body.
+- Use temporary directories, fixed IDs, synthetic data, loopback listeners on port 0 and fake credentials. Generate ephemeral OS-random keys for signing/verification behavior tests rather than embedding cryptographic keys; explicitly labeled standard test vectors can remain fixed. Tests must not require real Telegram, ChatGPT, Tavily, OpenRouter or Railway credentials or network services. A panic inside a spawned task does not fail the test, so return results from spawned tasks and assert them in the test body.
 - Prefer explicit synchronization or deadlines over fixed sleeps where practical; where timing is the behavior under test (timeouts, cancellation), keep generous margins and assert the outcome, not the duration.
 - Python tests use `unittest`, patch `subprocess`, `urllib` and the clock, and assert sanitized error messages.
 - Verify with the commands in [Stack, setup, and checks](#stack-setup-and-checks). A broad refactor must preserve test intent and coverage, not merely shorten assertions.

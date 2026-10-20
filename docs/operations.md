@@ -19,7 +19,7 @@ The bot requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, and `HEIMDALL_EXECUT
 
 ## Authentication and state
 
-Subscription credentials live in `/data/zeroclaw`, together with configuration and SQLite sessions. This directory belongs to UID 1000 and is private. A native auth check runs before Telegram polling. Operational logs go to Railway stdout; local diagnostics rotate at 1 MiB with three archives and three-day archive retention; tool/prompt payload capture remains disabled. There is no automatic API-key fallback.
+Subscription credentials live in `/data/zeroclaw`, together with configuration and SQLite sessions. This directory belongs to UID 1000 and is private. A native auth check runs before Telegram polling. Launcher/startup messages go to Railway stdout. The normal daemon terminal formatter is off; inspect structured runtime diagnostics in the paired dashboard. Local diagnostics rotate at 1 MiB with three archives and three-day archive retention; tool/prompt payload capture remains disabled. There is no automatic API-key fallback.
 
 For an interactive device sign-in, use the bot's Railway dashboard terminal:
 
@@ -41,13 +41,7 @@ The remote worker has no Telegram or provider credentials. Helpers run with a cl
 
 The maintained template enables Tavily basic search with three results and a 15-second timeout. `web_search_tool` is included in the primary agent's allowlist and auto-approval list. The workspace executor remains network-disabled. The agent also has web_fetch, http_request and a Lynx-backed text_browser. Tavily search does not provide interactive browser sessions.
 
-Set `ZEROCLAW_web_search__tavily_api_key` privately on the agent service in Railway, then deploy the updated source through the release workflow. The launcher inherits this environment variable and ZeroClaw resolves it natively. Do not put the key in the configuration template or source. The integration test uses a dummy key, asserts its exact in-memory value, calls native `Config::save()`, and asserts the saved TOML contains no dummy key.
-
-Local checks:
-
-```sh
-cargo test --locked --manifest-path launcher/Cargo.toml
-```
+Set `ZEROCLAW_web_search__tavily_api_key` privately on the agent service in Railway and restart/redeploy that service to load the variable. Source changes use the release workflow; setting a key for the existing integration does not require a source change. The launcher inherits this environment variable and ZeroClaw resolves it natively. Do not put the key in the configuration template or source. The integration test uses a dummy key, asserts its exact in-memory value, calls native `Config::save()`, and asserts the saved TOML contains no dummy key.
 
 The native secret-resolution fixture is `deploy/tests/config-secrets.rs`; the source-build release workflow installs it into the checksum-pinned ZeroClaw configuration crate and runs it. Portable launcher tests check exact tool permissions and settings; the separate native fixture proves secret resolution and non-persistence. Neither test needs your actual key.
 
@@ -63,30 +57,44 @@ OpenRouter's free router chooses an available free model supporting the request'
 
 Additional providers, including Ollama, require explicit configuration and verification. An Ollama instance on a powered-off Mac is unavailable; it needs a separate always-on host. Keep the existing tool boundary when adding providers.
 
+### Select another model on the OpenRouter slot
+
+1. Use the exact OpenRouter model ID and confirm its tool support, price and account availability. The alias `free` does not make a different explicitly selected model free.
+2. Send `/models openrouter.free`, then `/model EXACT_OPENROUTER_MODEL_ID` as separate Telegram messages. Provider selection alone does not set a compatible model.
+3. Send `/model` to confirm the selection and test a harmless workspace read. `/model free` restores `openrouter/free`; `/model codex` restores the subscription route. Verify session selections again after a restart.
+
 ## Add another provider through Railway CLI
 
-Native ZeroClaw environment overrides can create a named provider entry without changing source. Use lowercase provider/alias names supported by the pinned runtime. For example, to configure an Anthropic slot named `custom` after linking the CLI to this project's production environment:
+Native environment overrides can create a named provider entry without editing Rust. The pattern is `ZEROCLAW_providers__models__PROVIDER__ALIAS__FIELD`; use lowercase names and a provider family supported by the pinned runtime. `api_key`, `model` and, where required, `uri` are common fields. Unknown schema paths stop startup.
 
-```sh
-railway variable set --service heimdallclawd --skip-deploys \
-  ZEROCLAW_providers__models__anthropic__custom__model=YOUR_MODEL_ID
-read -r -s provider_key
-printf '%s' "$provider_key" | railway variable set \
-  ZEROCLAW_providers__models__anthropic__custom__api_key \
-  --stdin --skip-deploys --service heimdallclawd
-unset provider_key
-railway redeploy --service heimdallclawd --yes
-```
+For example, configure an Anthropic slot named `custom`:
 
-The silent `read` waits for you to paste the provider key and press Enter. Keep the key out of shell command history. Use that provider's exact model ID and API credential; do not literally use `YOUR_MODEL_ID`. The key remains an environment override rather than a TOML value. The configuration-library fixture verifies creation of a previously absent named provider and secret exclusion from saved config.
+1. Sign in with `railway login` if needed and link the local CLI to the intended project/environment with `railway link`. This is interactive operator setup; the project-token release workflow does **not** run `railway link`.
+2. Obtain the provider's API credential and exact supported model ID. A ChatGPT subscription does not supply another provider's API key.
+3. Set the model, replacing the placeholder, then enter the key at a hidden prompt and pass it through stdin:
 
-After deployment succeeds, send `/models anthropic.custom`, then `/model YOUR_MODEL_ID` to the bot as separate messages. `/models` changes only the provider, so the second command is required before asking a model question. `/model codex` returns to the subscription route in one command. New providers retain the same primary agent/tool boundary; verify an actual tool call after switching. API provider charges are separate from Railway's infrastructure budget. For an additional OpenRouter slot, replace `anthropic` with `openrouter`, keep a different alias, and supply its exact OpenRouter model ID. For Ollama, configure a reachable `uri` instead of an API key and verify private connectivity separately.
+   ```sh
+   railway variable set --service heimdallclawd --skip-deploys \
+     ZEROCLAW_providers__models__anthropic__custom__model=YOUR_MODEL_ID
+   printf 'Paste provider API key (hidden), then press Enter: '
+   read -r -s provider_key
+   printf '\n'
+   printf '%s' "$provider_key" | railway variable set \
+     ZEROCLAW_providers__models__anthropic__custom__api_key \
+     --stdin --skip-deploys --service heimdallclawd
+   unset provider_key
+   ```
+
+4. Redeploy the agent once to load both settings: `railway redeploy --service heimdallclawd --yes`. This affects the running service; perform it only as an authorized operator action.
+5. After it is healthy, send `/models anthropic.custom`, `/model YOUR_MODEL_ID` and `/model` as separate messages. Verify a reply and an actual remote tool call. `/model codex` restores the subscription route.
+
+Set these variables on the agent, never the executor. Keys are resolved in memory rather than saved in TOML. The configuration fixture verifies absent-provider creation and secret exclusion. Provider API usage is billed separately from Railway infrastructure.
+
+For another OpenRouter slot, use the `openrouter` family with a different alias and exact model ID. For Ollama, configure a supported alias with a reachable `uri` and model; a server on a powered-off Mac is unavailable. Endpoint connectivity requires separate verification. None of these additions enables automatic fallback.
 
 ## Building
 
-`deploy/bot/Dockerfile` builds everything from the checksum-pinned source on a native Linux x86_64 builder. For Railway's shorter build window, `deploy/bot/Dockerfile.artifact` packages the CI-tested prebuilt runtime and launcher executables without compiling on Railway. The expected executable hash is in `deploy/bot/runtime.sha256`, with build provenance in `deploy/bot/artifact.lock.json`. Executables are not stored in Git.
-
-Use the build-only Actions workflow for native x86_64 validation and artifact packaging. `tools/package-release.py` generates `runtime.sha256` and `artifact.lock.json` inside each release upload context; stale generated copies and the superseded cross-compilation helper are no longer committed.
+Build and release procedures, generated checksums/provenance and compile-cache boundaries are owned by [releases](releases.md). Executables and generated release provenance are not committed. Use the build-only workflow for native validation; Railway artifact images package already verified binaries.
 
 ## Skill installation
 
@@ -133,11 +141,11 @@ For Codespaces, also set `HEIMDALL_CODESPACE_REPOS` to a comma-separated allowli
 
 Do not run `gh auth login` or persist a token file. Missing token settings leave unrelated bot features available, but GitHub calls fail on use; a present malformed `GITHUB_TOKEN` stops startup. Missing Codespaces repository settings produce a tool error on use.
 
-The launcher exposes `codespace__status`, `codespace__list`, `codespace__create`, `codespace__stop`, `codespace__delete` and `codespace__exec`. They have explicit primary-agent grants, are not available in pipelines, and do not enable host shell tools. Mutations and execution check the real account listing against the configured repository policy. Explicit repository lists remain supported; standalone `*` permits GitHub-authorized repositories after deploying the updated parser. `list` reports the account's Codespaces. Creates use machine `basicLinux32gb`, 30-minute idle timeout and 24-hour stopped retention, with at most two account Codespaces allowed at creation time. The local call deadline is 80 seconds and each captured stream is bounded to 32 KiB. Killing a local SSH process does not guarantee a remote job stops; stop the Codespace after work, and use short remote commands. Output overflow fails with a bounded error rather than silently reporting a partial success.
+The launcher exposes `codespace__status`, `codespace__list`, `codespace__create`, `codespace__stop`, `codespace__delete` and `codespace__exec`. They have explicit primary-agent grants, are not available in pipelines, and do not enable host shell tools. Mutations and execution check the real account listing against the configured repository policy. Explicit repository lists remain supported; standalone `*` permits GitHub-authorized repositories. `list` reports the account's Codespaces. Creates use machine `basicLinux32gb`, 30-minute idle timeout and 24-hour stopped retention, with at most two account Codespaces allowed at creation time. The local call deadline is 80 seconds and each captured stream is bounded to 32 KiB. Killing a local SSH process does not guarantee a remote job stops; stop the Codespace after work, and use short remote commands. Output overflow fails with a bounded error rather than silently reporting a partial success.
 
 Codespaces compute/storage and GitHub quotas are separate from Railway billing. Idle timeout and retention reduce usage; they are not a hard spending limit. Configure the dedicated GitHub account's budget before creating Codespaces. Never create, delete or execute in a Codespace without a user request. These instructions guide the model; the tool grants themselves permit the operations. Codespaces may expose their own repository credentials to remote commands, so use sandbox repositories and do not configure production secrets there.
 
-Both agent Docker recipes install checksum-pinned GitHub CLI 2.102.0 and OpenSSH. No third Railway service is added and the isolated workspace executor remains credential-free and network-disabled.
+Both agent Docker recipes install checksum-verified GitHub CLI and OpenSSH; the version is pinned in those Dockerfiles. No third Railway service is added and the isolated workspace executor remains credential-free and network-disabled.
 
 After deployment, first test GitHub's read-only `/user` API and `codespace__list`. Create a sandbox only when requested, run a harmless remote command, and stop/delete it after verification. These operations have not been live-verified by local tests. Managed instruction files refresh at startup; see [instruction updates](#managed-agent-instructions).
 
@@ -163,7 +171,7 @@ Executor admission waits up to three seconds outside the active-map lock, then r
 
 Skill failures expose fixed heuristic categories for registry/network, missing skills, audit/policy and unknown failures; raw CLI failure output is withheld and output overflow is reported explicitly. Transfers expose sanitized categories for authentication, permission/policy, missing resources, duplicate/busy requests, rate limits, network/timeouts and service availability. A timeout does not prove that a delivery or write failed: inspect state before retrying. No raw HTTP response, token-bearing URL or service error description is returned.
 
-`transfer__send` now requires `recipient` explicitly, including for the owner. Use the intended requesting private-chat identity when known; ask only when ambiguous. The recipient must still be in the Telegram allowlist and the 48 KiB transfer ceiling is unchanged. Missing recipients fail before any transfer operation starts.
+`transfer__send` requires `recipient` explicitly, including for the owner. Use the intended requesting private-chat identity when known; ask only when ambiguous. The recipient must still be in the Telegram allowlist and the 48 KiB transfer ceiling is unchanged. Missing recipients fail before any transfer operation starts.
 
 ### GitHub Codespaces creation rejected with CS_NET_01
 
@@ -208,7 +216,7 @@ Normal startup remains fail-closed. Native ChatGPT refresh has a 60-second deadl
 For an agent that cannot start because authentication is missing/revoked or `/data` is full:
 
 1. In the agent service's Railway Variables, temporarily set `HEIMDALL_RECOVERY=1` and deploy that variable change. Only literal `1` enables recovery; absent or `0` selects normal startup, and other values fail validation. Recovery is never entered automatically.
-2. Check for the explicit `HEIMDALL RECOVERY: bot OFFLINE` startup message. `/health` returns HTTP 200 with body `recovery`; this means the maintenance listener is running, **not** that Telegram, authentication or tools work. No ZeroClaw daemon or Telegram polling starts. Other paths return 503. Keep the service private and do not publish releases while recovery is enabled.
+2. Check for the explicit `HEIMDALL RECOVERY: bot OFFLINE` startup message. `/health` returns HTTP 200 with body `recovery`; this means the maintenance listener is running, **not** that Telegram, authentication or tools work. No ZeroClaw daemon or Telegram polling starts. Other paths return 503. Do not add public routes or publish releases while recovery is enabled; the maintenance listener does not serve the dashboard or email ingress.
 3. Open the Railway dashboard terminal. Run `df -h /data` and `df -i /data` to check capacity and inodes. If needed, inspect top-level sizes locally with `du -x -h -d 1 /data`. Do not paste auth files, environment values or private file listings into chat/logs. Free space before attempting login. Recovery itself skips config/instruction writes and identity-directory initialization, so full persistent storage does not block this listener.
 4. Remove only operator-confirmed disposable artifacts. Preserve `/data/zeroclaw/auth-profiles.json`, `.secret_key`, databases, user workspace files and volume attachments. Do not delete the whole state directory or database sidecar files. The volume is not a backup; arrange and verify backups separately. Prefer investigating growth while free space remains; 80% usage is an advisory point to act, not an enforced quota.
 5. For authentication repair, run the device-login command from the setup section as `heimdall`. Complete sign-in without sharing credentials. Recovery assumes this existing deployment already has the state directory; it does not initialize a fresh installation. If the directory is absent or permissions are broken, repair them through the existing setup procedure before login.
@@ -216,20 +224,23 @@ For an agent that cannot start because authentication is missing/revoked or `/da
 
 For full executor storage, keep its isolation readiness gate intact. The supervisor remains running but MCP/health are unready when the startup probe fails. Use the executor dashboard terminal to inspect `df -h /data/workspace`, `df -i /data/workspace` and `du -x -h -d 1 /data/workspace`; remove only confirmed disposable files. Clean up before redeploying, then verify startup isolation passes and a synthetic workspace read/write succeeds. Never copy credentials into the executor or enable host tools as a workaround.
 
-These procedures have local process/health tests, but dashboard-terminal availability and recovery after a deliberately full volume still require a disposable Railway environment test. They are not yet live-verified. No production recovery setting is changed by the implementation.
+Recovery acceptance requires a disposable Railway environment: dashboard-terminal access, repaired sign-in/storage, normal readiness and an actual Telegram reply after recovery is disabled. Local process/health tests alone do not establish those outcomes. See the dated [verification record](verification.md).
 
 
 ## Trusted Telegram users
 
 Every allowlisted account receives the same primary-agent tool grants and auto-approval policy. Treat additional users as fully trusted operators: they can use configured GitHub/AgentMail credentials through the admitted tools, manage Codespaces and cron tasks, send messages, and access shared workspace data and permitted session/memory tools. The allowlist does not create separate user sandboxes or per-user credential scopes. Keep `TELEGRAM_OWNER_ID` and optional additional IDs limited to trusted accounts. Use a dedicated GitHub identity and the smallest token permissions that support the intended repositories and operations; this does not reduce the configured agent tool inventory.
 
+## Executor admission and command results
+
 Queued executor requests reserve their session-scoped ID immediately. Cancellation or response disconnect removes an unstarted reservation. Once admitted, the existing 30-second execution deadline applies; the three-second admission budget fits inside the client's 35-second tool timeout. A queue timeout is a JSON-RPC -32001 error in the HTTP 200 response stream, and explicit queued cancellation returns -32800. Duplicate IDs in the same session are still rejected before admission; no host fallback is introduced.
 
 
+See [structured command results](../executor/README.md#structured-command-results) for `bash` exit status, termination reason and bounded stdout/stderr. A successful MCP transport is not proof that the command succeeded.
+
+## Logging privacy
+
 Terminal logging privacy: daemon startup omits `--verbose` because a pinned-runtime fixture showed verbose failed-MCP diagnostics could print private tool-result text. The production terminal formatter stays off; launcher/recovery/storage status messages remain available. The regression exercises actual Telegram and MCP failures with synthetic data through the native subscriber. It checks terminal output only, not every runtime path or persisted diagnostic record; existing payload-capture settings remain off. Returned tool errors still reach the agent for troubleshooting. Production-log inspection remains a separate post-deployment check.
-
-
-Telegram voice transcription uses `agents.primary.transcription_provider = "deepgram.voice"` and the native `ZEROCLAW_providers__transcription__deepgram__voice__api_key` override. ZeroClaw v0.8.6 initializes the typed provider and voice limits together through its production channel factory; the former local transcription patch has been removed. Keep the Deepgram variable populated with its raw key and deploy the updated runtime; do not duplicate the key into legacy TOML fields. Configuration/registration tests do not prove the live key is valid or the Deepgram account has available service. Verify with a fresh private voice note after deployment.
 
 ## Native child-process isolation
 
@@ -249,7 +260,7 @@ These are credential-access profiles, not isolated tenants or a complete native-
 
 The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. This upgrade retains the existing provider variable names, subscription sign-in, persistent volume paths and executor protocol. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
 
-The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. Six Heimdall patches remain: private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, native child isolation, remote skill scripts and paired administration behind the dashboard proxy. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
+The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. The current local patch purposes are documented in [NOTICE](../deploy/bot/NOTICE.md), and the exact zero-fuzz application order lives in [the Dockerfile](../deploy/bot/Dockerfile). They also cover SOP-authoring guidance, Responses history repair and webhook deadlines; do not treat the original upgrade patch count as current. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
 
 `[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager so script skills can find the connected workspace executor. The launcher still regenerates configuration at startup: dashboard, RPC or CLI config edits are not durable deployment configuration. Use Railway overrides or a reviewed template change for settings that must survive restart.
 
