@@ -51,3 +51,4 @@ deploy/tests/native-child.rs
 launcher/src/mcp_stdio.rs
 deploy/bot/patches/sop-workshop-guidance.patch
 deploy/tests/sop-workshop.rs
+deploy/bot/patches/responses-tool-history.patch

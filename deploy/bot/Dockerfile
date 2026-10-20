@@ -43,7 +43,8 @@ COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
 COPY deploy/bot/patches/native-child.patch /tmp/native-child.patch
 COPY deploy/bot/patches/gateway-admin-auth.patch /tmp/gateway-admin-auth.patch
 COPY deploy/bot/patches/sop-workshop-guidance.patch /tmp/sop-workshop-guidance.patch
-RUN patch --fuzz=0 -p1 < /tmp/native-child.patch && patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/remote-skills.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch
+COPY deploy/bot/patches/responses-tool-history.patch /tmp/responses-tool-history.patch
+RUN patch --fuzz=0 -p1 < /tmp/native-child.patch && patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/remote-skills.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web
@@ -78,6 +79,7 @@ COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secret
 # Compile contracts before copying release binaries/configuration: those inputs are
 # read at test runtime, and must not invalidate the expensive test compiler layer.
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall --no-run \
+    && cargo test --locked -p zeroclaw-providers --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_native_child --no-run \
@@ -95,6 +97,7 @@ COPY deploy/bot/TOOLS.md /tmp/heimdall-TOOLS.md
 COPY deploy/bot/evals /tmp/heimdall-evals
 ENV HEIMDALL_TEST_DAEMON_VERBOSE=0 HEIMDALL_TEST_TOOLS=/tmp/heimdall-TOOLS.md HEIMDALL_TEST_ENTRYPOINT=/tmp/executor-entrypoint.sh HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
 RUN cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
+    && cargo test --locked -p zeroclaw-providers --lib heimdall \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_mcp --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_native_child \
