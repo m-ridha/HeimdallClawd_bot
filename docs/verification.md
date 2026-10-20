@@ -1,5 +1,11 @@
 # Verification
 
+## PR #35 review follow-up — 2026-10-20
+
+The review identified two valid gaps: response-body errors lost their cause and observed status, and the timeout regression bypassed production router assembly. Typed response-body errors now preserve timeout/transport/invalid-content/size categories with a response-body phase and observed HTTP status for gateway and Telegram parsing. Synthetic loopback fixtures exercise each case without real credentials or external requests.
+
+The listener and timeout regression now share the full production router assembly. Paused-clock requests cover a slow webhook and the actual memory API, checking their separate deadlines and webhook authentication. Both negative mutations failed as intended: moving the webhook back behind the ordinary timeout produced 408 instead of 200, and applying the long timeout to ordinary routes produced 200 instead of 408. Both portable Cargo suites (including 48 launcher library tests), both strict Clippy checks, all four pinned gateway `heimdall` tests and all 19 Python checks passed. All nine patches applied with zero fuzz to a fresh checksum-verified extraction, and the complete review diff passed a redacted Gitleaks scan. These remain local macOS checks; the updated native Linux workflow and live webhook recovery require separate verification.
+
 ## AgentMail review dispatch and failure routing — 2026-10-20
 
 Railway logs contained repeated uncertain-dispatch notices without HTTP details. The operator's read-only internal authentication check returned 200; dashboard inspection confirmed a manual review SOP and tool activity before several failure timestamps. The pinned gateway source puts synchronous `/webhook` execution under a 30-second timeout, a confirmed mismatch with the old adapter's 180-second wait; these observations do not establish the exact HTTP status of past events.
