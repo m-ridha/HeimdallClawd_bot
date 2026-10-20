@@ -739,11 +739,11 @@ fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
     assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(630));
     assert_eq!(
         DispatchError::GatewayHttp(408).diagnostic(),
-        json!({"stage":"gateway","kind":"http","http_status":408,"gateway_completed":false})
+        json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false})
     );
     assert_eq!(
         DispatchError::TelegramHttp(403).diagnostic(),
-        json!({"stage":"telegram","kind":"http","http_status":403,"gateway_completed":true})
+        json!({"stage":"telegram","phase":"response_status","kind":"http","http_status":403,"gateway_completed":true})
     );
     assert_eq!(
         DispatchError::GatewayTransport(true).diagnostic()["kind"],
@@ -754,7 +754,7 @@ fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
         "transport"
     );
     assert_eq!(
-        DispatchError::TelegramResponse.diagnostic()["gateway_completed"],
+        DispatchError::TelegramResponse(200).diagnostic()["gateway_completed"],
         true
     );
 }
@@ -765,7 +765,7 @@ fn filter_status_exposes_ten_recent_safe_diagnostics_without_raw_event_ids() {
     let path = dir.path().join("state");
     state(&path, |data| {
         for n in 1..=12 {
-            data["events"][format!("fixture{n}")] = json!({"time":n,"status":"uncertain","diagnostic":{"stage":"gateway","kind":"http","http_status":408,"gateway_completed":false}});
+            data["events"][format!("fixture{n}")] = json!({"time":n,"status":"uncertain","diagnostic":{"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false}});
         }
         Ok(())
     }).unwrap();
@@ -798,4 +798,105 @@ fn filter_status_exposes_ten_recent_safe_diagnostics_without_raw_event_ids() {
     assert_eq!(value["events"]["uncertain"], 12);
     assert!(!text.contains("fixture12"));
     assert_eq!(before, fs::read(path).unwrap());
+}
+
+#[derive(Clone, Copy)]
+enum BodyFixture {
+    Timeout,
+    Disconnect,
+    InvalidJson,
+    TooLarge,
+}
+
+async fn response_body_fixture(
+    fixture: BodyFixture,
+) -> (
+    reqwest::Client,
+    reqwest::Response,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<io::Result<()>>,
+) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await?;
+        let mut headers = Vec::new();
+        let mut buffer = [0; 1024];
+        while !headers.windows(4).any(|b| b == b"\r\n\r\n") {
+            let n = socket.read(&mut buffer).await?;
+            if n == 0 || headers.len() + n > 16_384 {
+                return Err(io::Error::other("fixture request missing headers"));
+            }
+            headers.extend_from_slice(&buffer[..n]);
+        }
+        let body = match fixture {
+            BodyFixture::TooLarge => vec![b'x'; 65_537],
+            _ => b"PRIVATE_ERROR".to_vec(),
+        };
+        let length = match fixture {
+            BodyFixture::Timeout | BodyFixture::Disconnect => body.len() + 100,
+            _ => body.len(),
+        };
+        socket
+            .write_all(
+                format!(
+                    "HTTP/1.1 201 Created\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await?;
+        socket.write_all(&body).await?;
+        if matches!(fixture, BodyFixture::Timeout) {
+            let _ = released.await;
+        }
+        Ok(())
+    });
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .read_timeout(Duration::from_secs(1))
+        .build()
+        .unwrap();
+    let response = client
+        .get(format!("http://{addr}/fixture"))
+        .send()
+        .await
+        .unwrap();
+    (client, response, release, server)
+}
+
+#[tokio::test]
+async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads() {
+    for (fixture, kind) in [
+        (BodyFixture::Timeout, "timeout"),
+        (BodyFixture::Disconnect, "transport"),
+        (BodyFixture::InvalidJson, "invalid_response"),
+        (BodyFixture::TooLarge, "response_too_large"),
+    ] {
+        for telegram in [false, true] {
+            let (client, response, release, server) = response_body_fixture(fixture).await;
+            let result = if telegram {
+                validate_telegram_response(response).await
+            } else {
+                deliver_response(&client, response, None).await
+            };
+            let diagnostic = result.unwrap_err().diagnostic();
+            assert_eq!(
+                diagnostic,
+                json!({
+                    "stage":if telegram { "telegram" } else { "gateway" },
+                    "phase":"response_body", "kind":kind, "http_status":201,
+                    "gateway_completed":telegram,
+                })
+            );
+            assert!(!diagnostic.to_string().contains("PRIVATE_ERROR"));
+            let _ = release.send(());
+            tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+        }
+    }
 }

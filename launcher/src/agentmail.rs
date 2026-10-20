@@ -532,15 +532,42 @@ async fn receive(
     response(StatusCode::ACCEPTED, "Accepted")
 }
 
-async fn bounded_json(mut response: reqwest::Response, limit: usize) -> io::Result<Value> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseBodyError {
+    Timeout,
+    Transport,
+    TooLarge,
+    InvalidJson,
+}
+impl ResponseBodyError {
+    fn kind(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Transport => "transport",
+            Self::TooLarge => "response_too_large",
+            Self::InvalidJson => "invalid_response",
+        }
+    }
+}
+
+async fn bounded_json(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Value, ResponseBodyError> {
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| failure())? {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        if error.is_timeout() {
+            ResponseBodyError::Timeout
+        } else {
+            ResponseBodyError::Transport
+        }
+    })? {
         if bytes.len() + chunk.len() > limit {
-            return Err(failure());
+            return Err(ResponseBodyError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).map_err(|_| failure())
+    serde_json::from_slice(&bytes).map_err(|_| ResponseBodyError::InvalidJson)
 }
 
 #[derive(Debug)]
@@ -548,33 +575,67 @@ enum DispatchError {
     Client,
     GatewayTransport(bool),
     GatewayHttp(u16),
-    GatewayResponse,
+    GatewayBody(u16, ResponseBodyError),
+    GatewayResponse(u16),
     TelegramTransport(bool),
     TelegramHttp(u16),
-    TelegramResponse,
+    TelegramBody(u16, ResponseBodyError),
+    TelegramResponse(u16),
 }
 impl DispatchError {
     fn diagnostic(&self) -> Value {
-        let (stage, kind, status, completed) = match self {
-            Self::Client => ("gateway", "client_configuration", None, false),
+        let (stage, phase, kind, status, completed) = match self {
+            Self::Client => ("gateway", "request", "client_configuration", None, false),
             Self::GatewayTransport(timeout) => (
                 "gateway",
+                "request",
                 if *timeout { "timeout" } else { "transport" },
                 None,
                 false,
             ),
-            Self::GatewayHttp(status) => ("gateway", "http", Some(*status), false),
-            Self::GatewayResponse => ("gateway", "invalid_response", None, false),
+            Self::GatewayHttp(status) => {
+                ("gateway", "response_status", "http", Some(*status), false)
+            }
+            Self::GatewayBody(status, error) => (
+                "gateway",
+                "response_body",
+                error.kind(),
+                Some(*status),
+                false,
+            ),
+            Self::GatewayResponse(status) => (
+                "gateway",
+                "response_body",
+                "invalid_response",
+                Some(*status),
+                false,
+            ),
             Self::TelegramTransport(timeout) => (
                 "telegram",
+                "request",
                 if *timeout { "timeout" } else { "transport" },
                 None,
                 true,
             ),
-            Self::TelegramHttp(status) => ("telegram", "http", Some(*status), true),
-            Self::TelegramResponse => ("telegram", "invalid_response", None, true),
+            Self::TelegramHttp(status) => {
+                ("telegram", "response_status", "http", Some(*status), true)
+            }
+            Self::TelegramBody(status, error) => (
+                "telegram",
+                "response_body",
+                error.kind(),
+                Some(*status),
+                true,
+            ),
+            Self::TelegramResponse(status) => (
+                "telegram",
+                "response_body",
+                "invalid_response",
+                Some(*status),
+                true,
+            ),
         };
-        json!({"stage":stage,"kind":kind,"http_status":status,"gateway_completed":completed})
+        json!({"stage":stage,"phase":phase,"kind":kind,"http_status":status,"gateway_completed":completed})
     }
 }
 
@@ -609,13 +670,14 @@ async fn deliver_response(
     response: reqwest::Response,
     telegram: Option<&(String, String)>,
 ) -> Result<(), DispatchError> {
+    let status = response.status().as_u16();
     let value = bounded_json(response, 65_536)
         .await
-        .map_err(|_| DispatchError::GatewayResponse)?;
+        .map_err(|error| DispatchError::GatewayBody(status, error))?;
     let text = value["response"]
         .as_str()
         .filter(|s| !s.trim().is_empty())
-        .ok_or(DispatchError::GatewayResponse)?;
+        .ok_or(DispatchError::GatewayResponse(status))?;
     let Some((owner, bot)) = telegram else {
         return Ok(());
     };
@@ -629,12 +691,17 @@ async fn deliver_response(
     if !response.status().is_success() {
         return Err(DispatchError::TelegramHttp(response.status().as_u16()));
     }
+    validate_telegram_response(response).await
+}
+
+async fn validate_telegram_response(response: reqwest::Response) -> Result<(), DispatchError> {
+    let status = response.status().as_u16();
     if bounded_json(response, 8192)
         .await
-        .map_err(|_| DispatchError::TelegramResponse)?["ok"]
+        .map_err(|error| DispatchError::TelegramBody(status, error))?["ok"]
         != true
     {
-        return Err(DispatchError::TelegramResponse);
+        return Err(DispatchError::TelegramResponse(status));
     }
     Ok(())
 }
@@ -673,7 +740,9 @@ async fn fetch_message(settings: &Settings, message: &Value) -> io::Result<Value
     if !response.status().is_success() {
         return Err(failure());
     }
-    let fetched = bounded_json(response, 1_048_576).await?;
+    let fetched = bounded_json(response, 1_048_576)
+        .await
+        .map_err(|_| failure())?;
     if fetched["inbox_id"] != message["inbox_id"] || fetched["message_id"] != message["message_id"]
     {
         return Err(failure());
