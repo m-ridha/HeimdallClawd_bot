@@ -56,7 +56,7 @@ session_backend = "sqlite"
 [channels.telegram.home]
 enabled = true
 mention_only = true
-ack_reactions = true
+ack_reactions = false
 
 [peer_groups.telegram_home]
 channel = "telegram.home"
