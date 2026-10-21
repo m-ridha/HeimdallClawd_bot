@@ -102,9 +102,30 @@ Git is installed in both agent image recipes. The agent has a dedicated stdio MC
 
 The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. It invokes ZeroClaw's native install/audit implementation without a shell, forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. This does not give the model a general shell on the agent container. The workspace executor remains network-disabled.
 
-Skills are assigned through the primary agent's `managed` bundle and persist under `/data/zeroclaw/shared/skills/managed`. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
+The registry installer targets the primary agent's `managed` bundle, persisted under `/data/zeroclaw/shared/skills/managed`. Additional operator-created native bundles can be attached with the procedure below. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
 
 Other registries and arbitrary source URLs are not exposed by this installer. Skill shell/script commands run through the remote executor. Bounded regular text files from the audited skill directory are copied into `.skills/TOOL_NAME` before execution; symlinks, oversized files and excessive trees are rejected. System dependencies must already exist in the executor. Verify a named skill's installation, visibility to the agent and behavior after deploying this version. CLI/stdio and configuration tests run locally; an actual registry installation through the deployed bot remains a live verification step.
+
+### Operator-installed skill bundles
+
+Use ZeroClaw's native CLI inside the bot container, with its existing `HOME` and `ZEROCLAW_CONFIG_DIR` set to `/data/zeroclaw`. Run native mutations as `heimdall` (UID/GID 1000), not root, so the runtime can continue to read its configuration and files. For example, from an operator container shell running as root:
+
+```sh
+gosu heimdall zeroclaw skills bundle add superpowers
+gosu heimdall zeroclaw skills install https://github.com/obra/superpowers \
+  --skill brainstorming --bundle superpowers
+# Install any other selected skills before refreshing.
+gosu heimdall heimdall-launcher --refresh-skills
+gosu heimdall zeroclaw skills list --agent primary
+```
+
+Then use the paired dashboard's existing reload action (`POST /admin/reload`, with the current paired bearer and remote administration enabled). The refresh command updates the on-disk primary-agent bundle assignment; it does not contact the gateway or activate a running agent. Native reload rereads the configuration and recreates daemon subsystems; it is not an in-flight skill refresh. Serialize native CLI, dashboard configuration edits and refresh operations, and finish them before requesting reload. Do not put bearer tokens in URLs, command history or chat.
+
+Every registered bundle is attached to `primary`: `managed` first, then other aliases alphabetically, matching native first-name-wins precedence. Extra aliases must be 1–64 lowercase ASCII letters, digits, hyphens or underscores. Native directory mappings and include/exclude filters are retained. `managed` remains template-owned at startup. No filesystem watcher or runtime patch is used, and unregistered directories are not attached. Native audit and tool grants continue to apply; installing a collection does not install its plugin hooks or enable delegation.
+
+At startup the launcher imports only the extra `[skill_bundles.*]` definitions from the existing persistent `config.toml`, then rebuilds the primary assignment in the freshly rendered configuration. Thus bundles, custom directories and filters survive a restart or redeployment with the same `/data` volume, including when refresh was not run before restart. Other saved configuration remains managed by the template and environment. Malformed, oversized, nonregular or symlinked saved configuration fails startup or refresh with sanitized errors instead of being discarded. Native bundle removal is respected on the next refresh/reload or startup; remove registered bundles through the native CLI rather than deleting their directories. Volumes are not backups, and this feature does not survive volume loss.
+
+No new Railway variables, tool grants or services are required. After deployment, verify a synthetic or selected audited skill with `skills list --agent primary`, authenticated reload and a new Telegram request. Runtime listing is covered by the build workflow; paired reload and Telegram use still require live verification.
 
 ## AgentMail API authentication
 

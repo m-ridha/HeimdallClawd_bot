@@ -103,6 +103,21 @@ fn runtime(vars: &[(String, String)]) -> Command {
     command
 }
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--refresh-skills") {
+        #[cfg(target_os = "linux")]
+        // SAFETY: geteuid only queries this process's effective identity.
+        if unsafe { libc::geteuid() } == 0 {
+            drop_runtime_identity()?;
+        }
+        let path = Path::new(STATE).join("config.toml");
+        let previous = heimdall_launcher::skill_bundles::read_config(&path)?
+            .ok_or_else(|| fail("Runtime configuration is missing; start Heimdall first"))?;
+        let updated =
+            heimdall_launcher::skill_bundles::attach(&previous, Some(&previous)).map_err(fail)?;
+        atomic_write(&path, &updated)?;
+        println!("Skill bundles assigned to primary; use authenticated /admin/reload to activate");
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("--mail-mcp") {
         return heimdall_launcher::agentmail::serve_mcp();
     }
@@ -182,7 +197,11 @@ fn main() -> io::Result<()> {
     }
     heimdall_launcher::startup::report_storage("/data");
     prepare_identity()?;
-    atomic_write(Path::new(STATE).join("config.toml").as_path(), &config)?;
+    let config_path = Path::new(STATE).join("config.toml");
+    let previous = heimdall_launcher::skill_bundles::read_config(&config_path)?;
+    let config =
+        heimdall_launcher::skill_bundles::attach(&config, previous.as_deref()).map_err(fail)?;
+    atomic_write(&config_path, &config)?;
     let workspace = Path::new(STATE).join("agents/primary/workspace");
     fs::create_dir_all(&workspace)?;
     for directory in ["shared/sops", "shared/plugins", "shared/skills/managed"] {
