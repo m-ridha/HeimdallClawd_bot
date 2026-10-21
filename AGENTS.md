@@ -20,6 +20,7 @@ This file owns durable contributor instructions and user decisions. It is not a 
 | GitHub API, credentials or Codespaces | [GitHub workflow](docs/github-workflow.md), [GitHub setup](docs/operations.md#github-access) |
 | Email admission, SOP assignment or webhook delivery | [AgentMail events](docs/agentmail-events.md), `launcher/src/agentmail.rs` and its tests |
 | Runtime patches or source upgrade | `deploy/bot/runtime.lock.json`, `deploy/bot/NOTICE.md`, bot Dockerfile and affected patch/contracts |
+| Run GitHub Actions / native Linux validation | [Run GitHub Actions from the command line](#run-github-actions-from-the-command-line), `.github/workflows/build.yml` |
 | Build/release or infrastructure | [Releases](docs/releases.md), [Railway IaC](docs/railway-iac.md), [.railway README](.railway/README.md) |
 | Folder navigation, previous evidence or deferred work | [Project guide](docs/project-guide.md), [verification](docs/verification.md), [ideas](docs/ideas.md) |
 
@@ -43,10 +44,58 @@ python3 -B -m unittest discover -s tools/tests -v
 
 - Run the Cargo and Python checks above for implementation changes. Apply formatting to affected Rust with `cargo fmt --manifest-path <crate>/Cargo.toml`, then check it. Use rustfmt defaults; no `rustfmt.toml` exists, so do not add one without approval. Do not reformat unrelated code.
 - `tools/tests/test_iac.py` is skipped unless `railway_sdk` is installed. When touching `.railway/`, install `.railway/requirements.txt` into a virtual environment so it actually runs, then review `railway config plan` read-only.
-- Linux-only tests (`#![cfg(target_os = "linux")]`) assert root and exercise seccomp, UID changes, symlink bootstrap and the native MCP client. They do not run meaningfully on macOS, and an ARM64 Docker engine cannot compile the x86_64 seccomp list. Never report them as passing from a macOS run. Validate them with **Actions → Build and verify release binaries → Run workflow** with the separate source-ref input set to the branch or preferably its full 40-character SHA (default `v0.0.0` label, no deployment; the workflow branch selector is a separate input), and report that run's result.
+- Linux-only tests (`#![cfg(target_os = "linux")]`) assert root and exercise seccomp, UID changes, symlink bootstrap and the native MCP client. They do not run meaningfully on macOS, and an ARM64 Docker engine cannot compile the x86_64 seccomp list. Never report them as passing from a macOS run. Validate them using [the CLI build-only workflow procedure](#run-github-actions-from-the-command-line), and report that run's result.
 - Neither repository build/release workflow runs automatically on pull requests. `build.yml` is reusable and manually dispatched; `release.yml` runs only on published releases. GitHub-managed code scanning can run separately. State which checks you actually ran. Report unavailable tools and exact commands/results; never present historical checks as a fresh run.
 - For documentation-only changes, check local links/anchors across **all tracked Markdown**, including SECURITY.md and files outside `docs/`, consistency with the code, and `git diff --check`; runtime tests are unnecessary. For workflow changes, also run `actionlint` when available.
 - Keep `Cargo.lock` changes in the same commit as the `Cargo.toml` change that caused them. Docker builds and CI use `--locked`.
+
+## Run GitHub Actions from the command line
+
+Prefer the GitHub CLI for authorized Actions work. Read the selected workflow's current `workflow_dispatch` inputs first. The build-only workflow is `.github/workflows/build.yml`; release/deployment authorization is separate (see [releases](docs/releases.md)). Neither build nor release runs automatically on a PR.
+
+### 1. Check tools and authentication
+
+```sh
+gh --version
+gh auth status
+```
+
+CLI authentication, Git push credentials and GitHub connector authentication are separate; success with one does not establish access through another. If the CLI is unavailable or unauthenticated, inspect the available connector tools for an equivalent dispatch capability. Use the browser only when neither CLI nor connector can perform the operation, and state the specific limitation. Never print credentials with `gh auth token` or extract them from another tool. Temporary helpers from past chats are not repository dependencies.
+
+Skills provide guidance rather than executable capabilities. Check the current session's skills for applicable GitHub instructions (for example, `ecc:github-ops`); installed skills and connector tools can differ between chats.
+
+### 2. Dispatch the build-only workflow
+
+Push the intended source commit when authorized before dispatching; GitHub cannot build an unpushed local commit. From this checkout:
+
+```sh
+source_sha=$(git rev-parse HEAD)
+workflow_ref=main  # Use the feature branch instead when validating workflow changes.
+gh workflow run build.yml --repo m-ridha/HeimdallClawd_bot \
+  --ref "$workflow_ref" -f ref="$source_sha" -f release_tag=v0.0.0
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `--ref "$workflow_ref"` | Branch or tag containing the workflow definition to execute. |
+| `-f ref="$source_sha"` | Source commit checked out and built by that workflow. Prefer its full 40-character SHA. |
+| `-f release_tag=v0.0.0` | Validation package label; this build does not publish a release or deploy. |
+
+### 3. Identify and verify the run
+
+Use the URL returned by dispatch when available. Otherwise list candidates and match the workflow branch, actor and dispatch time; do not assume the newest run is yours:
+
+```sh
+gh run list --repo m-ridha/HeimdallClawd_bot --workflow build.yml \
+  --event workflow_dispatch --branch "$workflow_ref" --limit 5 \
+  --json databaseId,createdAt,headBranch,headSha,status,conclusion,url
+gh run view RUN_ID --repo m-ridha/HeimdallClawd_bot \
+  --json status,conclusion,url,jobs
+```
+
+Replace `RUN_ID` with the verified run ID. The run's `headSha` describes the workflow event commit and can differ from the source `ref` input. Confirm the requested source SHA in the checkout/build evidence; do not filter solely by source SHA when the workflow ref differs. For a specific job, inspect `gh run view --job JOB_ID --repo m-ridha/HeimdallClawd_bot --log` as needed.
+
+Report the source SHA, run URL, and actual status/conclusion: dispatched, queued or running is not passed. If dispatch returns an ambiguous error, inspect existing runs before retrying so a successful request is not duplicated. If validation is unfinished, say it is pending; never substitute a historical run's result.
 
 ## Product constraints
 
