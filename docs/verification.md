@@ -4,7 +4,6 @@ This is a historical evidence log, not a current deployment checklist. Each entr
 
 For present behavior use [operations](operations.md), [capabilities](capabilities.md), the template and tests. For a rollout, establish the exact deployed commit and perform the relevant [acceptance checks](capabilities.md#live-verification-after-publishing-a-release); a historical passing build or a merged PR does not establish current live behavior. This documentation cleanup did not inspect production or rerun historical checks.
 
-
 ## PR #35 review follow-up — 2026-10-20
 
 The review identified two valid gaps: response-body errors lost their cause and observed status, and the timeout regression bypassed production router assembly. Typed response-body errors now preserve timeout/transport/invalid-content/size categories with a response-body phase and observed HTTP status for gateway and Telegram parsing. Synthetic loopback fixtures exercise each case without real credentials or external requests.
