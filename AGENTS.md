@@ -1,16 +1,29 @@
 # Agent guide for HeimdallClawd
 
-## Start here
+## First five minutes
 
-This guide contains durable instructions and user decisions. All required context is in this repository; private planning files and historical chat exports are not prerequisites. Inspect affected code before treating a requirement or a historical passing check as current behavior.
+This file owns durable contributor instructions and user decisions. It is not a deployment inventory or an incident transcript. All required context is in the repository; local handoffs, private planning files, historical chats and temporary helper scripts are optional, potentially stale references.
 
-Read the user's current instructions first, then consult:
+1. Read the current request. Inspect `git status --short`, the current branch and the relevant diff before editing; preserve staged and user changes. Do not assume a local branch is updated merely because a PR was merged.
+2. Identify the affected boundary using the map below, then inspect its source and tests. Current user decisions govern intent; code establishes implemented behavior. A disagreement is something to investigate, not permission to silently weaken either.
+3. Choose the smallest complete change and its validation. Continue authorized reversible work autonomously. A capability list, backlog or past one-off approval does not authorize unrelated work, deployment, replay, history rewriting or deletion of evidence.
+4. Keep useful agent capabilities available while preserving explicit credential and execution boundaries. Do not solve tool failures by granting host execution or solve repeated provider failures by blindly retrying mutations.
+5. Report what changed, exact checks and results, skipped/unavailable checks, required operator steps and material limitations. Distinguish checked-in, compiled, configured, granted, connected and live-verified behavior.
 
-- [README](README.md) for product, setup and configuration.
-- [Operations](docs/operations.md), [capabilities](docs/capabilities.md) and the [executor README](executor/README.md) for behavior, limits and the tool boundary.
-- [Releases](docs/releases.md) and [Railway IaC](docs/railway-iac.md) for deployment and infrastructure.
-- [Verification](docs/verification.md) for observed evidence and what is still unverified, and the [project walkthrough](docs/project-guide.md) for folder purposes.
-- The affected code and tests. Dated verification and audit entries describe the state at that time; the current source and tests win.
+### Read by task
+
+| Task | Start with |
+| --- | --- |
+| Product, fresh clone, configuration overview | [README](README.md) |
+| Provider/authentication, memory, recovery, tool limits | [Operations](docs/operations.md), [capabilities](docs/capabilities.md) |
+| Workspace commands, filesystem, Rust tooling or isolation | [Executor contract](executor/README.md), `executor/src/` and tests |
+| GitHub API, credentials or Codespaces | [GitHub workflow](docs/github-workflow.md), [GitHub setup](docs/operations.md#github-access) |
+| Email admission, SOP assignment or webhook delivery | [AgentMail events](docs/agentmail-events.md), `launcher/src/agentmail.rs` and its tests |
+| Runtime patches or source upgrade | `deploy/bot/runtime.lock.json`, `deploy/bot/NOTICE.md`, bot Dockerfile and affected patch/contracts |
+| Build/release or infrastructure | [Releases](docs/releases.md), [Railway IaC](docs/railway-iac.md), [.railway README](.railway/README.md) |
+| Folder navigation, previous evidence or deferred work | [Project guide](docs/project-guide.md), [verification](docs/verification.md), [ideas](docs/ideas.md) |
+
+Dated evidence establishes only what was checked at that revision. A successful compile does not establish native isolation; a merged PR does not establish deployment; a response claiming success does not establish that a tool ran.
 
 ## Stack, setup, and checks
 
@@ -23,20 +36,21 @@ cargo test --locked --manifest-path launcher/Cargo.toml
 cargo test --locked --manifest-path executor/Cargo.toml
 cargo clippy --locked --manifest-path launcher/Cargo.toml --all-targets -- -D warnings
 cargo clippy --locked --manifest-path executor/Cargo.toml --all-targets -- -D warnings
-cargo fmt --manifest-path launcher/Cargo.toml    # likewise for executor
+cargo fmt --manifest-path launcher/Cargo.toml -- --check
+cargo fmt --manifest-path executor/Cargo.toml -- --check
 python3 -B -m unittest discover -s tools/tests -v
 ```
 
-- Run the Cargo and Python checks above for implementation changes. Format Rust with rustfmt defaults; no `rustfmt.toml` exists, so do not add one without approval. Do not reformat unrelated code.
+- Run the Cargo and Python checks above for implementation changes. Apply formatting to affected Rust with `cargo fmt --manifest-path <crate>/Cargo.toml`, then check it. Use rustfmt defaults; no `rustfmt.toml` exists, so do not add one without approval. Do not reformat unrelated code.
 - `tools/tests/test_iac.py` is skipped unless `railway_sdk` is installed. When touching `.railway/`, install `.railway/requirements.txt` into a virtual environment so it actually runs, then review `railway config plan` read-only.
-- Linux-only tests (`#![cfg(target_os = "linux")]`) assert root and exercise seccomp, UID changes, symlink bootstrap and the native MCP client. They do not run meaningfully on macOS, and an ARM64 Docker engine cannot compile the x86_64 seccomp list. Never report them as passing from a macOS run. Validate them with **Actions → Build and verify release binaries → Run workflow** on the branch (default `v0.0.0` label, no deployment), and report that run's result.
+- Linux-only tests (`#![cfg(target_os = "linux")]`) assert root and exercise seccomp, UID changes, symlink bootstrap and the native MCP client. They do not run meaningfully on macOS, and an ARM64 Docker engine cannot compile the x86_64 seccomp list. Never report them as passing from a macOS run. Validate them with **Actions → Build and verify release binaries → Run workflow** with the separate source-ref input set to the branch or preferably its full 40-character SHA (default `v0.0.0` label, no deployment; the workflow branch selector is a separate input), and report that run's result.
 - Neither repository build/release workflow runs automatically on pull requests. `build.yml` is reusable and manually dispatched; `release.yml` runs only on published releases. GitHub-managed code scanning can run separately. State which checks you actually ran. Report unavailable tools and exact commands/results; never present historical checks as a fresh run.
-- For documentation-only changes, check links/paths, consistency with the code, and `git diff --check`; runtime tests are unnecessary. For workflow changes, also run `actionlint` when available.
+- For documentation-only changes, check local links/anchors across **all tracked Markdown**, including SECURITY.md and files outside `docs/`, consistency with the code, and `git diff --check`; runtime tests are unnecessary. For workflow changes, also run `actionlint` when available.
 - Keep `Cargo.lock` changes in the same commit as the `Cargo.toml` change that caused them. Docker builds and CI use `--locked`.
 
 ## Product constraints
 
-HeimdallClawd is a private, single-owner Telegram assistant. The bot holds credentials; a separate executor holds none and does all file and command work.
+HeimdallClawd is a private, owner-operated Telegram assistant. Additional permitted accounts are fully trusted operators who share tools, workspace and accessible sessions/memory, not isolated tenants. The bot holds credentials; a separate executor holds none and performs workspace file and command work. Authorized remote integrations such as Codespaces run in their own environment.
 
 - Accept only private chats from permitted accounts. `TELEGRAM_OWNER_ID` is required and never hardcoded; omitting it stops startup. IDs are positive decimal integers without leading zeros that fit `i64`; the owner is always included and duplicates are removed. Malformed entries fail startup rather than being skipped.
 - Secrets live only in Railway variables. Never put them in the config template, TOML, Git, GitHub variables, release assets, logs or error messages. ZeroClaw reads them through native `ZEROCLAW_...` environment overrides; the launcher regenerates `config.toml` at startup, so manual edits to the deployed file do not persist.
@@ -44,7 +58,8 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 - Host tools stay blocked: `shell`, `file_read`, `file_write`, `git_operations`, `schedule` and `delegate` remain in `excluded_tools`, `allowed_commands` stays empty, and there is no host execution fallback when the executor fails.
 - Tool grants are explicit. Registering an MCP server or plugin grants nothing; add its exact prefixed tool names to both `allowed_tools` and `auto_approve` (and to `pipeline.allowed_tools` only when pipelines should use it). Update the pinned count and expectations in `launcher/tests/config.rs` in the same change.
 - Keep infrastructure frugal and avoid unnecessary always-on services. Budget is operator-controlled rather than a fixed project constraint. Keep one replica per service, sleeping disabled, the existing IaC region, and the existing volume names, sizes and mounts: `heimdall-data` at `/data` (500 MB) and `executor-workspace` at `/data/workspace` (200 MB). Volumes are storage, not backups.
-- Public web access allows public hosts only (`allow_private_hosts = false`). The workspace executor stays network-disabled.
+- The paired agent dashboard is intentionally public; the executor stays private and workspace jobs stay network-disabled. Public web tools allow public destinations only (`allow_private_hosts = false`); this does not prohibit the configured private MCP transport. Tavily is search/content retrieval, not an interactive browser.
+- Keep `compact_context = false` unless the user changes that decision. Model capacity and the runtime working budget are separate settings; never copy one model's capacity to another route or disable trimming as an overflow workaround. See [context guidance](docs/operations.md#context-budgets-and-long-tasks).
 - For reminders without an explicit timezone, use the timezone recorded in the agent’s `USER.md`; ask the requesting user if it is unknown. An explicit timezone in the request takes precedence (see `deploy/bot/TOOLS.md`).
 - Append unscheduled ideas to the existing `docs/ideas.md` rather than implementing them. A backlog or capability list is not authorization to build it all.
 
@@ -73,6 +88,19 @@ HeimdallClawd is a private, single-owner Telegram assistant. The bot holds crede
 - The pinned ZeroClaw revision and source SHA-256 appear in `deploy/bot/runtime.lock.json`, `deploy/bot/Dockerfile` (`runtime-source`), `executor/Dockerfile` (`contract`), `deploy/bot/NOTICE.md`, the image labels and the docs. Upgrading the runtime changes all of them together, rebases the patches, and needs a full native build; never bypass the checksum check.
 - The runtime-compile layer must depend only on the pinned source, patches and compiler settings, not on launcher or configuration files, so configuration-only releases reuse the compile cache. Preserve the separate `runtime-binary` and `support-binaries` targets and the GHCR registry cache. Release compilation uses LTO off, 16 codegen units and optimization level 1; change this only with measured evidence.
 - `.dockerignore` excludes `docs/` and `.railway/` from build contexts, and executables are never committed (`prebuilt/` and `target/` are ignored).
+
+## Keep related changes together
+
+| Change | Required companions |
+| --- | --- |
+| Tool grant or removal | Exact prefixed policy entries, auto-approval/pipeline scope, pinned configuration expectations, managed instructions and capability docs |
+| Executor tool/protocol | Validation and dispatch, MCP adapter, process/files/confinement if affected, API/MCP/native-client contracts and documented bounds |
+| Template structure or embedded instructions | Pure renderer/tests, `include_str!` ownership, Docker COPY inputs and startup replacement behavior |
+| Runtime revision, feature or patch | All pins/checksums/NOTICE, zero-fuzz application, affected upstream fixture COPY/invocations, native Linux validation and provenance |
+| Provider/credential | Explicit operator setup, secret-origin policy where applicable, save/render non-persistence tests and model-specific capacity handling |
+| Documentation deletion/rename | Search all tracked references, including security policy and root files; verify file targets and heading anchors |
+
+Do not derive an exact test expectation from the implementation it is meant to check. Avoid adding repeated version lists, patch counts, temporary tool paths or dated deployment status to this guide; use the owning source and verification record.
 
 ## Security invariants
 
@@ -105,6 +133,7 @@ Preserve these accepted behaviors; each has a regression test that must keep pas
 - Suggested scopes: `launcher`, `executor`, `runtime`, `config`, `telegram`, `skills`, `transfer`, `docker`, `ci`, `release`, `railway`, `tools`, `deps`, `docs`. Use `chore` for build, CI, dependency and infrastructure maintenance (for example, `chore: [ci] pin build cache scope`); a change that alters shipped behavior is `feat` or `fix` even when it touches workflows or Dockerfiles. Examples: `fix: [executor] kill orphaned descendants after timeout`, `refactor: [launcher] split allowlist validation`, `test: [executor] cover symlink rejection`, `docs: [operations] document Tavily key setup`.
 - Name branches by the same classification: `<type>/<short-kebab-case-subject>` (a project convention extending the commit guide), such as `fix/executor-descendant-cleanup`.
 - Keep each commit to one reviewable change, with tests and docs for that change. Add a body only to explain why or note material limitations; do not repeat the diff. Never mix formatting churn with behavior changes.
+- Create PRs rather than pushing changes directly to `main`; follow `.github/pull_request_template.md`, adapting it when useful. Read both inline comments and submitted reviews/top-level discussion when reviewing feedback; an empty inline list does not mean no findings. Verify findings against source before changing code.
 - PR descriptions explain the concrete change, how it was validated (exact commands and the build-workflow run when native Linux checks matter), the Railway or variable changes an operator must make, and material limitations such as "not live-verified". Use semantic subjects when listing commits.
 - Use GitHub **Squash and merge** when merging authorized PRs, unless the user explicitly requests another method. Use a semantic commit subject for the resulting squash commit. Merge into `main` before releasing; a GitHub Release is titled with its tag (`vX.Y.Z`) and its notes summarize the semantic commits since the previous release.
 - Inspect `git status` and preserve staged and user edits. Do not commit, push, publish, merge, set Railway variables or resolve remote threads without task authorization. Do not delegate unless explicitly requested by the user or applicable instructions.
@@ -132,6 +161,29 @@ Preserve these accepted behaviors; each has a regression test that must keep pas
 - Python tests use `unittest`, patch `subprocess`, `urllib` and the clock, and assert sanitized error messages.
 - Verify with the commands in [Stack, setup, and checks](#stack-setup-and-checks). A broad refactor must preserve test intent and coverage, not merely shorten assertions.
 
-## GitHub repository workflow
+## Agent-facing integration contracts
 
-The owner wants work on any repository the GitHub token can access. REST operations use the agent's github secret alias. Codespaces retains explicit repository lists and adds standalone `HEIMDALL_CODESPACE_REPOS=*` for GitHub-authorized repositories; actual account listing and syntax checks remain mandatory. Offline Git is included in executor images; it receives no credentials or networking. Managed instructions explain API-first edits/PRs and Codespaces or authorized GitHub Actions for networked tests. Do not diagnose GitHub access from an executor download failure.
+- **GitHub:** one operator-provided raw `GITHUB_TOKEN`; the launcher derives internal authorization plumbing. REST tools use the `github` secret alias. Codespaces supports explicit repositories or standalone `HEIMDALL_CODESPACE_REPOS=*`; account listing, syntax checks and GitHub permissions still apply. Do not introduce a second Codespaces credential without a concrete requirement.
+- **Compute:** the executor provides offline Git, Python 3, jq and pinned Rust/Cargo/rustfmt/Clippy. Networking, credentials, dependency downloads, pushes and networked tests belong in Codespaces or authorized CI. Remote devcontainers determine available tools. Adding a binary to the agent image alone does not expose it through workspace tools. Keep managed instructions accurate about each environment.
+- **Configuration:** native `ZEROCLAW_...` environment overrides can mask new template defaults. Keep secrets environment-only and verify they remain absent when configuration is saved. AgentMail uses full `AGENTMAIL_AUTHORIZATION`; GitHub uses raw `GITHUB_TOKEN`. Provider-specific setup belongs in operations, not duplicated here. Connector authentication does not authenticate a local CLI.
+- **Gateway:** the optional email adapter and dashboard share one public listener. Forwarded administration must enforce native current pairing and remote-admin policy; loopback proxying must not turn public callers into local administrators. Shutdown and pairing-code secret routes remain console-only. Ask the operator to pair privately; never ask them to paste the code into chat.
+- **Email/SOP:** one `/agentmail/events` endpoint handles named sender/content rules. Enabling a rule never backfills; custom rules need an explicit optional `sop` assignment. Merely installing an SOP does not bind it to events. Preserve signature validation, bounded fixed-origin retrieval and durable reservation. Never automatically replay uncertain/reserved events or delete the ledger to fix delivery: external mutations may already have happened. SOP completion and Telegram delivery are separate outcomes.
+- **Credential origins:** HTTP aliases `github` and `agentmail` remain bound to their exact approved TLS origins; adding a credential alias requires an explicit origin policy and tests. Do not loosen destination policy to resolve authentication failures.
+
+## Diagnose before retrying
+
+Use sanitized stage/category/status and a reproducible synthetic case. Do not enable prompt/tool payload logging, print authentication files, or infer a specific cause from a generic task failure.
+
+| Symptom | What to inspect before changing behavior |
+| --- | --- |
+| Generic provider exhaustion | Earlier paired dashboard provider retry events; Railway stdout can contain only the terminal summary. Distinguish request validation, auth, quota and transport. |
+| Missing tool output in Responses history | Retained call/result reconciliation and `responses-tool-history.patch`; see [history repair](docs/operations.md#missing-tool-outputs-in-openaicodex-history). Unknown-outcome repair must not rerun tools. |
+| Context-window error | Selected route, verified model capacity, active environment overrides, working budget and current tool/result size. Use bounded phases/checkpoints; a larger limit is not guaranteed completion. |
+| No Telegram voice response | Channel download/transcription diagnostics and the typed provider alias/key; successful text chat does not prove transcription is configured. |
+| Workspace download or Git push failure | The executor deliberately has no network or credentials. Inspect GitHub access separately; do not unblock host shell. |
+| Codespaces `CS_NET_01` | GitHub account/network restrictions, including reproduction in its web UI; a CLI retry is not evidence of a code fix. |
+| Webhook accepted but no review | Rule enabled/matched, explicit SOP assignment and installed definition, reservation stage, gateway deadline and final delivery. Consult [event recovery](docs/agentmail-events.md#state-and-recovery) before any replay. |
+| Nonzero command status or timeout | Structured executor/Codespaces result and external state. A transport failure does not establish whether a remote mutation occurred. |
+| Railway Unauthorized | Project-token scope and sanitized preflight; `railway link` uses an account-level flow and is not a valid token-expiration test. |
+
+For ambiguous mutating operations, inspect external state before retrying. Record remaining uncertainty explicitly instead of claiming either success or no side effects.
