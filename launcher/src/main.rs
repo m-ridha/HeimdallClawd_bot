@@ -1,5 +1,6 @@
 use heimdall_launcher::config::{
-    configured_model, github_authorization, parse_allowed_ids, render_config, secret_overrides,
+    EXECUTOR_ORIGIN, configured_model, github_authorization, parse_allowed_ids, render_config,
+    secret_overrides,
 };
 use std::{
     fs,
@@ -172,6 +173,17 @@ fn main() -> io::Result<()> {
     let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
         .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
     let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
+    match std::env::var("HEIMDALL_EXECUTOR_URL") {
+        Ok(url) if url != EXECUTOR_ORIGIN => {
+            return Err(fail(
+                "HEIMDALL_EXECUTOR_URL must use the configured private executor",
+            ));
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(fail("Invalid HEIMDALL_EXECUTOR_URL"));
+        }
+        _ => {}
+    }
     let mail_settings = heimdall_launcher::agentmail::Settings::from_env()?;
     match std::env::var("GITHUB_TOKEN") {
         Ok(token) => vars.push((
