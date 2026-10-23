@@ -32,6 +32,7 @@ const BACKEND_PORT: u16 = 3887;
 const STATE: &str = "/data/zeroclaw/agentmail-state.json";
 const BODY_LIMIT: usize = 131_072;
 const EVENT_LIMIT: usize = 10_000;
+const STATE_LIMIT: usize = 2_000_000;
 const RECENT_EVENT_LIMIT: usize = 10;
 // Dispatch acknowledges admission; it does not wait for agent completion.
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(35);
@@ -378,8 +379,10 @@ fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io
         return Err(failure());
     }
     let mut raw = String::new();
-    (&mut file).take(2_000_001).read_to_string(&mut raw)?;
-    if raw.len() > 2_000_000 {
+    (&mut file)
+        .take((STATE_LIMIT + 1) as u64)
+        .read_to_string(&mut raw)?;
+    if raw.len() > STATE_LIMIT {
         return Err(failure());
     }
     let mut data = if raw.is_empty() {
@@ -402,6 +405,11 @@ fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io
     let original = serde_json::to_vec(&data).map_err(|_| failure())?;
     let result = update(&mut data)?;
     let bytes = serde_json::to_vec(&data).map_err(|_| failure())?;
+    // Run metadata grows the ledger too. Never write a state we will refuse to
+    // read on the next request; retain the prior reservations on overflow.
+    if bytes.len() > STATE_LIMIT {
+        return Err(failure());
+    }
     if !raw.is_empty() && bytes == original {
         return Ok(result);
     }

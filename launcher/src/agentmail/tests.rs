@@ -1206,3 +1206,28 @@ async fn multi_sop_event_case(fail_second: bool) {
     }
     front.abort();
 }
+
+#[test]
+fn oversized_state_update_preserves_readable_ledger_and_reservations() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |data| {
+        data["events"]["fixture"] = json!({"time":1,"status":"reserved"});
+        Ok(())
+    })
+    .unwrap();
+    let before = fs::read(&path).unwrap();
+    let result = state(&path, |data| {
+        data["events"]["fixture"]["runs"] =
+            json!([{"sop":"fixture","run_id":"x".repeat(2_000_000)}]);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    state(&path, |data| {
+        assert_eq!(data["events"]["fixture"]["status"], "reserved");
+        assert!(data["events"]["fixture"].get("runs").is_none());
+        Ok(())
+    })
+    .unwrap();
+}
