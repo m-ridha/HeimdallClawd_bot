@@ -36,6 +36,10 @@ const RECENT_EVENT_LIMIT: usize = 10;
 // Dispatch acknowledges admission; it does not wait for agent completion.
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(35);
 type Body = UnsyncBoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+fn startup_error(reason: &'static str) -> io::Error {
+    io::Error::other(format!("AgentMail startup: {reason}"))
+}
+
 fn failure() -> io::Error {
     io::Error::other("AgentMail adapter configuration or state is invalid")
 }
@@ -109,43 +113,86 @@ pub struct Settings {
 }
 impl Settings {
     pub fn from_env() -> io::Result<Option<Self>> {
-        if !template_enabled(include_str!("../../deploy/bot/config.template.toml"))? {
+        if !template_enabled(include_str!("../../deploy/bot/config.template.toml")).map_err(
+            |_| {
+                startup_error(
+                    "heimdall.agentmail.enabled in the embedded template must be a boolean",
+                )
+            },
+        )? {
             return Ok(None);
         }
-        let secret = std::env::var("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET").map_err(|_| failure())?;
+        Self::from_environment(|name| std::env::var(name))
+    }
+
+    fn from_environment(
+        lookup: impl Fn(&str) -> Result<String, std::env::VarError>,
+    ) -> io::Result<Option<Self>> {
+        let secret = lookup("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET").map_err(|_| {
+            startup_error("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET is required and must be Unicode")
+        })?;
         let secret = STANDARD
-            .decode(secret.strip_prefix("whsec_").ok_or_else(failure)?)
-            .map_err(|_| failure())?;
-        let token = std::env::var("HEIMDALL_AGENTMAIL_GATEWAY_TOKEN").map_err(|_| failure())?;
-        if secret.len() < 16
-            || token.len() < 32
-            || token.len() > 1024
-            || !token.bytes().all(|b| b.is_ascii_graphic())
-        {
-            return Err(failure());
+            .decode(secret.strip_prefix("whsec_").ok_or_else(|| {
+                startup_error("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must start with whsec_")
+            })?)
+            .map_err(|_| {
+                startup_error(
+                    "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must contain standard Base64 after whsec_",
+                )
+            })?;
+        let token = lookup("HEIMDALL_AGENTMAIL_GATEWAY_TOKEN").map_err(|_| {
+            startup_error("HEIMDALL_AGENTMAIL_GATEWAY_TOKEN is required and must be Unicode")
+        })?;
+        if secret.len() < 16 {
+            return Err(startup_error(
+                "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must decode to at least 16 bytes",
+            ));
         }
-        let filters = template_filters(include_str!("../../deploy/bot/config.template.toml"))?;
+        if token.len() < 32 || token.len() > 1024 || !token.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(startup_error(
+                "HEIMDALL_AGENTMAIL_GATEWAY_TOKEN must be 32-1024 printable ASCII characters without spaces or newlines",
+            ));
+        }
+        let filters = template_filters(include_str!("../../deploy/bot/config.template.toml"))
+            .map_err(|_| {
+                startup_error("heimdall.agentmail.filters in the embedded template is invalid")
+            })?;
         // Preserve explicitly configured native gateway clients and add a
         // digest for this adapter. The raw bearer never reaches saved TOML.
-        let existing = match std::env::var("ZEROCLAW_gateway__paired_tokens") {
+        let existing = match lookup("ZEROCLAW_gateway__paired_tokens") {
             Ok(value) => Some(value),
             Err(std::env::VarError::NotPresent) => None,
-            _ => return Err(failure()),
+            _ => {
+                return Err(startup_error(
+                    "ZEROCLAW_gateway__paired_tokens must be Unicode",
+                ));
+            }
         };
-        let paired_tokens = paired_tokens(existing.as_deref(), &token)?;
-        let gateway_secret = match std::env::var("ZEROCLAW_gateway__webhook_secret") {
+        let paired_tokens = paired_tokens(existing.as_deref(), &token).map_err(|_| startup_error("ZEROCLAW_gateway__paired_tokens must be a JSON array of at most 64 strings, each at most 1024 bytes"))?;
+        let gateway_secret = match lookup("ZEROCLAW_gateway__webhook_secret") {
             Ok(value) => value,
             Err(std::env::VarError::NotPresent) => String::new(),
-            _ => return Err(failure()),
+            _ => {
+                return Err(startup_error(
+                    "ZEROCLAW_gateway__webhook_secret must be Unicode",
+                ));
+            }
         };
         if gateway_secret.len() > 1024 || gateway_secret.bytes().any(|b| b.is_ascii_control()) {
-            return Err(failure());
+            return Err(startup_error(
+                "ZEROCLAW_gateway__webhook_secret must be at most 1024 bytes without control characters",
+            ));
         }
-        let owner = std::env::var("TELEGRAM_OWNER_ID").map_err(|_| failure())?;
-        crate::config::parse_allowed_ids(&owner, None).map_err(|_| failure())?;
-        let bot = std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| failure())?;
-        crate::config::secret_overrides(&bot, &"0".repeat(32)).map_err(|_| failure())?;
-        let authorization = match std::env::var("AGENTMAIL_AUTHORIZATION") {
+        let owner = lookup("TELEGRAM_OWNER_ID")
+            .map_err(|_| startup_error("TELEGRAM_OWNER_ID is required and must be Unicode"))?;
+        crate::config::parse_allowed_ids(&owner, None).map_err(|_| {
+            startup_error("TELEGRAM_OWNER_ID must be a positive decimal i64 without leading zeros")
+        })?;
+        let bot = lookup("TELEGRAM_BOT_TOKEN")
+            .map_err(|_| startup_error("TELEGRAM_BOT_TOKEN is required and must be Unicode"))?;
+        crate::config::secret_overrides(&bot, &"0".repeat(32))
+            .map_err(|_| startup_error("TELEGRAM_BOT_TOKEN has an invalid format"))?;
+        let authorization = match lookup("AGENTMAIL_AUTHORIZATION") {
             Ok(value)
                 if value.starts_with("Bearer ")
                     && value.len() <= 1024
@@ -154,7 +201,11 @@ impl Settings {
                 Some(value)
             }
             Err(std::env::VarError::NotPresent) => None,
-            _ => return Err(failure()),
+            _ => {
+                return Err(startup_error(
+                    "AGENTMAIL_AUTHORIZATION must start with Bearer followed by a space and contain at most 1024 printable ASCII characters",
+                ));
+            }
         };
         Ok(Some(Self {
             secret,
@@ -897,9 +948,9 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        if port == BACKEND_PORT { return Err(failure()) }
+        if port == BACKEND_PORT { return Err(startup_error("PORT must differ from reserved internal port 3887")) }
         let settings = Arc::new(settings);
-        async_state(settings.clone(), |_| Ok(())).await?;
+        async_state(settings.clone(), |_| Ok(())).await.map_err(|_| startup_error("admission state is unreadable, unsafe or invalid; preserve the ledger and inspect its permissions and schema"))?;
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         command.process_group(0);
         struct RuntimeChild(std::process::Child);

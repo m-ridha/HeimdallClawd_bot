@@ -996,3 +996,65 @@ fn ingress_enablement_is_a_required_template_boolean() {
         assert!(template_enabled(invalid).is_err());
     }
 }
+
+#[test]
+fn startup_errors_identify_configuration_without_echoing_credentials() {
+    let fixtures = [
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "private-fixture",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must start with whsec_",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "whsec_private-fixture!",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must contain standard Base64 after whsec_",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "whsec_YQ==",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must decode to at least 16 bytes",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_GATEWAY_TOKEN",
+            "private-fixture\n",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_GATEWAY_TOKEN must be 32-1024 printable ASCII characters without spaces or newlines",
+        ),
+        (
+            "AGENTMAIL_AUTHORIZATION",
+            "private-fixture",
+            "AgentMail startup: AGENTMAIL_AUTHORIZATION must start with Bearer followed by a space and contain at most 1024 printable ASCII characters",
+        ),
+        (
+            "ZEROCLAW_gateway__paired_tokens",
+            "private-fixture",
+            "AgentMail startup: ZEROCLAW_gateway__paired_tokens must be a JSON array of at most 64 strings, each at most 1024 bytes",
+        ),
+    ];
+    for (name, value, expected) in fixtures {
+        let lookup = |key: &str| {
+            if key == name {
+                return Ok(value.to_string());
+            }
+            match key {
+                "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET" => {
+                    Ok(format!("whsec_{}", STANDARD.encode([0_u8; 32])))
+                }
+                "HEIMDALL_AGENTMAIL_GATEWAY_TOKEN" => Ok("a".repeat(64)),
+                "TELEGRAM_OWNER_ID" => Ok("1001".into()),
+                "TELEGRAM_BOT_TOKEN" => Ok("123456:TEST_token_abcdefghijklmnop".into()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        let error = Settings::from_environment(lookup).err().unwrap();
+        assert_eq!(error.to_string(), expected);
+        assert!(!format!("{error:?}").contains("private-fixture"));
+    }
+    let error = Settings::from_environment(|_| Err(std::env::VarError::NotPresent))
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.to_string(),
+        "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET is required and must be Unicode"
+    );
+}
