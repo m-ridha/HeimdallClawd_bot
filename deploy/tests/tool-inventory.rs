@@ -32,7 +32,6 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
         .arg("--render-config")
         .env_clear()
         .env("TELEGRAM_OWNER_ID", "1001")
-        .env("HEIMDALL_MODEL", "gpt-6.1-sol")
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -202,7 +201,6 @@ fn managed_github_guide_is_visible_with_production_prompt_budget() {
         .arg("--render-config")
         .env_clear()
         .env("TELEGRAM_OWNER_ID", "1001")
-        .env("HEIMDALL_MODEL", "gpt-6.1-sol")
         .output()
         .unwrap();
     assert!(output.status.success());

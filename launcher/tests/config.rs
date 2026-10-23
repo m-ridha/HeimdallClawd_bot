@@ -594,3 +594,11 @@ fn launcher_email_rules_never_enter_upstream_runtime_configuration() {
     assert!(config.get("heimdall").is_none());
     assert!(!rendered.contains("notifications@github.com"));
 }
+
+#[test]
+fn subscription_model_selection_comes_from_the_template() {
+    assert_eq!(
+        heimdall_launcher::config::configured_model().unwrap(),
+        "gpt-6.1-sol"
+    );
+}

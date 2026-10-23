@@ -32,7 +32,7 @@ sequenceDiagram
     Note over S: Verify live request, review and notify through SOP steps
 ```
 
-Non-secret rules live in `[[heimdall.agentmail.filters]]` in the embedded template; the launcher removes that section from rendered ZeroClaw configuration. Railway holds credentials, not filter definitions. The `/sop/webhook/` prefix is a provider-independent convention within the native `/sop/*` route, not a new upstream endpoint. Email authentication and parsing remain provider-specific.
+Ingress enablement (`heimdall.agentmail.enabled`) and non-secret rules live in `[[heimdall.agentmail.filters]]` in the embedded template; the launcher removes that section from rendered ZeroClaw configuration. Railway holds credentials, not filter definitions. The `/sop/webhook/` prefix is a provider-independent convention within the native `/sop/*` route, not a new upstream endpoint. Email authentication and parsing remain provider-specific.
 
 The adapter sends matched rule names and bounded inbox/message identifiers, not a chat prompt, subject or email body. Distinct assigned SOP names are deduplicated per event. The installed SOP's explicit agent ownership determines execution; Telegram's current model selection does not configure this driver.
 

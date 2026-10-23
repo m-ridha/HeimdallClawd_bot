@@ -109,10 +109,8 @@ pub struct Settings {
 }
 impl Settings {
     pub fn from_env() -> io::Result<Option<Self>> {
-        match std::env::var("HEIMDALL_AGENTMAIL_ENABLED").as_deref() {
-            Err(std::env::VarError::NotPresent) | Ok("0") => return Ok(None),
-            Ok("1") => {}
-            _ => return Err(failure()),
+        if !template_enabled(include_str!("../../deploy/bot/config.template.toml"))? {
+            return Ok(None);
         }
         let secret = std::env::var("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET").map_err(|_| failure())?;
         let secret = STANDARD
@@ -193,6 +191,16 @@ fn paired_tokens(existing: Option<&str>, token: &str) -> io::Result<String> {
         tokens.push(digest);
     }
     serde_json::to_string(&tokens).map_err(|_| failure())
+}
+
+fn template_enabled(template: &str) -> io::Result<bool> {
+    let config: toml::Value = toml::from_str(template).map_err(|_| failure())?;
+    config
+        .get("heimdall")
+        .and_then(|v| v.get("agentmail"))
+        .and_then(|v| v.get("enabled"))
+        .and_then(toml::Value::as_bool)
+        .ok_or_else(failure)
 }
 
 // The template owns non-secret rules; all rule validation is shared with fixtures.
@@ -934,7 +942,7 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
 
 /// Narrow management tool: durable enable/disable state, never arbitrary paths.
 pub fn serve_mcp() -> io::Result<()> {
-    let settings = Settings::from_env()?;
+    let settings = Settings::from_env();
     let mut input = io::stdin().lock();
     loop {
         let mut line = Vec::new();
@@ -978,15 +986,15 @@ pub fn serve_mcp() -> io::Result<()> {
                     )?;
                     continue;
                 }
-                let output = if let Some(settings) = &settings {
-                    manage(settings, name, args)
-                } else {
-                    Ok(json!({"configured":false,"hint":"Operator must configure AgentMail ingress in Railway first"}).to_string())
+                let output = match &settings {
+                    Ok(Some(settings)) => manage(settings, name, args),
+                    Ok(None) => Ok(json!({"configured":false,"hint":"Email ingress is disabled in the template"}).to_string()),
+                    Err(_) => Err(io::Error::other("Email ingress configuration is invalid or credentials are missing")),
                 };
                 match output {
                     Ok(text) => json!({"content":[{"type":"text","text":text}]}),
                     Err(_) => {
-                        json!({"isError":true,"content":[{"type":"text","text":"Invalid filter arguments or unavailable admission state"}]})
+                        json!({"isError":true,"content":[{"type":"text","text":"Invalid email configuration, missing credentials, or unavailable admission state"}]})
                     }
                 }
             }

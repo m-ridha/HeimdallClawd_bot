@@ -1,5 +1,5 @@
 use heimdall_launcher::config::{
-    EXECUTOR_ORIGIN, github_authorization, parse_allowed_ids, render_config, secret_overrides,
+    configured_model, github_authorization, parse_allowed_ids, render_config, secret_overrides,
 };
 use std::{
     fs,
@@ -161,7 +161,7 @@ fn main() -> io::Result<()> {
         std::env::var("TELEGRAM_OWNER_ID").map_err(|_| fail("TELEGRAM_OWNER_ID is required"))?;
     let allowed = std::env::var("TELEGRAM_ALLOWED_USER_IDS").ok();
     let ids = parse_allowed_ids(&owner, allowed.as_deref()).map_err(fail)?;
-    let model = std::env::var("HEIMDALL_MODEL").unwrap_or_else(|_| "gpt-6.1-sol".into());
+    let model = configured_model().map_err(fail)?;
     let config = render_config(&ids, &model).map_err(fail)?;
     if std::env::args().nth(1).as_deref() == Some("--render-config") {
         print!("{config}");
@@ -180,13 +180,6 @@ fn main() -> io::Result<()> {
         )),
         Err(std::env::VarError::NotPresent) => {}
         Err(std::env::VarError::NotUnicode(_)) => return Err(fail("Invalid GITHUB_TOKEN")),
-    }
-    if let Ok(url) = std::env::var("HEIMDALL_EXECUTOR_URL")
-        && url != EXECUTOR_ORIGIN
-    {
-        return Err(fail(
-            "HEIMDALL_EXECUTOR_URL must use the configured private executor",
-        ));
     }
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "3888".into())

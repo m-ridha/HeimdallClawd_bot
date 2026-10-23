@@ -983,3 +983,16 @@ fn template_rules_are_the_default_and_use_strict_shared_validation() {
         assert!(template_filters(invalid).is_err());
     }
 }
+
+#[test]
+fn ingress_enablement_is_a_required_template_boolean() {
+    assert!(template_enabled(include_str!("../../../deploy/bot/config.template.toml")).unwrap());
+    assert!(!template_enabled("[heimdall.agentmail]\nenabled = false").unwrap());
+    for invalid in [
+        "",
+        "[heimdall.agentmail]\nenabled = '1'",
+        "[heimdall.agentmail]\nenabled = 1",
+    ] {
+        assert!(template_enabled(invalid).is_err());
+    }
+}

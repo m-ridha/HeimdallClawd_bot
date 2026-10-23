@@ -1,16 +1,15 @@
 # AgentMail email events
 
-The optional Rust adapter runs inside the existing agent service. It uses ZeroClaw's authenticated `/sop/webhook/<sop-name>`; no extra Railway service or additional channel feature is required. The launcher owns public `PORT` (normally 3888), binds ZeroClaw at `127.0.0.1:3887`, and proxies dashboard, pairing, WebSocket and ACP traffic. Pairing remains required. The gateway admin authentication patch treats forwarded reload and SOP administration as remote requests: native authentication validates the current paired bearer and requires remote administration to be enabled, including after token revocation or policy changes. The proxy forwards these dashboard routes and `/pair/code`, which reports status without revealing a code. Shutdown and pairing-code secret routes stay console-only. Without the opt-in flag, the original direct gateway starts.
+The optional Rust adapter runs inside the existing agent service. It uses ZeroClaw's authenticated `/sop/webhook/<sop-name>`; no extra Railway service or additional channel feature is required. The launcher owns public `PORT` (normally 3888), binds ZeroClaw at `127.0.0.1:3887`, and proxies dashboard, pairing, WebSocket and ACP traffic. Pairing remains required. The gateway admin authentication patch treats forwarded reload and SOP administration as remote requests: native authentication validates the current paired bearer and requires remote administration to be enabled, including after token revocation or policy changes. The proxy forwards these dashboard routes and `/pair/code`, which reports status without revealing a code. Shutdown and pairing-code secret routes stay console-only. With `[heimdall.agentmail].enabled = false` in the template, the original direct gateway starts. The checked-in deployment enables the adapter.
 
 For the distinction between the gateway endpoint and webhook channel, timeout rationale and public reachability, see [webhook architecture](webhook-architecture.md).
 
 ## Setup
 
-Set these variables in the **agent Railway service**, never GitHub or Git:
+Enable the adapter with `[heimdall.agentmail].enabled = true` in `deploy/bot/config.template.toml`. Set these credentials in the **agent Railway service**, never GitHub or Git:
 
 | Variable | Value |
 | --- | --- |
-| `HEIMDALL_AGENTMAIL_ENABLED` | `1` to run the adapter; absent or `0` starts the direct gateway |
 | `HEIMDALL_AGENTMAIL_WEBHOOK_SECRET` | AgentMail's webhook-specific `whsec_...` signing secret, distinct from the API key |
 | `HEIMDALL_AGENTMAIL_GATEWAY_TOKEN` | A newly generated random bearer of at least 32 characters; keep private |
 | `AGENTMAIL_AUTHORIZATION` | Existing full `Bearer ...` API credential; used for tools and retrieval of omitted bodies |
@@ -18,7 +17,7 @@ Set these variables in the **agent Railway service**, never GitHub or Git:
 1. Deploy a release containing this feature through the normal release workflow.
 2. Use the existing agent HTTPS domain, targeting container port 3888. Generated Railway domains stay platform-managed outside IaC; see [public networking ownership](../.railway/README.md). The authenticated dashboard/gateway share that domain; retain pairing. Keep the executor private.
 3. In AgentMail, create an inbox-scoped webhook for `message.received` with URL `https://YOUR_AGENT_DOMAIN/agentmail/events`. Copy its signing secret directly into Railway, never into Telegram or logs. See [webhook registration](https://docs.agentmail.to/webhooks-overview) and [Svix verification](https://docs.agentmail.to/webhook-verification).
-4. Configure the variables and deploy the variable change. Internal port 3887 is reserved.
+4. Configure the credentials and release the updated template/launcher. Internal port 3887 is reserved.
 5. Install the intended `github-pr-review` SOP first (through Heimdall or the dashboard), with explicit execution ownership (for example `agent = "primary"`) and the exact Webhook trigger below. A Manual trigger alone does not match. Its steps must treat payload identifiers as untrusted, retrieve the referenced email if needed, verify the live GitHub request/head and prior reviews, perform the review and notify the operator on success or failure. Do not recursively invoke the same SOP. Keep approval gates. Do not share its trigger path with another SOP; unexpected dispatch results fail closed in the adapter, but cannot undo work already started.
 6. Tell Heimdall “List the email filters,” then “Enable github-review-request.” The management tool arguments are `{"name":"github-review-request","enabled":true}`; disabling uses `false`. All rules initially default to disabled.
 7. Verify a real review-request notification produces a Telegram response and unrelated mail does not start a task. These live checks require operator execution.

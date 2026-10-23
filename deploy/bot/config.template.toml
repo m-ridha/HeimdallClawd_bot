@@ -469,7 +469,11 @@ enabled = false
 [webauthn]
 enabled = false
 
-# Launcher-owned email admission rules; removed before rendering ZeroClaw config.
+# Launcher-owned settings; removed before rendering ZeroClaw config.
+[heimdall.agentmail]
+enabled = true
+
+# Email admission rules.
 # No credentials here. Enabled flags remain on the persistent agent volume.
 [[heimdall.agentmail.filters]]
 name = "github-review-request"
