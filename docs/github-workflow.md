@@ -22,7 +22,7 @@ Choose `HEIMDALL_CODESPACE_REPOS`:
 
 GitHub API operations cover any repository the token is authorized to access, regardless of this variable.
 
-The primary runtime explicitly disables compact context so the complete managed TOOLS.md fits the native 20,000-character per-file bootstrap budget. A pinned-runtime prompt contract checks that the complete guide survives assembly with the production-effective settings. This increases prompt size compared with compact mode; no host file reader is granted.
+The primary runtime explicitly disables compact context so the complete managed TOOLS.md fits the native 20,000-character per-file bootstrap budget. A pinned-runtime prompt contract checks that the complete guide survives assembly with the production-effective settings. This increases prompt size compared with compact mode; deferred tool discovery limits schema overhead while native file tools remain available.
 
 Managed TOOLS.md/IDENTITY.md instructions refresh at startup and explain native Git/gh, optional API editing, Codespaces and CI fallback. No external GitHub skill is required; CLI-oriented instructions can use the installed main-service toolkit.
 

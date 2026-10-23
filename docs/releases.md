@@ -37,6 +37,27 @@ binaries and sudo access. Portable macOS tests do not prove native Linux behavio
 
 For a local two-phase build, export the `runtime-binary` and `support-binaries` Buildx targets, combine their executables in ignored `prebuilt/`, then build `release-binaries`. Required contexts and fixtures are defined in [the bot Dockerfile](../deploy/bot/Dockerfile); do not replace validation with unverified compile artifacts.
 
+## Inspect a build run
+
+For CLI dispatch, use the [contributor command](../AGENTS.md#run-github-actions-from-the-command-line).
+After an authorized dispatch, use its returned URL. If no URL was returned, match
+branch, actor and dispatch time before selecting a run; do not blindly rerun.
+
+```sh
+gh run list --repo m-ridha/HeimdallClawd_bot --workflow build.yml \
+  --event workflow_dispatch --branch "$workflow_ref" --limit 5 \
+  --json databaseId,createdAt,headBranch,headSha,status,conclusion,url
+gh run view RUN_ID --repo m-ridha/HeimdallClawd_bot \
+  --json status,conclusion,url,jobs
+gh run view --job JOB_ID --repo m-ridha/HeimdallClawd_bot --log
+```
+
+Use the workflow branch selected at dispatch for `$workflow_ref` and replace
+RUN_ID/JOB_ID with verified IDs. Event headSha may identify the workflow-definition
+commit; check source checkout evidence for the separate source-ref input.
+Report source SHA, URL and actual conclusion. A run for an older commit does not
+validate unpushed local changes; queued or running is not passed.
+
 ## Faster builds
 
 Compilation and runtime performance are different. The two compile targets run on separate runners and export successful GHCR caches before downstream validation. The expensive runtime layer depends on pinned source, patches and compiler settings rather than launcher/config files. Changes to those inputs can require a cold compile; configuration-only changes can reuse the compiled runtime.
@@ -47,7 +68,7 @@ The build uses repository-scoped `build-cache` registry tags for compiled-runtim
 
 `native-test-compile` compiles contracts with `--no-run` before current executable/configuration inputs are copied. `runtime-build` receives those inputs and executes the matching tests; the workflow bypasses cache for that stage only. This preserves fresh execution while reusing expensive test compilation. Validation receives executables rather than release compiler layers and removes unused runner installations to limit disk pressure.
 
-BuildKit exports binaries without loading the compiler image into Docker. Dashboard assets use Node 26 in a build stage; Node is not in the agent runtime. The deployment workflow uses Node 24 only to install the pinned Railway CLI. Railway artifact Dockerfiles verify prebuilt checksums rather than running Cargo. Preserve the WASM feature and native integration checks when optimizing build time.
+BuildKit exports binaries without loading the compiler image into Docker. Dashboard assets and the main-image Node/npm toolkit use Node 26. The daemon itself remains Rust. The deployment workflow uses Node 24 only to install the pinned Railway CLI. The sole production image recipe, Dockerfile.artifact, verifies prebuilt checksums rather than compiling the runtime or launcher. Preserve the WASM feature and native integration checks when optimizing build time.
 
 ## Project-token authentication
 
@@ -61,4 +82,16 @@ The workflow masks project/environment/service IDs before Railway commands; the 
 
 ## Release input hygiene
 
-`tools/release-files.txt` is the reviewed package manifest. Add required sources explicitly: unlisted local files are omitted, and missing files or symlinked source paths stop packaging. `tools/package-release.py` generates executable checksums and patch provenance inside each upload context; generated copies and executables are not committed. Docker contexts separately exclude credentials. Neither exclusion replaces secret scanning of the reviewed inputs.
+`tools/release-files.txt` lists runtime-only upload inputs: the image recipe,
+entrypoint, evaluation fixture, licenses/notice and runtime pin. Prebuilt binaries,
+checksums and provenance are added by `tools/package-release.py`. The launcher
+embeds its configuration/instructions, so their source files, Rust sources/tests
+and upstream patches are not uploaded to Railway. They remain in the tagged
+repository; patch hashes remain in provenance. The build Dockerfile contains only
+compilation/validation/export targets; Dockerfile.artifact is the sole image recipe.
+
+Unlisted local files are omitted. Missing files and symlinks stop packaging,
+including provenance-only patch inputs. Docker context exclusions independently
+protect credentials; neither exclusion replaces input secret scanning. Compilers,
+Clippy/rustfmt, standard libraries and rustdoc are retained, while installed Rust
+HTML/man reference pages are omitted from the image.

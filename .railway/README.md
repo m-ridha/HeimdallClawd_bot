@@ -12,10 +12,9 @@ Use Python 3.10+ and Railway CLI 5.68.0:
 python3 -m venv /tmp/heimdall-iac
 /tmp/heimdall-iac/bin/pip install -r .railway/requirements.txt
 PATH="/tmp/heimdall-iac/bin:$PATH" railway config plan
-PATH="/tmp/heimdall-iac/bin:$PATH" railway config apply --yes
 ```
 
-Link to the intended project and production environment first. Review each plan. No destructive flag is part of our workflow: service deletion, volume detachment/shrinkage or other destructive changes must stop for explicit review. Runtime variable values and local plan/state files must never be committed.
+For an interactive account CLI, link only the intended checkout/project/environment first; verify the target before planning. Do not relink the operator’s other checkout. Review each plan. The project-token release workflow does not use railway link. No destructive flag is part of our workflow: service deletion, volume detachment/shrinkage or other destructive changes must stop for explicit review. Runtime variable values and local plan/state files must never be committed.
 
 Publishing a stable GitHub Release installs the pinned SDK, plans/applies this infrastructure and then deploys the checksum-verified agent. Pushing main alone does not deploy. The runtime remains Rust; Python is only the infrastructure authoring tool.
 

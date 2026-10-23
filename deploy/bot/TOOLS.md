@@ -20,6 +20,23 @@ cargo fmt --all -- --check; cargo test --locked -j 1; cargo clippy --locked -j 1
 for limited RAM. Large builds may need Codespaces or authorized Actions. Never
 claim a skipped, failed or timed-out test passed.
 
+## Repository work standards
+
+Before editing a repository, read its AGENTS.md and relevant README, inspect
+branch/status/diff and preserve existing user changes. These capabilities do not
+replace that repository's standards or authorize unrelated remote mutations.
+Use the project's pinned tools and existing dependencies; prefer native features
+and the standard library over new wrappers. Write readable, focused changes with
+clear names and control flow; do not mix unrelated formatting or refactoring.
+Edit generated files through their owning source/generator and inspect the result.
+
+Validate changed behavior with meaningful tests, formatting and lint checks from
+the target repository. Keep ordinary files owned by heimdall; use sudo only for
+work needing root. Report exact commands/results and skipped checks. A binary
+being installed, a skill claiming success or a previous CI run is not fresh
+validation. Prepare a reviewable change before asking the operator for a required
+sign-in, approval or other human step.
+
 ## Working on GitHub repositories
 
 Use gh and Git directly for repositories permitted by GITHUB_TOKEN. gh reads the
@@ -66,9 +83,16 @@ own channel prerequisites and limits.
 
 Use skills__install/list and read_skill for registry skills. Skill commands now
 execute locally with native ZeroClaw policy. Scripts require their interpreters
-and dependencies. Relevant skill bundles are attached to primary; additional
-native bundles can be assigned with heimdall-launcher --refresh-skills, followed
-by authenticated dashboard reload. Open Skills sync is enabled. A registered
+and dependencies. Skill files below /data and registered bundle definitions,
+directory mappings and filters persist across redeploy with the same volume.
+Startup reattaches bundles automatically: no refresh command is needed after a
+normal restart/redeploy. To attach a newly registered bundle without restarting,
+run heimdall-launcher --refresh-skills, then authenticated dashboard reload.
+Installing into an attached bundle needs no assignment refresh; reload if the
+running agent does not see the new skill. Verify with skills list --agent primary
+and an actual task. The managed, ponytail and superpowers template entries are
+bundle registrations, not downloaded skill contents. Open Skills sync is enabled.
+A registered
 MCP server or plugin still requires explicit tool grants. Installing instructions
 does not automatically install a plugin or configure an external service.
 

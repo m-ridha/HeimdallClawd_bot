@@ -10,7 +10,7 @@ service runs native tools with internet and passwordless sudo root access.
 | Scheduling | Agent cron tools plus native shell schedule; Telegram delivery requires explicit recipient and a known timezone. |
 | Delegation | Native spawn_subagent/delegate granted; reachable targets and recursion limits remain upstream policy. Work shares credentials/resources. |
 | Parallel tools, pipelines, SOPs | Enabled; pipeline remains explicitly scoped and capped at twelve steps. SOP definitions/approval/state persist. |
-| Skills and hooks | Native skill scripts, registry install/list, Open Skills sync and lifecycle hooks. Skill instructions are not automatically installed software. |
+| Skills and hooks | Native skill scripts, registry install/list, Open Skills sync and lifecycle hooks. Files and registered bundle definitions persist on the same /data volume; startup restores assignments. Refresh plus reload is for new bundles without restarting. See [skill persistence](operations.md#operator-installed-skill-bundles). |
 | WASM plugins | Cranelift host enabled with discovery and bounded plugin calls. No plugin bundled; packages need exact tool grants and their own configuration. |
 | Web and browser | Tavily search, fetch, HTTP, Lynx and native local Chromium automation. ChromeDriver is loopback-only; no remote browser account required. Public URL restrictions remain on web tools; shell networking is broader. |
 | Media | image_info; Deepgram voice with existing key; media preprocessing. No desktop screenshot environment; browser screenshots use browser actions. Upstream video summarization is a placeholder. |
@@ -32,7 +32,7 @@ require actual endpoints, clients, credentials or devices. They are not activate
 by an all-tools selector. No automatic paid-provider fallback is configured.
 Browser delegation requires a separate browser-agent CLI; local browser automation
 is available instead. OIDC and hardware cannot be made useful by enabling flags
-without prerequisites. See the [feature/patch audit](native-feature-audit.md).
+without prerequisites. See the [patch rationale](../deploy/bot/NOTICE.md).
 
 ## Additional MCP servers and plugins
 
@@ -63,6 +63,6 @@ workload fits 1 GB RAM, 1 GB ephemeral storage or 500 MB persistent storage.
 - [GitHub workflow](github-workflow.md)
 - [Trusted users](operations.md#trusted-telegram-users)
 - [Recovery](operations.md#authentication-and-storage-recovery)
-- [Native child policy](operations.md#native-child-process-isolation)
+- [Narrow subprocess profiles](operations.md#narrow-subprocess-profiles)
 - [Runtime upgrade](operations.md#upgrading-to-zeroclaw-v086)
 - [Context budgets](operations.md#context-budgets-and-long-tasks)

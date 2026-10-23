@@ -1,19 +1,33 @@
 # Notice
 
-The image builds ZeroClaw v0.8.6, revision c473221313341a853e04122f93bb9bd26b5e6c47, from <https://github.com/zeroclaw-labs/zeroclaw>.
+The build uses ZeroClaw v0.8.6, revision c473221313341a853e04122f93bb9bd26b5e6c47,
+from <https://github.com/zeroclaw-labs/zeroclaw>, distributed under MIT OR
+Apache-2.0. Both upstream license files accompany the deployment recipe and
+release package. The immutable archive checksum and build features live in
+runtime.lock.json; Dockerfile verifies the archive and applies patches with zero
+fuzz before compilation.
 
-ZeroClaw is distributed under MIT OR Apache-2.0. Both upstream license files accompany this deployment recipe. The local patch rejects Telegram updates outside private chats before callback processing or media downloads. The runtime otherwise uses upstream subscription authentication, provider integration, channel routing, SQLite sessions, and MCP client.
+## Native behavior and retained patches
 
-The HTTP origin patch binds Heimdall named GitHub and AgentMail secrets to their exact HTTPS origins before credential resolution; other public HTTP requests remain available.
+Subscription authentication, provider integration, channel routing, SQLite
+sessions, typed transcription, WIT interface paths, MCP, local skill execution
+and browser automation use upstream features. The single-service model does not
+need the former remote-skills or native-child patches. General commands have
+explicitly approved root access; narrow integration profiles do not confine them.
 
-The gateway admin authentication patch treats requests marked by a trusted proxy as remote for daemon reload and SOP administration, requiring the native paired bearer and remote-admin policy instead of granting loopback CLI authority. Genuine host CLI requests keep their existing behavior; pairing-code generation still requires the host admin secret.
+| Patch | Contract not replaced by native configuration |
+| --- | --- |
+| private-telegram.patch | Reject non-private Telegram updates before callback/media processing, in addition to account allowlisting. |
+| http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |
+| http-diagnostics.patch | Provide bounded, sanitized actionable HTTP status/category diagnostics without enabling payload logging. |
+| gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
+| sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
+| responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
 
-ZeroClaw v0.8.6 supplies canonical typed transcription initialization and crate-local WIT interface paths upstream; no local patch is needed for either. The retained patches enforce private Telegram ingress, exact HTTP secret origins, sanitized HTTP diagnostics, paired proxy administration and actionable SOP workshop guidance.
+AgentMail uses native /sop/* admission and the background SOP driver. Synchronous
+/webhook keeps its ordinary upstream timeout; no timeout patch is needed.
 
-The SOP workshop guidance patch corrects action-specific parameter descriptions and reports the required Markdown step syntax without echoing the rejected procedure. Proposal validation and explicit application remain upstream behavior.
-
-The Responses tool-history patch reconciles provider replay with canonical retained calls, supplies explicit unknown-outcome error results for missing outputs, and avoids retrying the same provider-rejected tool-history shape. The shared builder covers OpenAI Responses and Codex. It does not execute tools or rewrite persisted sessions.
-
-AgentMail dispatch uses upstream `/sop/*` admission and its background SOP driver. No local gateway timeout patch is needed; synchronous `/webhook` retains the upstream ordinary request timeout.
-
-Native child and remote skill patches are removed for the single-service execution model. Browser and skill commands now use upstream implementations.
+Remove a patch only after a tested upstream replacement covers its contract.
+Configuration, retries or extra logging do not substitute for missing behavior.
+Artifact provenance retains patch hashes; source and tests stay in the tagged
+repository rather than the runtime-only Railway upload.
