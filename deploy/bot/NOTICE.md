@@ -14,4 +14,4 @@ The SOP workshop guidance patch corrects action-specific parameter descriptions 
 
 The Responses tool-history patch reconciles provider replay with canonical retained calls, supplies explicit unknown-outcome error results for missing outputs, and avoids retrying the same provider-rejected tool-history shape. The shared builder covers OpenAI Responses and Codex. It does not execute tools or rewrite persisted sessions.
 
-The webhook timeout patch places synchronous `/webhook` execution under the existing long-running agent-route timeout rather than the ordinary control-plane timeout. It preserves authentication, body limits, idempotency and ordinary-route deadlines.
+AgentMail dispatch uses upstream `/sop/*` admission and its background SOP driver. No local gateway timeout patch is needed; synchronous `/webhook` retains the upstream ordinary request timeout.

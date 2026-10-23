@@ -25,6 +25,21 @@ pub fn parse_allowed_ids(owner: &str, allowed: Option<&str>) -> Result<Vec<Strin
     }
     Ok(ids)
 }
+/// Read deployment-independent model selection from the authoritative template.
+pub fn configured_model() -> Result<String, ConfigError> {
+    let config: toml::Value = toml::from_str(include_str!("../../deploy/bot/config.template.toml"))
+        .map_err(|_| "Invalid embedded runtime configuration")?;
+    config
+        .get("providers")
+        .and_then(|v| v.get("models"))
+        .and_then(|v| v.get("openai"))
+        .and_then(|v| v.get("codex"))
+        .and_then(|v| v.get("model"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned)
+        .ok_or("Missing configured Codex model")
+}
+
 pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError> {
     if ids.is_empty() || ids.iter().any(|id| !valid_id(id)) {
         return Err("Empty or invalid Telegram allowlist");
@@ -35,11 +50,16 @@ pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError>
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-._/".contains(&b))
     {
-        return Err("Invalid HEIMDALL_MODEL");
+        return Err("Invalid configured Codex model");
     }
     let mut config: toml::Value =
         toml::from_str(include_str!("../../deploy/bot/config.template.toml"))
             .map_err(|_| "Invalid embedded runtime configuration")?;
+    // Launcher-owned settings are not part of the upstream ZeroClaw schema.
+    config
+        .as_table_mut()
+        .ok_or("Invalid embedded runtime configuration")?
+        .remove("heimdall");
     // These paths are fixed by the embedded template and pinned by configuration tests.
     config["peer_groups"]["telegram_home"]["external_peers"] =
         toml::Value::Array(ids.iter().cloned().map(toml::Value::String).collect());

@@ -470,7 +470,7 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
 async fn matching_event_dispatches_once_and_retains_only_metadata() {
     event_dispatch_case(
         StatusCode::OK,
-        br#"{"response":"Fixture review notification"}"#,
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"started","sop":"github-pr-review","run_id":"fixture-run"}]}"#,
         "accepted",
         "complete",
     )
@@ -489,6 +489,20 @@ async fn dispatch_failures_retain_safe_diagnostics_and_suppress_replay() {
     event_dispatch_case(
         StatusCode::UNAUTHORIZED,
         b"PRIVATE_ERROR",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    for body in [
+        br#"{"response":"old synchronous result"}"#.as_slice(),
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"skipped","sop":"github-pr-review","reason":"busy"}]}"#,
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"started","sop":"wrong-sop","run_id":"fixture-run"}]}"#,
+    ] {
+        event_dispatch_case(StatusCode::OK, body, "uncertain", "gateway").await;
+    }
+    event_dispatch_case(
+        StatusCode::NOT_FOUND,
+        b"no matching SOP",
         "uncertain",
         "gateway",
     )
@@ -527,6 +541,13 @@ async fn event_dispatch_case(
                 service_fn(move |req: Request<Incoming>| {
                     let tx = tx.clone();
                     async move {
+                        assert_eq!(req.method(), "POST");
+                        assert_eq!(
+                            req.headers()["authorization"],
+                            "Bearer fixture_not_a_live_token"
+                        );
+                        assert_eq!(req.headers()["x-idempotency-key"], "evt_new");
+                        assert!(req.headers().get("x-session-id").is_none());
                         let uri = req.uri().to_string();
                         let body = req.into_body().collect().await.unwrap().to_bytes();
                         let value: Value = serde_json::from_slice(&body).unwrap();
@@ -575,18 +596,11 @@ async fn event_dispatch_case(
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(uri, "/webhook?agent=primary");
-    assert!(
-        prompt["message"]
-            .as_str()
-            .unwrap()
-            .contains("github-review-request")
-    );
+    assert_eq!(uri, "/sop/webhook/github-pr-review");
+    assert_eq!(prompt["rules"], json!(["github-review-request"]));
+    assert!(prompt.get("message").is_none());
+    assert!(prompt.get("subject").is_none());
     assert!(!prompt.to_string().contains("PRIVATE_BODY"));
-    let instruction = prompt["message"].as_str().unwrap();
-    assert!(instruction.contains("github-pr-review"));
-    assert!(instruction.contains("sop_execute"));
-    assert!(instruction.contains("sop_advance"));
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let finished = state(
@@ -608,6 +622,16 @@ async fn event_dispatch_case(
             s["events"]["evt_new"]["diagnostic"]["stage"],
             expected_stage
         );
+        if expected_status == "accepted" {
+            assert_eq!(
+                s["events"]["evt_new"]["runs"],
+                json!([{"sop":"github-pr-review","run_id":"fixture-run","status":"started"}])
+            );
+            assert_eq!(
+                s["events"]["evt_new"]["diagnostic"]["execution_completed"],
+                false
+            );
+        }
         if !status.is_success() {
             assert_eq!(
                 s["events"]["evt_new"]["diagnostic"]["http_status"],
@@ -746,7 +770,7 @@ fn optional_sop_is_strict_operator_configuration() {
 
 #[test]
 fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
-    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(630));
+    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(35));
     assert_eq!(
         DispatchError::GatewayHttp(408).diagnostic(),
         json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false})
@@ -885,11 +909,17 @@ async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads(
         (BodyFixture::TooLarge, "response_too_large"),
     ] {
         for telegram in [false, true] {
-            let (client, response, release, server) = response_body_fixture(fixture).await;
+            let (_client, response, release, server) = response_body_fixture(fixture).await;
             let result = if telegram {
                 validate_telegram_response(response).await
             } else {
-                deliver_response(&client, response, None).await
+                read_sop_dispatch(
+                    response,
+                    "github-pr-review",
+                    "/sop/webhook/github-pr-review",
+                )
+                .await
+                .map(|_| ())
             };
             let diagnostic = result.unwrap_err().diagnostic();
             assert_eq!(
@@ -909,4 +939,295 @@ async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads(
                 .unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn notification_only_rule_never_contacts_gateway() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = Arc::new(Settings {
+        secret: test_signing_key().to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters: parse_filters(
+            r#"[{"name":"notice","sender":"sender@example.com","contains":"text"}]"#,
+        )
+        .unwrap(),
+        state: dir.path().join("state"),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        // An attempted request would fail, so this tests the absence of dispatch.
+        gateway: "http://127.0.0.1:0".into(),
+        telegram: None,
+        gateway_secret: String::new(),
+    });
+    dispatch(&settings, "fixture", &json!({}), &[])
+        .await
+        .unwrap();
+    assert!(!settings.state.exists());
+}
+
+#[test]
+fn template_rules_are_the_default_and_use_strict_shared_validation() {
+    let filters =
+        template_filters(include_str!("../../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(filters.len(), 1);
+    assert_eq!(filters[0].name, "github-review-request");
+    assert_eq!(filters[0].sender, "notifications@github.com");
+    assert_eq!(filters[0].contains, "requested your review on:");
+    assert_eq!(filters[0].sop.as_deref(), Some("github-pr-review"));
+    for invalid in [
+        "",
+        "[heimdall.agentmail]\nfilters = 'wrong-type'",
+        "[[heimdall.agentmail.filters]]\nname = 'bad'\nsender = 'sender@example.com'\ncontains = 'text'\nsop = '../escape'",
+        "[[heimdall.agentmail.filters]]\nname = 'bad'\nsender = 'sender@example.com'\ncontains = 'text'\nunknown = true",
+    ] {
+        assert!(template_filters(invalid).is_err());
+    }
+}
+
+#[test]
+fn ingress_enablement_is_a_required_template_boolean() {
+    assert!(template_enabled(include_str!("../../../deploy/bot/config.template.toml")).unwrap());
+    assert!(!template_enabled("[heimdall.agentmail]\nenabled = false").unwrap());
+    for invalid in [
+        "",
+        "[heimdall.agentmail]\nenabled = '1'",
+        "[heimdall.agentmail]\nenabled = 1",
+    ] {
+        assert!(template_enabled(invalid).is_err());
+    }
+}
+
+#[test]
+fn startup_errors_identify_configuration_without_echoing_credentials() {
+    let fixtures = [
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "private-fixture",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must start with whsec_",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "whsec_private-fixture!",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must contain standard Base64 after whsec_",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET",
+            "whsec_YQ==",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET must decode to at least 16 bytes",
+        ),
+        (
+            "HEIMDALL_AGENTMAIL_GATEWAY_TOKEN",
+            "private-fixture\n",
+            "AgentMail startup: HEIMDALL_AGENTMAIL_GATEWAY_TOKEN must be 32-1024 printable ASCII characters without spaces or newlines",
+        ),
+        (
+            "AGENTMAIL_AUTHORIZATION",
+            "private-fixture",
+            "AgentMail startup: AGENTMAIL_AUTHORIZATION must start with Bearer followed by a space and contain at most 1024 printable ASCII characters",
+        ),
+        (
+            "ZEROCLAW_gateway__paired_tokens",
+            "private-fixture",
+            "AgentMail startup: ZEROCLAW_gateway__paired_tokens must be a JSON array of at most 64 strings, each at most 1024 bytes",
+        ),
+    ];
+    for (name, value, expected) in fixtures {
+        let lookup = |key: &str| {
+            if key == name {
+                return Ok(value.to_string());
+            }
+            match key {
+                "HEIMDALL_AGENTMAIL_WEBHOOK_SECRET" => {
+                    Ok(format!("whsec_{}", STANDARD.encode([0_u8; 32])))
+                }
+                "HEIMDALL_AGENTMAIL_GATEWAY_TOKEN" => Ok("a".repeat(64)),
+                "TELEGRAM_OWNER_ID" => Ok("1001".into()),
+                "TELEGRAM_BOT_TOKEN" => Ok("123456:TEST_token_abcdefghijklmnop".into()),
+                _ => Err(std::env::VarError::NotPresent),
+            }
+        };
+        let error = Settings::from_environment(lookup).err().unwrap();
+        assert_eq!(error.to_string(), expected);
+        assert!(!format!("{error:?}").contains("private-fixture"));
+    }
+    let error = Settings::from_environment(|_| Err(std::env::VarError::NotPresent))
+        .err()
+        .unwrap();
+    assert_eq!(
+        error.to_string(),
+        "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET is required and must be Unicode"
+    );
+}
+
+#[tokio::test]
+async fn matching_rules_share_one_sop_admission_and_suppress_replay() {
+    multi_sop_event_case(false).await;
+}
+
+#[tokio::test]
+async fn later_sop_failure_retains_earlier_admission_and_suppresses_replay() {
+    multi_sop_event_case(true).await;
+}
+
+async fn multi_sop_event_case(fail_second: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |s| {
+        s["enabled"] = json!({"first":true,"second":true});
+        Ok(())
+    })
+    .unwrap();
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gateway = format!("http://{}", backend.local_addr().unwrap());
+    let (requests_tx, mut requests_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = tokio::select! {
+                _ = &mut stop_rx => break,
+                accepted = backend.accept() => accepted.unwrap(),
+            };
+            let requests_tx = requests_tx.clone();
+            hyper::server::conn::http1::Builder::new().serve_connection(
+                TokioIo::new(socket),
+                service_fn(move |req: Request<Incoming>| {
+                    let requests_tx = requests_tx.clone();
+                    async move {
+                        let path = req.uri().path().to_string();
+                        let authorization = req.headers().get("authorization").cloned();
+                        let idempotency = req.headers().get("x-idempotency-key").cloned();
+                        let body = req.into_body().collect().await.unwrap().to_bytes();
+                        let payload: Value = serde_json::from_slice(&body).unwrap();
+                        requests_tx.send((path.clone(), authorization, idempotency, payload)).unwrap();
+                        let failed = fail_second && path == "/sop/webhook/z-second";
+                        let body = if failed {
+                            json!({"error":"PRIVATE_ERROR"})
+                        } else {
+                            json!({"status":"accepted","source":"webhook","path":path,"results":[{"status":"coalesced","sop":"a-first","run_id":"retained-run"}]})
+                        };
+                        Ok::<_, Infallible>(Response::builder()
+                            .status(if failed { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::OK })
+                            .header("connection", "close")
+                            .body(Full::new(Bytes::from(body.to_string()))).unwrap())
+                    }
+                }),
+            ).await.unwrap();
+        }
+    });
+    let key = test_signing_key();
+    // Reverse SOP order proves dispatch order is sorted, not rule order.
+    let filters = parse_filters(&json!([
+        {"name":"first","sender":"notifications@github.com","contains":"review","sop":if fail_second {"z-second"} else {"a-first"}},
+        {"name":"second","sender":"notifications@github.com","contains":"review","sop":"a-first"}
+    ]).to_string()).unwrap();
+    let (url, front) = ingress(Settings {
+        secret: key.to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters,
+        state: path.clone(),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        gateway,
+        telegram: None,
+        gateway_secret: String::new(),
+    })
+    .await;
+    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_multi","message":{"from":"notifications@github.com","text":"PRIVATE_BODY review"}})).unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(&key, &body, now()))
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if state(&path, |s| {
+                Ok(s["events"]["evt_multi"]["status"] != "reserved")
+            })
+            .unwrap()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    state(&path, |s| {
+        let event = &s["events"]["evt_multi"];
+        assert_eq!(event["status"], if fail_second {"uncertain"} else {"accepted"});
+        assert_eq!(event["runs"], json!([{"sop":"a-first","run_id":"retained-run","status":"coalesced"}]));
+        if fail_second {
+            assert_eq!(event["diagnostic"], json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":503,"gateway_completed":false}));
+        }
+        Ok(())
+    }).unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(&key, &body, now()))
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut paths = Vec::new();
+    while let Some((path, auth, idempotency, payload)) = requests_rx.recv().await {
+        paths.push(path);
+        assert_eq!(auth.unwrap(), "Bearer fixture_not_a_live_token");
+        assert_eq!(idempotency.unwrap(), "evt_multi");
+        assert_eq!(payload["rules"], json!(["first", "second"]));
+        assert!(!payload.to_string().contains("PRIVATE_BODY"));
+    }
+    assert_eq!(
+        paths,
+        if fail_second {
+            vec!["/sop/webhook/a-first", "/sop/webhook/z-second"]
+        } else {
+            vec!["/sop/webhook/a-first"]
+        }
+    );
+    let saved = fs::read_to_string(&path).unwrap();
+    for private in ["PRIVATE_BODY", "PRIVATE_ERROR", "fixture_not_a_live_token"] {
+        assert!(!saved.contains(private));
+    }
+    front.abort();
+}
+
+#[test]
+fn oversized_state_update_preserves_readable_ledger_and_reservations() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |data| {
+        data["events"]["fixture"] = json!({"time":1,"status":"reserved"});
+        Ok(())
+    })
+    .unwrap();
+    let before = fs::read(&path).unwrap();
+    let result = state(&path, |data| {
+        data["events"]["fixture"]["runs"] =
+            json!([{"sop":"fixture","run_id":"x".repeat(2_000_000)}]);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    state(&path, |data| {
+        assert_eq!(data["events"]["fixture"]["status"], "reserved");
+        assert!(data["events"]["fixture"].get("runs").is_none());
+        Ok(())
+    })
+    .unwrap();
 }
