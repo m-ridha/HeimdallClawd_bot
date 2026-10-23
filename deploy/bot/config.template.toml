@@ -468,3 +468,11 @@ enabled = false
 # Requires the actual HTTPS relying-party domain/origin before activation.
 [webauthn]
 enabled = false
+
+# Launcher-owned email admission rules; removed before rendering ZeroClaw config.
+# No credentials here. Enabled flags remain on the persistent agent volume.
+[[heimdall.agentmail.filters]]
+name = "github-review-request"
+sender = "notifications@github.com"
+contains = "requested your review on:"
+sop = "github-pr-review"

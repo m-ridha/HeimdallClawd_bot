@@ -40,6 +40,11 @@ pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError>
     let mut config: toml::Value =
         toml::from_str(include_str!("../../deploy/bot/config.template.toml"))
             .map_err(|_| "Invalid embedded runtime configuration")?;
+    // Launcher-owned settings are not part of the upstream ZeroClaw schema.
+    config
+        .as_table_mut()
+        .ok_or("Invalid embedded runtime configuration")?
+        .remove("heimdall");
     // These paths are fixed by the embedded template and pinned by configuration tests.
     config["peer_groups"]["telegram_home"]["external_peers"] =
         toml::Value::Array(ids.iter().cloned().map(toml::Value::String).collect());

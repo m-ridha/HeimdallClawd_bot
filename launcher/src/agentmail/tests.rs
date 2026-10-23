@@ -470,7 +470,7 @@ async fn proxy_preserves_requests_and_blocks_loopback_admin_escalation() {
 async fn matching_event_dispatches_once_and_retains_only_metadata() {
     event_dispatch_case(
         StatusCode::OK,
-        br#"{"response":"Fixture review notification"}"#,
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"started","sop":"github-pr-review","run_id":"fixture-run"}]}"#,
         "accepted",
         "complete",
     )
@@ -489,6 +489,20 @@ async fn dispatch_failures_retain_safe_diagnostics_and_suppress_replay() {
     event_dispatch_case(
         StatusCode::UNAUTHORIZED,
         b"PRIVATE_ERROR",
+        "uncertain",
+        "gateway",
+    )
+    .await;
+    for body in [
+        br#"{"response":"old synchronous result"}"#.as_slice(),
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"skipped","sop":"github-pr-review","reason":"busy"}]}"#,
+        br#"{"status":"accepted","source":"webhook","path":"/sop/webhook/github-pr-review","results":[{"status":"started","sop":"wrong-sop","run_id":"fixture-run"}]}"#,
+    ] {
+        event_dispatch_case(StatusCode::OK, body, "uncertain", "gateway").await;
+    }
+    event_dispatch_case(
+        StatusCode::NOT_FOUND,
+        b"no matching SOP",
         "uncertain",
         "gateway",
     )
@@ -527,6 +541,13 @@ async fn event_dispatch_case(
                 service_fn(move |req: Request<Incoming>| {
                     let tx = tx.clone();
                     async move {
+                        assert_eq!(req.method(), "POST");
+                        assert_eq!(
+                            req.headers()["authorization"],
+                            "Bearer fixture_not_a_live_token"
+                        );
+                        assert_eq!(req.headers()["x-idempotency-key"], "evt_new");
+                        assert!(req.headers().get("x-session-id").is_none());
                         let uri = req.uri().to_string();
                         let body = req.into_body().collect().await.unwrap().to_bytes();
                         let value: Value = serde_json::from_slice(&body).unwrap();
@@ -575,18 +596,11 @@ async fn event_dispatch_case(
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(uri, "/webhook?agent=primary");
-    assert!(
-        prompt["message"]
-            .as_str()
-            .unwrap()
-            .contains("github-review-request")
-    );
+    assert_eq!(uri, "/sop/webhook/github-pr-review");
+    assert_eq!(prompt["rules"], json!(["github-review-request"]));
+    assert!(prompt.get("message").is_none());
+    assert!(prompt.get("subject").is_none());
     assert!(!prompt.to_string().contains("PRIVATE_BODY"));
-    let instruction = prompt["message"].as_str().unwrap();
-    assert!(instruction.contains("github-pr-review"));
-    assert!(instruction.contains("sop_execute"));
-    assert!(instruction.contains("sop_advance"));
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let finished = state(
@@ -608,6 +622,16 @@ async fn event_dispatch_case(
             s["events"]["evt_new"]["diagnostic"]["stage"],
             expected_stage
         );
+        if expected_status == "accepted" {
+            assert_eq!(
+                s["events"]["evt_new"]["runs"],
+                json!([{"sop":"github-pr-review","run_id":"fixture-run","status":"started"}])
+            );
+            assert_eq!(
+                s["events"]["evt_new"]["diagnostic"]["execution_completed"],
+                false
+            );
+        }
         if !status.is_success() {
             assert_eq!(
                 s["events"]["evt_new"]["diagnostic"]["http_status"],
@@ -746,7 +770,7 @@ fn optional_sop_is_strict_operator_configuration() {
 
 #[test]
 fn dispatch_diagnostics_distinguish_delivery_from_unknown_execution() {
-    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(630));
+    assert_eq!(DISPATCH_TIMEOUT, Duration::from_secs(35));
     assert_eq!(
         DispatchError::GatewayHttp(408).diagnostic(),
         json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":408,"gateway_completed":false})
@@ -885,11 +909,17 @@ async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads(
         (BodyFixture::TooLarge, "response_too_large"),
     ] {
         for telegram in [false, true] {
-            let (client, response, release, server) = response_body_fixture(fixture).await;
+            let (_client, response, release, server) = response_body_fixture(fixture).await;
             let result = if telegram {
                 validate_telegram_response(response).await
             } else {
-                deliver_response(&client, response, None).await
+                read_sop_dispatch(
+                    response,
+                    "github-pr-review",
+                    "/sop/webhook/github-pr-review",
+                )
+                .await
+                .map(|_| ())
             };
             let diagnostic = result.unwrap_err().diagnostic();
             assert_eq!(
@@ -908,5 +938,48 @@ async fn body_read_diagnostics_preserve_status_cause_and_stage_without_payloads(
                 .unwrap()
                 .unwrap();
         }
+    }
+}
+
+#[tokio::test]
+async fn notification_only_rule_never_contacts_gateway() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = Arc::new(Settings {
+        secret: test_signing_key().to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters: parse_filters(
+            r#"[{"name":"notice","sender":"sender@example.com","contains":"text"}]"#,
+        )
+        .unwrap(),
+        state: dir.path().join("state"),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        // An attempted request would fail, so this tests the absence of dispatch.
+        gateway: "http://127.0.0.1:0".into(),
+        telegram: None,
+        gateway_secret: String::new(),
+    });
+    dispatch(&settings, "fixture", &json!({}), &[])
+        .await
+        .unwrap();
+    assert!(!settings.state.exists());
+}
+
+#[test]
+fn template_rules_are_the_default_and_use_strict_shared_validation() {
+    let filters =
+        template_filters(include_str!("../../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(filters.len(), 1);
+    assert_eq!(filters[0].name, "github-review-request");
+    assert_eq!(filters[0].sender, "notifications@github.com");
+    assert_eq!(filters[0].contains, "requested your review on:");
+    assert_eq!(filters[0].sop.as_deref(), Some("github-pr-review"));
+    for invalid in [
+        "",
+        "[heimdall.agentmail]\nfilters = 'wrong-type'",
+        "[[heimdall.agentmail.filters]]\nname = 'bad'\nsender = 'sender@example.com'\ncontains = 'text'\nsop = '../escape'",
+        "[[heimdall.agentmail.filters]]\nname = 'bad'\nsender = 'sender@example.com'\ncontains = 'text'\nunknown = true",
+    ] {
+        assert!(template_filters(invalid).is_err());
     }
 }

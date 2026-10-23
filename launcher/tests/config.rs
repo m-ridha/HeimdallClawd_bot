@@ -580,3 +580,17 @@ fn codex_capacity_is_not_borrowed_by_another_model() {
             .is_none()
     );
 }
+
+#[test]
+fn launcher_email_rules_never_enter_upstream_runtime_configuration() {
+    let template: toml::Value =
+        toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    assert_eq!(
+        template["heimdall"]["agentmail"]["filters"][0]["sop"].as_str(),
+        Some("github-pr-review")
+    );
+    let rendered = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    let config: toml::Value = toml::from_str(&rendered).unwrap();
+    assert!(config.get("heimdall").is_none());
+    assert!(!rendered.contains("notifications@github.com"));
+}
