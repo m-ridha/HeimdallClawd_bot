@@ -45,12 +45,12 @@ fn real_mail_stdio_exposes_only_management_and_fails_closed_without_ingress() {
         .collect();
     assert_eq!(names, ["filters", "set_enabled"]);
     assert_eq!(responses[2]["error"]["code"], -32602);
-    let status: Value = serde_json::from_str(
-        responses[3]["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(status["configured"], false);
+    // Template enables ingress, but this credential-free process can still
+    // advertise its tools and must report configuration failure on invocation.
+    assert_eq!(responses[3]["result"]["isError"], true);
+    assert_eq!(
+        responses[3]["result"]["content"][0]["text"],
+        "Invalid email configuration, missing credentials, or unavailable admission state"
+    );
     assert_eq!(responses[4]["error"]["code"], -32601);
 }
