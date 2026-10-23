@@ -120,7 +120,44 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
         })
         .await;
         let names: HashSet<_> = assembled.registry.iter().map(|tool| tool.name()).collect();
+        if !acp {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 2048];
+                socket.read(&mut request).await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 17\r\nConnection: close\r\n\r\nnative-network-ok").await.unwrap();
+            });
+            let shell = assembled
+                .registry
+                .iter()
+                .find(|tool| tool.name() == "shell")
+                .unwrap();
+            let result = shell.execute(serde_json::json!({"command":format!("curl --noproxy '*' --fail --max-time 10 http://{address}/")})).await.unwrap();
+            if !result.success {
+                server.abort();
+                let _ = server.await;
+                panic!("native network command failed: {:?}", result.error);
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(15), server)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(result.output.contains("native-network-ok"));
+        }
+
         for name in ADDED.into_iter().chain([
+            "browser",
+            "file_edit",
+            "content_search",
+            "glob_search",
+            "spawn_subagent",
+            "calculator",
+            "backup",
+            "data_management",
+            "TodoWrite",
             "web_search_tool",
             "text_browser",
             "web_fetch",
@@ -157,11 +194,10 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             "file_read",
             "file_write",
             "git_operations",
-            "screenshot",
             "delegate",
             "schedule",
         ] {
-            assert!(!names.contains(name), "unexpected {name}, ACP={acp}");
+            assert!(names.contains(name), "missing native {name}, ACP={acp}");
         }
         let search = assembled
             .registry
@@ -183,8 +219,8 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             .await
             .unwrap();
         assert!(
-            !denied.output.contains("<function>"),
-            "discovery must not expose excluded host tools"
+            denied.output.contains("<function>"),
+            "discovery must expose permitted native tools"
         );
         assert_eq!(names.contains("deliver_file"), acp);
         for name in ["file_upload", "file_upload_bundle", "file_download"] {

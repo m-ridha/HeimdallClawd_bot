@@ -32,11 +32,11 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        58
+        80
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
-        Some("workspace__bash")
+        Some("shell")
     );
     assert_eq!(
         cfg["providers"]["models"]["openai"]["codex"]["requires_openai_auth"].as_bool(),
@@ -52,18 +52,13 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
 #[test]
 fn secret_overrides_are_in_memory_and_errors_do_not_echo_values() {
     let token = "123456:TEST_token_abcdefghijklmnop";
-    let executor = "e".repeat(64);
-    let vars = secret_overrides(token, &executor).unwrap();
+    let vars = secret_overrides(token).unwrap();
     assert_eq!(vars[0].0, "ZEROCLAW_channels__telegram__home__bot_token");
-    assert_eq!(
-        vars[1].0,
-        "ZEROCLAW_mcp__servers__workspace__headers__authorization"
-    );
+    assert_eq!(vars.len(), 1);
     let text = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
     assert!(!text.contains(token));
-    assert!(!text.contains(&executor));
     assert!(
-        !secret_overrides("bad-secret-value", &executor)
+        !secret_overrides("bad-secret-value")
             .unwrap_err()
             .contains("bad-secret-value")
     );
@@ -80,7 +75,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     std::fs::write(dir.path().join("config.toml"), &config).unwrap();
     let token = "123456:TEST_token_abcdefghijklmnop";
     let secret = "e".repeat(64);
-    let mut vars = secret_overrides(token, &secret).unwrap();
+    let mut vars = secret_overrides(token).unwrap();
     let deepgram_key = "fixture_deepgram_private_value";
     let cohere_key = "fixture_cohere_private_value";
     vars.push((
@@ -208,7 +203,7 @@ fn owner_must_be_configured_explicitly() {
 }
 
 #[test]
-fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
+fn tavily_search_and_native_shell_are_explicitly_enabled() {
     let config = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
     let cfg: toml::Value = toml::from_str(&config).unwrap();
     assert_eq!(cfg["web_search"]["enabled"].as_bool(), Some(true));
@@ -219,9 +214,9 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
     assert_eq!(cfg["web_search"]["max_results"].as_integer(), Some(3));
     assert_eq!(cfg["web_search"]["timeout_secs"].as_integer(), Some(15));
     let expected = [
-        "workspace__bash",
-        "workspace__file_read",
-        "workspace__file_write",
+        "shell",
+        "file_read",
+        "file_write",
         "web_search_tool",
         "skills__install",
         "skills__list",
@@ -236,7 +231,11 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
         for name in expected {
             assert!(actual.contains(&name), "missing {name}");
         }
-        for blocked in ["shell", "file_read", "file_write", "delegate", "schedule"] {
+        for blocked in [
+            "workspace__bash",
+            "workspace__file_read",
+            "workspace__file_write",
+        ] {
             assert!(!actual.contains(&blocked), "unexpected host tool {blocked}");
         }
     }
@@ -245,7 +244,8 @@ fn tavily_search_is_explicitly_enabled_without_broadening_host_tools() {
         cfg["risk_profiles"]["primary"]["allowed_commands"]
             .as_array()
             .unwrap()
-            .is_empty()
+            .iter()
+            .any(|v| v.as_str() == Some("*"))
     );
 }
 
@@ -379,14 +379,14 @@ fn codespace_tools_are_explicitly_granted_without_host_shell_access() {
         "schedule",
         "delegate",
     ] {
-        assert!(excluded.contains(&tool));
+        assert!(!excluded.contains(&tool));
     }
     assert_eq!(
         cfg["agents"]["primary"]["mcp_bundles"]
             .as_array()
             .unwrap()
             .len(),
-        5
+        4
     );
 }
 
@@ -545,7 +545,7 @@ fn upgraded_tool_inventory_stays_full_with_bounded_discovery() {
         Some(true)
     );
     assert_eq!(cfg["mcp"]["deferred_loading"].as_bool(), Some(false));
-    assert_eq!(cfg["browser"]["automation_enabled"].as_bool(), Some(false));
+    assert_eq!(cfg["browser"]["automation_enabled"].as_bool(), Some(true));
     for field in ["allowed_tools", "auto_approve"] {
         assert!(tool_names(&cfg["risk_profiles"]["primary"], field).contains(&"tool_search"));
     }
@@ -601,4 +601,41 @@ fn subscription_model_selection_comes_from_the_template() {
         heimdall_launcher::config::configured_model().unwrap(),
         "gpt-6.1-sol"
     );
+}
+
+#[test]
+fn native_execution_is_networked_root_capable_without_executor_configuration() {
+    let text = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    let config: toml::Value = toml::from_str(&text).unwrap();
+    let profile = &config["risk_profiles"]["primary"];
+    assert_eq!(profile["level"].as_str(), Some("full"));
+    assert_eq!(profile["workspace_only"].as_bool(), Some(false));
+    assert_eq!(profile["block_high_risk_commands"].as_bool(), Some(false));
+    assert_eq!(
+        profile["require_approval_for_medium_risk"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(profile["allowed_commands"][0].as_str(), Some("*"));
+    assert_eq!(profile["shell_timeout_secs"].as_integer(), Some(300));
+    assert_eq!(profile["delegation_policy"]["mode"].as_str(), Some("allow"));
+    assert!(profile["forbidden_paths"].as_array().unwrap().is_empty());
+    assert!(!text.contains("executor"));
+    assert!(!text.contains("workspace__"));
+    for field in ["allowed_tools", "auto_approve"] {
+        let names = tool_names(profile, field);
+        for name in [
+            "shell",
+            "git_operations",
+            "browser",
+            "spawn_subagent",
+            "calculator",
+            "backup",
+            "data_management",
+            "TodoWrite",
+        ] {
+            assert!(names.contains(&name), "missing {field}: {name}");
+        }
+    }
+    assert_eq!(config["backup"]["max_keep"].as_integer(), Some(2));
+    assert_eq!(config["data_retention"]["dry_run"].as_bool(), Some(true));
 }

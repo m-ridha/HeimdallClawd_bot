@@ -32,7 +32,6 @@ fn bootstrap_does_not_follow_state_symlinks_and_keeps_secrets_out_of_config() {
             .env("PATH", "/usr/bin:/bin")
             .env("TELEGRAM_OWNER_ID", "1001")
             .env("TELEGRAM_BOT_TOKEN", "123456:TEST_token_abcdefghijklmnop")
-            .env("HEIMDALL_EXECUTOR_TOKEN", "e".repeat(64))
             .env("HEIMDALL_AGENTMAIL_WEBHOOK_SECRET", &webhook_secret)
             .env("HEIMDALL_AGENTMAIL_GATEWAY_TOKEN", &gateway_token)
             .output()

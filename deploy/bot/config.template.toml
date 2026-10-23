@@ -38,8 +38,8 @@ model_provider = "openai.codex"
 transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
-mcp_bundles = ["workspace", "skills", "transfer", "codespace", "mail"]
-skill_bundles = ["managed"]
+mcp_bundles = ["skills", "transfer", "codespace", "mail"]
+skill_bundles = ["managed", "ponytail", "superpowers"]
 cron_jobs = []
 acp_enable_mcp = true
 
@@ -68,13 +68,39 @@ external_peers = []
 optional = ["*"]
 
 [risk_profiles.primary]
-level = "supervised"
-workspace_only = true
-allowed_commands = []
+level = "full"
+workspace_only = false
+allowed_commands = ["*"]
+block_high_risk_commands = false
+require_approval_for_medium_risk = false
+forbidden_paths = []
+shell_timeout_secs = 300
 allowed_tools = [
-	"workspace__bash",
-	"workspace__file_read",
-	"workspace__file_write",
+	"shell",
+	"file_read",
+	"file_write",
+	"file_edit",
+	"glob_search",
+	"content_search",
+	"git_operations",
+	"schedule",
+	"delegate",
+	"spawn_subagent",
+	"memory_export",
+	"memory_purge",
+	"calculator",
+	"browser",
+	"backup",
+	"data_management",
+	"canvas",
+	"llm_task",
+	"model_routing_config",
+	"model_switch",
+	"proxy_config",
+	"weather",
+	"TodoWrite",
+	"send_message_to_peer",
+	"escalate_to_human",
 	"web_search_tool",
 	"skills__install",
 	"skills__list",
@@ -132,9 +158,31 @@ allowed_tools = [
 	"mail__set_enabled",
 ]
 auto_approve = [
-	"workspace__bash",
-	"workspace__file_read",
-	"workspace__file_write",
+	"shell",
+	"file_read",
+	"file_write",
+	"file_edit",
+	"glob_search",
+	"content_search",
+	"git_operations",
+	"schedule",
+	"delegate",
+	"spawn_subagent",
+	"memory_export",
+	"memory_purge",
+	"calculator",
+	"browser",
+	"backup",
+	"data_management",
+	"canvas",
+	"llm_task",
+	"model_routing_config",
+	"model_switch",
+	"proxy_config",
+	"weather",
+	"TodoWrite",
+	"send_message_to_peer",
+	"escalate_to_human",
 	"web_search_tool",
 	"skills__install",
 	"skills__list",
@@ -191,20 +239,15 @@ auto_approve = [
 	"mail__filters",
 	"mail__set_enabled",
 ]
-excluded_tools = [
-	"shell",
-	"file_read",
-	"file_write",
-	"git_operations",
-	"schedule",
-	"delegate",
-]
-shell_env_passthrough = []
+excluded_tools = []
+# Explicitly expose only the GitHub credential to normal shell children.
+# Root escalation can access the service identity and persistent credentials.
+shell_env_passthrough = ["GITHUB_TOKEN", "CARGO_HOME", "RUSTUP_HOME"]
 sandbox_enabled = false
 sandbox_backend = "none"
 
 [risk_profiles.primary.delegation_policy]
-mode = "forbidden"
+mode = "allow"
 
 [runtime_profiles.primary]
 # Keep the complete managed TOOLS.md guide in the 20,000-character bootstrap budget.
@@ -221,13 +264,6 @@ max_tool_result_chars = 70_000
 [mcp]
 enabled = true
 deferred_loading = false
-
-[[mcp.servers]]
-name = "workspace"
-transport = "http"
-url = "http://heimdall-executor.railway.internal:3889/mcp"
-tool_timeout_secs = 35
-max_response_bytes = 524_288
 
 [[mcp.servers]]
 name = "skills"
@@ -267,9 +303,6 @@ servers = ["skills"]
 [mcp_bundles.mail]
 servers = ["mail"]
 
-[mcp_bundles.workspace]
-servers = ["workspace"]
-
 [mcp_bundles.transfer]
 servers = ["transfer"]
 
@@ -278,6 +311,12 @@ servers = ["codespace"]
 
 [skill_bundles.managed]
 directory = "shared/skills/managed"
+
+[skill_bundles.ponytail]
+directory = "shared/skills/ponytail"
+
+[skill_bundles.superpowers]
+directory = "shared/skills/superpowers"
 
 [heartbeat]
 enabled = true
@@ -344,9 +383,31 @@ procedural_memory_enabled = true
 enabled = true
 max_steps = 12
 allowed_tools = [
-	"workspace__bash",
-	"workspace__file_read",
-	"workspace__file_write",
+	"shell",
+	"file_read",
+	"file_write",
+	"file_edit",
+	"glob_search",
+	"content_search",
+	"git_operations",
+	"schedule",
+	"delegate",
+	"spawn_subagent",
+	"memory_export",
+	"memory_purge",
+	"calculator",
+	"browser",
+	"backup",
+	"data_management",
+	"canvas",
+	"llm_task",
+	"model_routing_config",
+	"model_switch",
+	"proxy_config",
+	"weather",
+	"TodoWrite",
+	"send_message_to_peer",
+	"escalate_to_human",
 	"web_search_tool",
 	"skills__install",
 	"skills__list",
@@ -357,9 +418,11 @@ allowed_tools = [
 
 [browser]
 enabled = false
-automation_enabled = false
+automation_enabled = true
 backend = "rust_native"
 native_headless = true
+native_webdriver_url = "http://127.0.0.1:9515"
+native_chrome_path = "/usr/bin/chromium"
 allowed_domains = ["*"]
 allowed_private_hosts = []
 
@@ -480,3 +543,13 @@ name = "github-review-request"
 sender = "notifications@github.com"
 contains = "requested your review on:"
 sop = "github-pr-review"
+
+[backup]
+enabled = true
+max_keep = 2
+include_dirs = ["sessions", "knowledge"]
+
+[data_retention]
+enabled = true
+retention_days = 90
+dry_run = true

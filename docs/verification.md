@@ -157,7 +157,7 @@ Release acceptance remains outstanding: deploy the new artifact, restart, inspec
 
 ## 2026-10-16: supplied audit, local remediation
 
-Current boundaries are documented in [operations](operations.md#native-child-process-isolation) and the [executor guide](../executor/README.md); deferred work belongs in [ideas](ideas.md). Named-secret origin enforcement and private-address rejection passed two integration checks against the pinned ZeroClaw tools crate. The new patch applies cleanly to an unmodified copy of its target file. Launcher and executor portable tests, strict Clippy for both crates, thirteen Python tests with the pinned SDK, formatting, actionlint and diff checks passed. An existing route-order-dependent test was corrected to assert the Codex route by hint and preserve the free route's model.
+Current boundaries are documented in [operations](operations.md#native-child-process-isolation) and the [executor guide](single-service-migration.md); deferred work belongs in [ideas](ideas.md). Named-secret origin enforcement and private-address rejection passed two integration checks against the pinned ZeroClaw tools crate. The new patch applies cleanly to an unmodified copy of its target file. Launcher and executor portable tests, strict Clippy for both crates, thirteen Python tests with the pinned SDK, formatting, actionlint and diff checks passed. An existing route-order-dependent test was corrected to assert the Codex route by hint and preserve the free route's model.
 
 `cargo check --locked --manifest-path executor/Cargo.toml --target x86_64-unknown-linux-gnu --tests` passed, checking the new Linux code and tests. This is cross-target type checking, not execution: the address-space cap, stacked seccomp filters, real pthread probe, timestamp/copy/archive compatibility and temporary-directory cleanup still require the branch's native Linux workflow before merge. The updated runtime patch has not completed a native release build. No live API calls, infrastructure changes or deployment were performed.
 
@@ -244,3 +244,18 @@ The native transcription contract now uses the upstream production channel facto
 Native Linux workflow validation and live Railway upgrade checks are tracked in the upgrade PR. Local macOS checks cannot establish Linux isolation or deployed compatibility. No production deployment or persistent-state migration has been performed as part of source preparation.
 
 Source inspection also confirmed that native memory reranking is implemented, correcting the earlier capability description. The template now enables MMR/deduplication with a two-times candidate pool, and the inventory contract materializes the production settings and checks duplicate collapse without any external provider.
+
+## Single-service migration preparation (24 October 2026)
+
+Local launcher tests, strict Clippy, formatting, all 19 Python checks (including
+IaC SDK checks), local Markdown links, diff whitespace and redacted diff scanning
+passed during preparation. All six retained patches applied with zero fuzz to
+the checksum-verified upstream source. New Linux/root/browser image checks are
+wired into the build-only workflow; they have not been established by portable
+macOS checks.
+
+The isolated read-only production plan proposed raising the agent CPU/RAM
+ceilings and deleting the old service, with no volume deletion. It was not
+applied. Old workspace backup/import, native Linux validation, image-size checks,
+provider verification and production migration remain outstanding. See the
+[migration procedure](single-service-migration.md) before a release.

@@ -1,6 +1,5 @@
 use heimdall_launcher::config::{
-    EXECUTOR_ORIGIN, configured_model, github_authorization, parse_allowed_ids, render_config,
-    secret_overrides,
+    configured_model, github_authorization, parse_allowed_ids, render_config, secret_overrides,
 };
 use std::{
     fs,
@@ -122,10 +121,6 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--mail-mcp") {
         return heimdall_launcher::agentmail::serve_mcp();
     }
-    if std::env::args().nth(1).as_deref() == Some("browser-child") {
-        return heimdall_launcher::child_policy::browser();
-    }
-
     if std::env::args().nth(1).as_deref() == Some("--skills-mcp") {
         return heimdall_launcher::skills_mcp::serve();
     }
@@ -170,20 +165,7 @@ fn main() -> io::Result<()> {
     }
     let token =
         std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| fail("TELEGRAM_BOT_TOKEN is required"))?;
-    let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
-        .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
-    let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
-    match std::env::var("HEIMDALL_EXECUTOR_URL") {
-        Ok(url) if url != EXECUTOR_ORIGIN => {
-            return Err(fail(
-                "HEIMDALL_EXECUTOR_URL must use the configured private executor",
-            ));
-        }
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(fail("Invalid HEIMDALL_EXECUTOR_URL"));
-        }
-        _ => {}
-    }
+    let mut vars = secret_overrides(&token).map_err(fail)?;
     let mail_settings = heimdall_launcher::agentmail::Settings::from_env()?;
     match std::env::var("GITHUB_TOKEN") {
         Ok(token) => vars.push((
@@ -228,7 +210,7 @@ fn main() -> io::Result<()> {
         heimdall_launcher::startup::AUTH_TIMEOUT,
     )?;
     println!(
-        "HeimdallClawd: ZeroClaw 0.8.6; {} allowed Telegram user(s); remote workspace MCP; port {port}",
+        "HeimdallClawd: ZeroClaw 0.8.6; {} allowed Telegram user(s); native networked workspace; sudo root access; port {port}",
         ids.len()
     );
     use std::os::unix::process::CommandExt;

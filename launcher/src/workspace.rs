@@ -1,4 +1,5 @@
-use crate::protocol::LIMIT;
+static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const LIMIT: usize = 49_152;
 use std::{
     ffi::CString,
     fs::File,
@@ -56,13 +57,6 @@ impl Workspace {
             CString::new(parts.last().unwrap().as_os_str().as_encoded_bytes())?,
         ))
     }
-    pub fn read(&self, path: &str) -> io::Result<Vec<u8>> {
-        let bytes = self.read_binary(path)?;
-        if std::str::from_utf8(&bytes).is_err() && bytes.len() <= LIMIT {
-            return Err(io::Error::other("File is not UTF-8 text"));
-        }
-        Ok(bytes)
-    }
     pub fn read_binary(&self, path: &str) -> io::Result<Vec<u8>> {
         let (dir, name) = self.parent(path, false)?;
         let file = open_at(&dir, &name, libc::O_RDONLY | libc::O_NONBLOCK, 0)?;
@@ -71,14 +65,14 @@ impl Workspace {
         }
         let mut bytes = Vec::new();
         file.take((LIMIT + 1) as u64).read_to_end(&mut bytes)?;
+        if bytes.len() > LIMIT {
+            return Err(io::Error::other("Transfer exceeds 48 KiB"));
+        }
         Ok(bytes)
-    }
-    pub fn write(&self, path: &str, text: &str) -> io::Result<()> {
-        self.write_binary(path, text.as_bytes())
     }
     pub fn write_binary(&self, path: &str, bytes: &[u8]) -> io::Result<()> {
         if bytes.len() > LIMIT {
-            return Err(io::Error::other("Write exceeds 64 KiB"));
+            return Err(io::Error::other("Transfer exceeds 48 KiB"));
         }
         let (dir, name) = self.parent(path, true)?;
         let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
@@ -99,7 +93,15 @@ impl Workspace {
         } else if io::Error::last_os_error().raw_os_error() != Some(libc::ENOENT) {
             return Err(io::Error::last_os_error());
         }
-        let temp = CString::new(format!(".heimdall-{}", uuid::Uuid::new_v4())).unwrap();
+        let temp = CString::new(format!(
+            ".heimdall-{}",
+            format_args!(
+                "{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            )
+        ))
+        .unwrap();
         let operation = (|| {
             let mut file = open_at(
                 &dir,
@@ -143,5 +145,39 @@ fn open_at(dir: &File, name: &CString, flags: i32, mode: u32) -> io::Result<File
         Err(io::Error::last_os_error())
     } else {
         Ok(unsafe { File::from_raw_fd(fd) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn bounded_local_transfers_reject_traversal_symlinks_and_special_files() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(root.path()).unwrap();
+        workspace.write_binary("nested/file", b"hello").unwrap();
+        assert_eq!(workspace.read_binary("nested/file").unwrap(), b"hello");
+        workspace
+            .write_binary("nested/file", b"replacement")
+            .unwrap();
+        assert_eq!(
+            workspace.read_binary("nested/file").unwrap(),
+            b"replacement"
+        );
+        for path in ["", "../escape", "/absolute", "nested/../escape"] {
+            assert!(workspace.read_binary(path).is_err());
+            assert!(workspace.write_binary(path, b"x").is_err());
+        }
+        std::os::unix::fs::symlink(outside.path(), root.path().join("link")).unwrap();
+        assert!(workspace.write_binary("link/file", b"x").is_err());
+        std::os::unix::fs::symlink("nested/file", root.path().join("file-link")).unwrap();
+        assert!(workspace.read_binary("file-link").is_err());
+        assert!(workspace.write_binary("file-link", b"x").is_err());
+        assert!(workspace.write_binary("large", &vec![0; 49_153]).is_err());
+        std::fs::write(root.path().join("large"), vec![0; 49_153]).unwrap();
+        assert!(workspace.read_binary("large").is_err());
+        assert!(workspace.read_binary("nested").is_err());
+        assert!(!outside.path().join("file").exists());
     }
 }

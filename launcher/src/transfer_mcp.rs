@@ -1,13 +1,11 @@
-//! Bounded Telegram file transfer; executor credentials never reach workspace jobs.
-use base64::{Engine, engine::general_purpose::STANDARD};
+//! Bounded Telegram file transfer; local workspace access and explicit recipient authorization.
 use reqwest::blocking::{Client, Response, multipart};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 const LIMIT: usize = 49152;
-static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const WORKSPACE: &str = "/data/zeroclaw/agents/primary/workspace";
 fn valid_path(path: &str) -> bool {
     !path.is_empty()
         && path.len() <= 1024
@@ -79,7 +77,7 @@ fn status_error(status: u16) -> Option<&'static str> {
         }
         404 => Some("transfer_not_found: check the file or service resource"),
         409 => Some("transfer_duplicate_request: inspect the original operation before retrying"),
-        423 => Some("executor_busy: wait before retrying this unstarted transfer request"),
+        423 => Some("transfer_busy: wait before retrying this unstarted transfer request"),
         429 => Some("transfer_rate_limit: wait and check delivery state before resending"),
         500..=599 => Some(
             "transfer_service_unavailable: check service health and operation state before retrying",
@@ -124,8 +122,6 @@ fn value(response: Response) -> Result<Value, &'static str> {
 struct Bridge {
     client: Client,
     token: String,
-    executor: String,
-    endpoint: String,
     peers: Vec<String>,
 }
 impl Bridge {
@@ -141,42 +137,11 @@ impl Bridge {
                 .build()
                 .map_err(|_| "Cannot initialize transfer client")?,
             token: std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| "Telegram token is required")?,
-            executor: std::env::var("HEIMDALL_EXECUTOR_TOKEN")
-                .map_err(|_| "Executor token is required")?,
-            endpoint: crate::config::workspace_mcp_url()?,
             peers,
         })
     }
-    fn remote(&self, name: &str, args: Value) -> Result<String, &'static str> {
-        let id = format!(
-            "transfer-{}-{}",
-            std::process::id(),
-            SEQUENCE.fetch_add(1, Ordering::Relaxed)
-        );
-        let response = self.client.post(&self.endpoint)
-            .timeout(Duration::from_secs(35))
-            .bearer_auth(&self.executor)
-            .json(&json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}}))
-            .send().map_err(transport_error)?;
-        let result = value(response)?;
-        if result.get("error").is_some() {
-            return Err(match result["error"]["code"].as_i64() {
-                Some(-32001) => {
-                    "executor_busy: wait before retrying this unstarted transfer request"
-                }
-                Some(-32002) => {
-                    "transfer_duplicate_request: inspect the original operation before retrying"
-                }
-                _ => "executor_transfer_failed: check path, size and executor health",
-            });
-        }
-        if result["result"]["isError"] == true {
-            return Err("executor_transfer_failed: check path, size and executor health");
-        }
-        result["result"]["content"][0]["text"]
-            .as_str()
-            .map(str::to_owned)
-            .ok_or("Invalid executor response")
+    fn workspace(&self) -> Result<crate::workspace::Workspace, &'static str> {
+        crate::workspace::Workspace::open(Path::new(WORKSPACE)).map_err(|_| "Workspace unavailable")
     }
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{method}", self.token)
@@ -194,10 +159,10 @@ impl Bridge {
                 if !self.peers.iter().any(|p| p == recipient) {
                     return Err("Recipient is outside the Telegram allowlist");
                 }
-                let encoded = self.remote("file_read_base64", json!({"path":path}))?;
-                let bytes = STANDARD
-                    .decode(encoded.trim())
-                    .map_err(|_| "Invalid binary file encoding")?;
+                let bytes = self
+                    .workspace()?
+                    .read_binary(path)
+                    .map_err(|_| "Cannot read workspace file; check path and 48 KiB limit")?;
                 if bytes.len() > LIMIT {
                     return Err("Transfer exceeds 48 KiB");
                 }
@@ -226,11 +191,10 @@ impl Bridge {
                     .as_str()
                     .ok_or("A Telegram attachment source path is required")?;
                 let bytes = read_attachment(source)?;
-                self.remote(
-                    "file_write_base64",
-                    json!({"path":path,"content":STANDARD.encode(bytes)}),
-                )?;
-                Ok("Telegram attachment copied into the isolated workspace".into())
+                self.workspace()?
+                    .write_binary(path, &bytes)
+                    .map_err(|_| "Cannot write workspace file; check path and 48 KiB limit")?;
+                Ok("Telegram attachment copied into the agent workspace".into())
             }
             "receive" => {
                 let file_id = args["file_id"]
@@ -276,11 +240,10 @@ impl Bridge {
                 if bytes.len() > LIMIT {
                     return Err("Transfer exceeds 48 KiB");
                 }
-                self.remote(
-                    "file_write_base64",
-                    json!({"path":path,"content":STANDARD.encode(bytes)}),
-                )?;
-                Ok("File saved in the isolated workspace".into())
+                self.workspace()?
+                    .write_binary(path, &bytes)
+                    .map_err(|_| "Cannot write workspace file; check path and 48 KiB limit")?;
+                Ok("File saved in the agent workspace".into())
             }
             _ => Err("Unknown transfer tool"),
         }
@@ -302,9 +265,9 @@ fn handle(
         }
         "ping" => json!({}),
         "tools/list" => json!({"tools":[
-            {"name":"send","description":"Send an isolated workspace file (up to 48 KiB) as a Telegram document to an allowed user. An explicit allowed recipient is required; use the requesting private chat identity. Paths are relative to /data/workspace.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"recipient":{"type":"string"}},"required":["path","recipient"],"additionalProperties":false}},
-            {"name":"import","description":"Copy a Telegram attachment already downloaded under the agent workspace telegram_files directory into the isolated workspace (up to 48 KiB). Use the source path shown in the incoming Telegram message.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"source":{"type":"string"}},"required":["path","source"],"additionalProperties":false}},
-            {"name":"receive","description":"Download a Telegram file_id into the isolated workspace (up to 48 KiB).","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"file_id":{"type":"string"}},"required":["path","file_id"],"additionalProperties":false}}
+            {"name":"send","description":"Send an agent workspace file (up to 48 KiB) as a Telegram document to an allowed user. An explicit allowed recipient is required; use the requesting private chat identity. Paths are relative to /data/zeroclaw/agents/primary/workspace.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"recipient":{"type":"string"}},"required":["path","recipient"],"additionalProperties":false}},
+            {"name":"import","description":"Copy a Telegram attachment already downloaded under the agent workspace telegram_files directory into the agent workspace (up to 48 KiB). Use the source path shown in the incoming Telegram message.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"source":{"type":"string"}},"required":["path","source"],"additionalProperties":false}},
+            {"name":"receive","description":"Download a Telegram file_id into the agent workspace (up to 48 KiB).","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"file_id":{"type":"string"}},"required":["path","file_id"],"additionalProperties":false}}
         ]}),
         "tools/call" => {
             let tool = request["params"]["name"].as_str().unwrap_or("");
@@ -451,7 +414,7 @@ mod tests {
                 .unwrap()
                 .starts_with("transfer_permission_or_policy:")
         );
-        assert!(status_error(423).unwrap().starts_with("executor_busy:"));
+        assert!(status_error(423).unwrap().starts_with("transfer_busy:"));
         assert!(
             status_error(429)
                 .unwrap()

@@ -10,7 +10,7 @@ class NativeTestCacheTests(unittest.TestCase):
         dockerfile = (ROOT / 'deploy/bot/Dockerfile').read_text()
         compiled = dockerfile.split('FROM runtime-source AS native-test-compile\n', 1)[1].split('\nFROM ', 1)[0]
         executed = dockerfile.split('FROM native-test-compile AS runtime-build\n', 1)[1].split('\nFROM ', 1)[0]
-        for volatile in ['COPY prebuilt/', '--from=launcher-validation', 'COPY deploy/bot/config.template.toml', 'COPY executor/entrypoint.sh']:
+        for volatile in ['COPY prebuilt/', '--from=launcher-validation', 'COPY deploy/bot/config.template.toml']:
             self.assertNotIn(volatile, compiled)
             self.assertIn(volatile, executed)
         compile_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in compiled.splitlines() if 'cargo test ' in line]

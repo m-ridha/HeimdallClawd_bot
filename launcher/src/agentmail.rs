@@ -191,7 +191,7 @@ impl Settings {
         })?;
         let bot = lookup("TELEGRAM_BOT_TOKEN")
             .map_err(|_| startup_error("TELEGRAM_BOT_TOKEN is required and must be Unicode"))?;
-        crate::config::secret_overrides(&bot, &"0".repeat(32))
+        crate::config::secret_overrides(&bot)
             .map_err(|_| startup_error("TELEGRAM_BOT_TOKEN has an invalid format"))?;
         let authorization = match lookup("AGENTMAIL_AUTHORIZATION") {
             Ok(value)

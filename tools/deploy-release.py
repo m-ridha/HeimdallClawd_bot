@@ -22,8 +22,8 @@ def exact_status(deployments, deployment_id):
 
 def main():
     path, service, tag, label = sys.argv[1:]
-    if label not in {"agent", "executor"}:
-        raise ValueError("Service label must be agent or executor")
+    if label != "agent":
+        raise ValueError("Service label must be agent")
     for value in [service, os.environ['RAILWAY_PROJECT_ID'], os.environ['RAILWAY_ENVIRONMENT_ID']]:
         uuid.UUID(value)
     scope = ['--project', os.environ['RAILWAY_PROJECT_ID'], '--environment', os.environ['RAILWAY_ENVIRONMENT_ID'], '--service', service]

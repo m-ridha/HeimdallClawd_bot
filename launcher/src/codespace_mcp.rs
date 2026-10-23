@@ -298,7 +298,7 @@ fn command_failure(exit_code: Option<i32>, diagnostics: &[u8]) -> String {
     .to_string()
 }
 
-/// The GitHub CLI receives only its own token; Telegram, executor and provider credentials are never inherited.
+/// The GitHub CLI receives only its own token; Telegram and provider credentials are never inherited.
 fn configure_command(command: &mut Command, token: &str) {
     command
         .env_clear()
@@ -735,13 +735,13 @@ mod tests {
         let mut command = Command::new("/usr/bin/env");
         command
             .env("TELEGRAM_BOT_TOKEN", "dummy-private-fixture")
-            .env("HEIMDALL_EXECUTOR_TOKEN", "dummy-executor-fixture");
+            .env("UNRELATED_SERVICE_SECRET", "dummy-unrelated-fixture");
         configure_command(&mut command, "ghp_fixtureTokenValue0123456789");
         let output = command.output().unwrap();
         assert!(output.status.success());
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(!text.contains("dummy-private-fixture"));
-        assert!(!text.contains("dummy-executor-fixture"));
+        assert!(!text.contains("dummy-unrelated-fixture"));
         assert!(text.contains("GH_TOKEN=ghp_fixtureTokenValue0123456789"));
         assert_eq!(capture(&vec![b'x'; LIMIT][..]).unwrap().bytes.len(), LIMIT);
         assert!(capture(&vec![b'x'; LIMIT + 100][..]).unwrap().truncated);

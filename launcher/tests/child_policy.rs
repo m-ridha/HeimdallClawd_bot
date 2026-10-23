@@ -20,7 +20,7 @@ fn filesystem_and_process_memory_boundaries_are_inherited() {
         "probe",
         secret.to_str().unwrap(),
     ]);
-    session.configure(&mut command, Scope::Browser).unwrap();
+    session.configure(&mut command, Scope::Scratch).unwrap();
     let output = command.output().unwrap();
     assert!(!output.status.success());
     assert_eq!(output.stdout, b"public-output");
@@ -32,7 +32,7 @@ fn filesystem_and_process_memory_boundaries_are_inherited() {
         .env_clear()
         .env("HEIMDALL_CHILD_PROBE", "1")
         .args(["--exact", "process_memory_probe"]);
-    session.configure(&mut child, Scope::Browser).unwrap();
+    session.configure(&mut child, Scope::Scratch).unwrap();
     assert!(child.status().unwrap().success());
 }
 #[test]

@@ -61,19 +61,3 @@ fn recovery_starts_without_credentials_and_only_exposes_labeled_health() {
         assert!(!reply.contains("synthetic-invalid-secret"));
     }
 }
-
-#[test]
-fn nonstandard_executor_override_fails_before_agentmail_startup() {
-    let output = Command::new(env!("CARGO_BIN_EXE_heimdall-launcher"))
-        .env_clear()
-        .env("TELEGRAM_OWNER_ID", "1001")
-        .env("TELEGRAM_BOT_TOKEN", "123456:TEST_token_abcdefghijklmnop")
-        .env("HEIMDALL_EXECUTOR_TOKEN", "a".repeat(64))
-        .env("HEIMDALL_EXECUTOR_URL", "https://private-fixture.invalid")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("HEIMDALL_EXECUTOR_URL must use the configured private executor"));
-    assert!(!error.contains("private-fixture"));
-}

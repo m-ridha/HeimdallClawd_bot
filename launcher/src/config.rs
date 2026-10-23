@@ -81,10 +81,7 @@ pub fn render_config(ids: &[String], model: &str) -> Result<String, ConfigError>
     }
     toml::to_string_pretty(&config).map_err(|_| "Cannot render runtime configuration")
 }
-pub fn secret_overrides(
-    token: &str,
-    executor_token: &str,
-) -> Result<Vec<(String, String)>, ConfigError> {
+pub fn secret_overrides(token: &str) -> Result<Vec<(String, String)>, ConfigError> {
     let Some((id, secret)) = token.split_once(':') else {
         return Err("Missing or invalid TELEGRAM_BOT_TOKEN");
     };
@@ -96,19 +93,10 @@ pub fn secret_overrides(
     {
         return Err("Missing or invalid TELEGRAM_BOT_TOKEN");
     }
-    if executor_token.len() < 32 || !executor_token.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err("Missing or invalid HEIMDALL_EXECUTOR_TOKEN");
-    }
-    Ok(vec![
-        (
-            "ZEROCLAW_channels__telegram__home__bot_token".into(),
-            token.into(),
-        ),
-        (
-            "ZEROCLAW_mcp__servers__workspace__headers__authorization".into(),
-            format!("Bearer {executor_token}"),
-        ),
-    ])
+    Ok(vec![(
+        "ZEROCLAW_channels__telegram__home__bot_token".into(),
+        token.into(),
+    )])
 }
 
 /// Builds the HTTP Authorization value without putting credentials in rendered TOML.
@@ -118,67 +106,4 @@ pub fn github_authorization(token: &str) -> Result<String, ConfigError> {
         return Err("Invalid GITHUB_TOKEN; provide a raw token without Bearer or whitespace");
     }
     Ok(format!("Bearer {token}"))
-}
-
-/// The only supported executor origin; credentials must never follow a configurable host.
-pub const EXECUTOR_ORIGIN: &str = "http://heimdall-executor.railway.internal:3889";
-
-/// Resolve the workspace MCP endpoint from the immutable, embedded template.
-pub fn workspace_mcp_url() -> Result<String, ConfigError> {
-    workspace_url(include_str!("../../deploy/bot/config.template.toml"))
-}
-
-fn workspace_url(template: &str) -> Result<String, ConfigError> {
-    let config: toml::Value =
-        toml::from_str(template).map_err(|_| "Invalid embedded runtime configuration")?;
-    let servers = config
-        .get("mcp")
-        .and_then(|mcp| mcp.get("servers"))
-        .and_then(toml::Value::as_array)
-        .ok_or("Missing workspace MCP server")?;
-    let mut workspace = servers
-        .iter()
-        .filter(|server| server.get("name").and_then(toml::Value::as_str) == Some("workspace"));
-    let server = workspace.next().ok_or("Missing workspace MCP server")?;
-    if workspace.next().is_some()
-        || server.get("transport").and_then(toml::Value::as_str) != Some("http")
-    {
-        return Err("Invalid workspace MCP server");
-    }
-    let url = server
-        .get("url")
-        .and_then(toml::Value::as_str)
-        .ok_or("Missing workspace MCP URL")?;
-    if url.strip_suffix("/mcp") != Some(EXECUTOR_ORIGIN) {
-        return Err("Workspace MCP URL must use the configured private executor");
-    }
-    Ok(url.to_owned())
-}
-
-#[cfg(test)]
-mod endpoint_tests {
-    use super::*;
-    #[test]
-    fn embedded_workspace_endpoint_is_fixed_and_unambiguous() {
-        assert_eq!(
-            workspace_mcp_url().unwrap(),
-            "http://heimdall-executor.railway.internal:3889/mcp"
-        );
-        for url in [
-            "https://example.com/mcp",
-            "http://heimdall-executor.railway.internal:3889/other",
-            "http://heimdall-executor.railway.internal:3889/mcp?redirect=x",
-        ] {
-            assert!(
-                workspace_url(&format!(
-                    "[[mcp.servers]]\nname='workspace'\ntransport='http'\nurl='{url}'"
-                ))
-                .is_err()
-            );
-        }
-        let server = "[[mcp.servers]]\nname='workspace'\ntransport='http'\nurl='http://heimdall-executor.railway.internal:3889/mcp'\n";
-        assert!(workspace_url(&(server.to_owned() + server)).is_err());
-        assert!(workspace_url("").is_err());
-        assert!(workspace_url(&server.replace("transport='http'", "transport='stdio'")).is_err());
-    }
 }

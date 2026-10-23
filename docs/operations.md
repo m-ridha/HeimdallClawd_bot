@@ -1,21 +1,24 @@
 # Operations
 
-HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher and a separate Rust workspace executor. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
+HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher in a single networked service. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
 
 ## Railway services
 
-| Service | Persistent mount | Port | Resource ceiling |
-| --- | --- | --- | --- |
-| heimdallclawd | `/data` (500 MB) | 3888 | 0.5 GB, 0.5 vCPU |
-| heimdall-executor | `/data/workspace` (200 MB) | 3889 | 0.25 GB, 0.25 vCPU |
+The main service listens on 3888, with one replica and sleeping disabled.
+The Trial proposal raises its ceiling to 2 shared vCPU and 1 GB RAM; the agent
+volume remains 500 MB at /data. Limits are ceilings, not reserved capacity.
+After Trial, Free has lower CPU/RAM limits. See [migration](single-service-migration.md)
+for storage preservation and the distinction between Trial and Full Trial network access.
 
-Keep one replica per service and sleeping disabled. Monitor costs and use an operator-selected budget; favor frugal infrastructure. Set `PORT` explicitly in Railway: its injected port takes precedence over Docker's environment default. The agent's public domain serves authenticated clients and signed email events; Telegram polling alone needs no public domain. The executor stays private and listens on IPv6 for Railway private networking.
+The public gateway requires pairing; Telegram uses polling and private permitted
+chats. Root-capable tools share this service with credentials. Monitor usage and
+keep caches small. Platform restrictions still apply to root commands.
 
 ## Variables
 
-The bot requires `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_ID`, and `HEIMDALL_EXECUTOR_TOKEN`. No Telegram owner ID is hardcoded; omitting it stops startup. Keep token values in Railway variables only. `TELEGRAM_ALLOWED_USER_IDS` accepts comma-separated numeric IDs with optional surrounding spaces; the owner is always included and duplicates are removed. A blank variable means owner only. Empty entries within a nonempty list, zero, negative and malformed entries fail startup. Only private chats from permitted accounts are accepted. All permitted accounts share the executor workspace; conversation keys include the sender identity.
+The bot requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`. No Telegram owner ID is hardcoded; omitting it stops startup. Keep token values in Railway variables only. `TELEGRAM_ALLOWED_USER_IDS` accepts comma-separated numeric IDs with optional surrounding spaces; the owner is always included and duplicates are removed. A blank variable means owner only. Empty entries within a nonempty list, zero, negative and malformed entries fail startup. Only private chats from permitted accounts are accepted. All permitted accounts share the agent workspace; conversation keys include the sender identity.
 
-The subscription model is selected in `[providers.models.openai.codex].model` in `deploy/bot/config.template.toml`; the launcher keeps the Codex route consistent with that selection. When changing it, update/remove its model-specific context capacity at the same time. The executor URL comes from the embedded `workspace` MCP server definition. The legacy `HEIMDALL_EXECUTOR_URL` variable does not select an endpoint; if present, it must still equal `http://heimdall-executor.railway.internal:3889` or startup fails. The transfer bridge validates its private origin and exact `/mcp` path; it does not read mutable deployed TOML. Set the executor's `EXECUTOR_TOKEN` to the same private value as the bot's executor token.
+The subscription model is selected in `[providers.models.openai.codex].model` in `deploy/bot/config.template.toml`; the launcher keeps the Codex route consistent with that selection. When changing it, update/remove its model-specific context capacity at the same time.
 
 ### Configuration ownership and variable cleanup
 
@@ -37,17 +40,26 @@ gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider o
 
 Complete the official login page yourself. Never paste authentication files or tokens into chat, source control, or logs.
 
-Conversation history uses `/data/zeroclaw/data/sessions/sessions.db`; the agent's SQLite memory lives under its workspace within `/data/zeroclaw/agents/primary/workspace`. These paths survive image replacement while the volume remains attached. Executor files live on its separate volume. A volume is persistent storage, not a backup: retain a private backup before deleting a volume or service. An additional database is unnecessary for this single-instance setup.
+Conversation history uses `/data/zeroclaw/data/sessions/sessions.db`; the agent's SQLite memory lives under its workspace within `/data/zeroclaw/agents/primary/workspace`. These paths survive image replacement while the volume remains attached. User files now live in the agent workspace; migrate old files before retiring old storage. A volume is persistent storage, not a backup: retain a private backup before deleting a volume or service. An additional database is unnecessary for this single-instance setup.
 
 ## Tool boundary
 
-The primary agent has isolated workspace operations, Tavily search, public web fetching/HTTP/text browsing, agent cron management, SOP/pipeline tools, messaging tools, and restricted Telegram transfers. Parallel tools are enabled; the executor admits at most two concurrent jobs. Native host shell/filesystem/git tools, shell-only scheduling, and agent delegation remain blocked. Skill commands are redirected to the isolated executor by a maintained upstream patch; there is no local fallback when a remote skill command fails.
+Native shell/file/edit/search/Git tools operate in the main service. Native shell
+commands run as heimdall; passwordless sudo -n gives root execution. Full autonomy,
+all-command admission and delegation are intentional operator decisions. There is
+no credential-isolated command boundary: root can access sign-in, integration
+credentials, messages and persistent state, and can stop the service.
 
-The remote worker has no Telegram or provider credentials. Helpers run with a cleared environment, separate UID, Linux seccomp restrictions, no networking, a 30-second timeout, 64 KiB output/content bounds, and process-group cleanup. Binary transfer tools use the same path protections with a 48 KiB file limit. Failed startup isolation checks keep the worker unhealthy. See [capabilities](capabilities.md) for scheduling, extensions, transfers and deployment verification.
+Git, gh, Bash, Python 3, curl, jq, Node/npm, SSH, Rust 1.99/Cargo/rustfmt/Clippy,
+GCC and Chromium are installed in the final image. Native shell has a 300-second
+timeout and upstream output bounds; large builds may exceed container resources.
+Telegram transfer helpers preserve relative-path, symlink, size and recipient
+checks. Other native tools have their own upstream policy and prerequisites.
+Do not use the former executor limits as current restrictions.
 
 ## Tavily web search
 
-The maintained template enables Tavily basic search with three results and a 15-second timeout. `web_search_tool` is included in the primary agent's allowlist and auto-approval list. The workspace executor remains network-disabled. The agent also has web_fetch, http_request and a Lynx-backed text_browser. Tavily search does not provide interactive browser sessions.
+The maintained template enables Tavily basic search with three results and a 15-second timeout. `web_search_tool` is included in the primary agent's allowlist and auto-approval list. Native shell has outbound internet access subject to platform policy. The agent also has web_fetch, http_request, Lynx text_browser and native Chromium automation. Tavily search does not provide interactive browser sessions.
 
 Set `ZEROCLAW_web_search__tavily_api_key` privately on the agent service in Railway and restart/redeploy that service to load the variable. Source changes use the release workflow; setting a key for the existing integration does not require a source change. The launcher inherits this environment variable and ZeroClaw resolves it natively. Do not put the key in the configuration template or source. The integration test uses a dummy key, asserts its exact in-memory value, calls native `Config::save()`, and asserts the saved TOML contains no dummy key.
 
@@ -96,7 +108,7 @@ For example, configure an Anthropic slot named `custom`:
 4. Redeploy the agent once to load both settings: `railway redeploy --service heimdallclawd --yes`. This affects the running service; perform it only as an authorized operator action.
 5. After it is healthy, send `/models anthropic.custom`, `/model YOUR_MODEL_ID` and `/model` as separate messages. Verify a reply and an actual remote tool call. `/model codex` restores the subscription route.
 
-Set these variables on the agent, never the executor. Keys are resolved in memory rather than saved in TOML. The configuration fixture verifies absent-provider creation and secret exclusion. Provider API usage is billed separately from Railway infrastructure.
+Set these variables on the main agent service. Keys are resolved in memory rather than saved in TOML. The configuration fixture verifies absent-provider creation and secret exclusion. Provider API usage is billed separately from Railway infrastructure.
 
 For another OpenRouter slot, use the `openrouter` family with a different alias and exact model ID. For Ollama, configure a supported alias with a reachable `uri` and model; a server on a powered-off Mac is unavailable. Endpoint connectivity requires separate verification. None of these additions enables automatic fallback.
 
@@ -108,11 +120,11 @@ Build and release procedures, generated checksums/provenance and compile-cache b
 
 Git is installed in both agent image recipes. The agent has a dedicated stdio MCP server implemented by `heimdall-launcher --skills-mcp`, exposing only `skills__install` and `skills__list`. Ask Heimdall to install a named skill from the official ZeroClaw registry, or to list its installed skills. The model may also select these tools when a task needs a skill.
 
-The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. It invokes ZeroClaw's native install/audit implementation without a shell, forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. This does not give the model a general shell on the agent container. The workspace executor remains network-disabled.
+The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. It invokes ZeroClaw's native install/audit implementation without a shell, forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. This does not give the model a general shell on the agent container. Native shell has outbound internet access subject to platform policy.
 
 The registry installer targets the primary agent's `managed` bundle, persisted under `/data/zeroclaw/shared/skills/managed`. Additional operator-created native bundles can be attached with the procedure below. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
 
-Other registries and arbitrary source URLs are not exposed by this installer. Skill shell/script commands run through the remote executor. Bounded regular text files from the audited skill directory are copied into `.skills/TOOL_NAME` before execution; symlinks, oversized files and excessive trees are rejected. System dependencies must already exist in the executor. Verify a named skill's installation, visibility to the agent and behavior after deploying this version. CLI/stdio and configuration tests run locally; an actual registry installation through the deployed bot remains a live verification step.
+The narrow registry installer accepts official bare registry names. Native skill scripts execute locally under ZeroClaw policy; dependencies can be installed in the main service. Verify installation and actual execution after deployment.
 
 ### Operator-installed skill bundles
 
@@ -150,7 +162,7 @@ No separate `AGENTMAIL_API_KEY` variable is required. Deploy the variable change
 agentmail = "${AGENTMAIL_AUTHORIZATION}"
 ```
 
-ZeroClaw resolves the reference from its inherited Railway environment when `http_request` uses `auth_secret="agentmail"`. This tool expects the complete Authorization header value; it does not prepend `Bearer` or interpolate a prefix inside the reference. Do not replace the reference with the real key or commit the variable's value. The isolated executor does not need these variables.
+ZeroClaw resolves the reference from its inherited Railway environment when `http_request` uses `auth_secret="agentmail"`. This tool expects the complete Authorization header value; it does not prepend `Bearer` or interpolate a prefix inside the reference. Do not replace the reference with the real key or commit the variable's value.
 
 For a read-only check, ask Heimdall to GET `https://api.agentmail.to/v0/inboxes` using that named auth secret and report success or a sanitized error. Use the secret only at `https://api.agentmail.to`. If the reference variable is absent, unrelated features can still start; AgentMail calls fail until it is configured. The template is regenerated at startup, so manual edits to the deployed TOML are not persistent.
 
@@ -160,7 +172,7 @@ Optional signed email ingress uses the existing agent container and ZeroClaw's a
 
 ## GitHub access
 
-Use a dedicated GitHub account and keep its token only in the **heimdallclawd** Railway service. Never add it to the executor, Git, GitHub Actions variables or chat.
+Use a dedicated GitHub account and keep its token only in the **heimdallclawd** Railway service. Never put it in Git, files in the workspace, GitHub Actions variables or chat. Native gh reads it from the shell environment.
 
 Set `GITHUB_TOKEN` to the raw personal access token, without `Bearer` or whitespace. This single variable serves both GitHub REST requests and Codespaces. The launcher validates it and derives `HEIMDALL_GITHUB_AUTHORIZATION=Bearer <token>` only in ZeroClaw's process environment. Do not configure that internal variable in Railway. The template stores only `github = "${HEIMDALL_GITHUB_AUTHORIZATION}"` in `[http_request.secrets]`; the resolved token is never written into TOML. Remove the older separate authorization/Codespaces token variables if present.
 
@@ -174,7 +186,7 @@ The launcher exposes `codespace__status`, `codespace__list`, `codespace__create`
 
 Codespaces compute/storage and GitHub quotas are separate from Railway billing. Idle timeout and retention reduce usage; they are not a hard spending limit. Configure the dedicated GitHub account's budget before creating Codespaces. Never create, delete or execute in a Codespace without a user request. These instructions guide the model; the tool grants themselves permit the operations. Codespaces may expose their own repository credentials to remote commands, so use sandbox repositories and do not configure production secrets there.
 
-Both agent Docker recipes install checksum-verified GitHub CLI and OpenSSH; the version is pinned in those Dockerfiles. No third Railway service is added and the isolated workspace executor remains credential-free and network-disabled.
+Both final image recipes install gh, SSH and the complete native toolkit. Codespaces stays optional remote compute; native shell and sudo can also work on repositories directly. Root commands can access the service credentials.
 
 After deployment, first test GitHub's read-only `/user` API and `codespace__list`. Create a sandbox only when requested, run a harmless remote command, and stop/delete it after verification. These operations have not been live-verified by local tests. Managed instruction files refresh at startup; see [instruction updates](#managed-agent-instructions).
 
@@ -184,19 +196,19 @@ A nonzero GitHub control-plane CLI exit returns a JSON object in the MCP error t
 
 Agent-facing instructions explicitly name `github` as the HTTP secret alias. Managed `TOOLS.md` edits reach existing deployments at their next startup. No credential or raw CLI diagnostic needs to be shown to the model or operator to classify a failure. Inspect actual Codespaces state before retrying a mutation or remote command.
 
-See [GitHub repository workflow](github-workflow.md) for API-first repository editing, offline Git, Codespaces policy and CI fallback.
+See [GitHub repository workflow](github-workflow.md) for native Git/gh repository editing, Codespaces policy and CI fallback.
 
 ## Managed agent instructions
 
 At each startup the launcher synchronizes embedded `TOOLS.md` and `IDENTITY.md` into the primary agent control workspace. Replaced content is preserved in hidden `.<name>.saved-<unique suffix>` files with private permissions; identical files are not rewritten or backed up again. Saved copies are historical references, not active instructions. Personal preferences belong in `USER.md`, which the launcher never changes. Record the preferred IANA timezone there (for example, `Default timezone: <IANA timezone>`). For a reminder without an explicit timezone, the agent uses that preference and asks if it is unknown or ambiguous. Requests with an explicit timezone take precedence. This is agent guidance, not a scheduler-level default; existing jobs retain their configured schedules and timezones. Instruction reads reject symlinks, non-regular files and content larger than 128 KiB rather than overwriting it blindly. These saved copies are migration safeguards on the same volume, not independent backups.
 
-The identity and tool guide distinguish ordinary isolated executor work from GitHub Codespaces work. Their files and execution environments are separate; choosing Codespaces never gives local Railway host execution access.
+The identity and tool guide distinguish ordinary native agent workspace work from GitHub Codespaces work. Their files and execution environments are separate; choosing Codespaces never gives local Railway host execution access.
 
 ## Tool discovery and recovery
 
 `codespace__status` reads local configuration without calling GitHub or starting a Codespace. It returns configured/missing/invalid token and repository configuration states, the validated repository allowlist, CLI availability and fixed resource/time/output limits. It never includes credentials and explicitly reports that authentication and network reachability have not been verified. Use it before choosing a repository; use `codespace__list` for actual remote state.
 
-Executor admission waits up to three seconds outside the active-map lock, then returns `executor_busy` (-32001, no execution started) from `duplicate_request` (-32002, that request ID is active within the same MCP client session). The HTTP readiness gate remains 503 until isolation passes. Retry an unstarted busy request after current work completes; do not duplicate an active operation or fall back to host tools. Tool descriptions state the 30-second executor deadline, 64 KiB output ceiling, two-job capacity and fresh-process working-directory behavior.
+Executor admission waits up to three seconds outside the active-map lock, then returns `agent workspace_busy` (-32001, no execution started) from `duplicate_request` (-32002, that request ID is active within the same MCP client session). The HTTP readiness gate remains 503 until isolation passes. Retry an unstarted busy request after current work completes; do not duplicate an active operation or fall back to host tools. Tool descriptions state the 30-second agent workspace deadline, 64 KiB output ceiling, two-job capacity and fresh-process working-directory behavior.
 
 Skill failures expose fixed heuristic categories for registry/network, missing skills, audit/policy and unknown failures; raw CLI failure output is withheld and output overflow is reported explicitly. Transfers expose sanitized categories for authentication, permission/policy, missing resources, duplicate/busy requests, rate limits, network/timeouts and service availability. A timeout does not prove that a delivery or write failed: inspect state before retrying. No raw HTTP response, token-bearing URL or service error description is returned.
 
@@ -208,7 +220,7 @@ If GitHub reports HTTP 422 with `CS_NET_01` and says creation is blocked from th
 
 ## Heartbeat
 
-The hourly worker runs as the primary agent and delivers only to the configured owner. ZeroClaw creates an empty `HEARTBEAT.md` in `/data/zeroclaw/agents/primary/workspace`. Add explicit task lines there through the Railway dashboard terminal, for example `- [low] Check the assigned inbox and notify me only about actionable new mail`. This is the agent control workspace, not the executor's `/data/workspace`; writing a same-named executor file does not configure heartbeat. Keep credentials out of instructions. Empty or paused tasks do not run. A fallback task can instead use the native `ZEROCLAW_heartbeat__message` variable. Use cron for exact reminder times. Heartbeat work consumes model/search quotas.
+The hourly worker runs as the primary agent and delivers only to the configured owner. ZeroClaw creates an empty `HEARTBEAT.md` in `/data/zeroclaw/agents/primary/workspace`. Add explicit task lines there through the Railway dashboard terminal, for example `- [low] Check the assigned inbox and notify me only about actionable new mail`. This is the agent control workspace, not the agent workspace's `/data/workspace`; writing a same-named agent workspace file does not configure heartbeat. Keep credentials out of instructions. Empty or paused tasks do not run. A fallback task can instead use the native `ZEROCLAW_heartbeat__message` variable. Use cron for exact reminder times. Heartbeat work consumes model/search quotas.
 
 ## Additional providers and private clients
 
@@ -219,13 +231,13 @@ The template selects Deepgram `nova-3` for voice/audio with automatic language d
 | `ZEROCLAW_providers__transcription__deepgram__voice__api_key` | Your Deepgram API key |
 | `ZEROCLAW_memory__embedding_api_key` | Your Cohere API key |
 
-The template contains no keys; ZeroClaw resolves native environment overrides in memory. Saving runtime configuration must not persist these credentials. Do not add keys to the executor or GitHub variables. The primary agent's transcription alias is `deepgram.voice`; a global transcription key alone does not configure that alias.
+The template contains no keys; ZeroClaw resolves native environment overrides in memory. Saving runtime configuration must not persist these credentials. Do not add keys to the agent workspace or GitHub variables. The primary agent's transcription alias is `deepgram.voice`; a global transcription key alone does not configure that alias.
 
 Cohere uses `custom:https://api.cohere.ai/compatibility/v1`, which ZeroClaw resolves to `/embeddings`. The [Cohere compatibility API](https://docs.cohere.com/docs/compatibility-api) supports OpenAI-style embedding requests but does not support a dimensions parameter. Therefore configuration uses the model's [documented default of 2,048 dimensions](https://docs.cohere.com/docs/cohere-embed), rather than claiming a reduced vector size. Its 1,024-entry cache limits cached vector storage; it does not cap all memory/database growth. Keep model and dimensions together when changing providers; existing vectors may need reindexing.
 
 Voice audio is sent to Deepgram, and memory/query text is sent to Cohere. Their quotas/billing are separate from ChatGPT subscriptions and Railway billing. Provider errors are not evidence of a working integration; after deployment, send a short voice message and verify its transcription, then store and recall a synthetic fact with different wording. Check provider usage to confirm embedding requests; keyword recall alone does not prove embeddings worked.
 
-The embedded dashboard and ACP endpoint share the agent's HTTPS domain, targeting port 3888 with pairing required. Dashboard daemon reload and SOP administration require `gateway.allow_remote_admin=true` and a current paired bearer, enforced by the native gateway even behind the email adapter. Pair in the browser using a code obtained from the Railway console; `/pair/code` exposes status only. Shutdown and reading/generating pairing codes stay console-only. Deploy the configuration and runtime change before retrying a reload rejected by the old policy. Reload applies the runtime's current configuration; it does not deploy a new image or replace the launcher's startup rendering. Dashboard changes to managed settings can be overwritten on the next deployment; keep durable settings in the repository or Railway variables. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in the workspace executor. See [public networking ownership](../.railway/README.md).
+The embedded dashboard and ACP endpoint share the agent's HTTPS domain, targeting port 3888 with pairing required. Dashboard daemon reload and SOP administration require `gateway.allow_remote_admin=true` and a current paired bearer, enforced by the native gateway even behind the email adapter. Pair in the browser using a code obtained from the Railway console; `/pair/code` exposes status only. Shutdown and reading/generating pairing codes stay console-only. Deploy the configuration and runtime change before retrying a reload rejected by the old policy. Reload applies the runtime's current configuration; it does not deploy a new image or replace the launcher's startup rendering. Dashboard changes to managed settings can be overwritten on the next deployment; keep durable settings in the repository or Railway variables. ACP clients use `/acp` and a paired authorization header; never put tokens in URLs. A compatible client bridge runs on the editor side, not in a separate command environment. See [public networking ownership](../.railway/README.md).
 
 WebAuthn activation needs `ZEROCLAW_webauthn__enabled`, `ZEROCLAW_webauthn__rp_id` and `ZEROCLAW_webauthn__rp_origin` matching the actual HTTPS client origin. Remote nodes need `ZEROCLAW_nodes__auth_token` as a Railway secret and a configured private client before enabling `ZEROCLAW_nodes__enabled`. Leave both inactive until those prerequisites are met.
 
@@ -251,7 +263,7 @@ For an agent that cannot start because authentication is missing/revoked or `/da
 5. For authentication repair, run the device-login command from the setup section as `heimdall`. Complete sign-in without sharing credentials. Recovery assumes this existing deployment already has the state directory; it does not initialize a fresh installation. If the directory is absent or permissions are broken, repair them through the existing setup procedure before login.
 6. Remove `HEIMDALL_RECOVERY` (or set it to `0`) and redeploy. Confirm normal authentication validation, service health and an actual Telegram reply. Recovery mode has no automatic expiry; leaving it enabled keeps the bot offline. A green Railway deployment alone is insufficient acceptance.
 
-For full executor storage, keep its isolation readiness gate intact. The supervisor remains running but MCP/health are unready when the startup probe fails. Use the executor dashboard terminal to inspect `df -h /data/workspace`, `df -i /data/workspace` and `du -x -h -d 1 /data/workspace`; remove only confirmed disposable files. Clean up before redeploying, then verify startup isolation passes and a synthetic workspace read/write succeeds. Never copy credentials into the executor or enable host tools as a workaround.
+For full agent storage, use recovery mode and inspect df/du without deleting unknown files. Native command work shares /data; keep build/package caches small and back up state before cleanup. There is no executor readiness probe.
 
 Recovery acceptance requires a disposable Railway environment: dashboard-terminal access, repaired sign-in/storage, normal readiness and an actual Telegram reply after recovery is disabled. Local process/health tests alone do not establish those outcomes. See the dated [verification record](verification.md).
 
@@ -262,10 +274,10 @@ Every allowlisted account receives the same primary-agent tool grants and auto-a
 
 ## Executor admission and command results
 
-Queued executor requests reserve their session-scoped ID immediately. Cancellation or response disconnect removes an unstarted reservation. Once admitted, the existing 30-second execution deadline applies; the three-second admission budget fits inside the client's 35-second tool timeout. A queue timeout is a JSON-RPC -32001 error in the HTTP 200 response stream, and explicit queued cancellation returns -32800. Duplicate IDs in the same session are still rejected before admission; no host fallback is introduced.
-
-
-See [structured command results](../executor/README.md#structured-command-results) for `bash` exit status, termination reason and bounded stdout/stderr. A successful MCP transport is not proof that the command succeeded.
+The executor service and admission protocol are retired. Native execution is
+now authoritative; see [Tool boundary](#tool-boundary). No compatibility endpoint
+or credentials remain. Structured tool results and external-state checks still
+matter: timeout or disconnect does not prove a mutation never occurred.
 
 ## Logging privacy
 
@@ -273,29 +285,28 @@ Terminal logging privacy: daemon startup omits `--verbose` because a pinned-runt
 
 ## Native child-process isolation
 
-The text browser runs through a launcher wrapper with an empty credential environment, an ephemeral HOME/TMPDIR, and a Linux Landlock filesystem policy. It can read system binaries, libraries, public configuration and its private scratch directory; it cannot read agent authentication files, conversation storage, SSH keys, or `/proc`.
+The native-child patch is removed. Native browser and skill commands use
+upstream execution. General root-capable shell access is intentionally trusted
+with the service's credentials and filesystem. Narrow registry/Codespaces MCP
+servers still clear their environments and retain their own scoped child policy;
+these protect those call paths, not the agent from its authorized root commands.
 
-The registry installer retains its existing cleared environment and official-registry restrictions. Landlock grants the rendered configuration, managed skill storage, and read-only skill/plugin metadata directories, while a private temporary registry cache avoids granting access to the agent workspace. Codespaces receives only its GitHub token and access to its own CLI state and scratch directory. Its intentionally authorized remote commands can still access credentials available inside the Codespace; this policy protects the Railway agent's other credentials.
-
-Native descendants inherit filesystem restrictions and a seccomp denial of process-memory inspection. These profiles require Linux Landlock ABI 3 or newer and fail closed without it; there is no unrestricted fallback. Existing skill/GitHub timeout, output and process-group handling remains. The native text-browser transport still has its upstream redirect/DNS limitations; prefer `web_fetch` for untrusted URLs. Browser state is ephemeral rather than an authenticated persistent browsing profile.
-
-After native validation, verify Landlock compatibility on Railway and exercise text browsing, skill listing/installing, and Codespaces before treating the change as live-verified. No production deployment is implied by local/CI checks.
-
-The native OAuth refresh is a trusted control-plane operation: it still reads/writes the sign-in state needed to refresh the subscription and is not subjected to the browser/registry filesystem profile. Its environment is explicitly limited to PATH, HOME and ZEROCLAW_CONFIG_DIR, and its diagnostics remain discarded. The long-running agent/MCP servers retain the credentials required by their granted integrations.
-
-These are credential-access profiles, not isolated tenants or a complete native-process sandbox. Landlock ABI 3 does not mediate every metadata operation, and native network clients retain their intended connectivity. A browser killed abruptly may leave its private scratch directory until container replacement; normal completion cleans it. No live-provider or Railway verification is claimed by the native tests.
+ChromeDriver is supervised locally, accepts loopback clients and receives no
+provider environment. Chromium automation uses upstream service-mode flags;
+this is not a secure browser sandbox. Keep pairing, Telegram authorization and
+signed admission intact. Never run untrusted repository scripts without review.
 
 ## Upgrading to ZeroClaw v0.8.6
 
-The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. This upgrade retains the existing provider variable names, subscription sign-in, persistent volume paths and executor protocol. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
+The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. This upgrade retains the existing provider variable names, subscription sign-in, persistent agent volume paths. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
 
 The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. The current local patch purposes are documented in [NOTICE](../deploy/bot/NOTICE.md), and the exact zero-fuzz application order lives in [the Dockerfile](../deploy/bot/Dockerfile). They also cover SOP-authoring guidance, Responses history repair; do not treat the original upgrade patch count as current. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
 
-`[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager so script skills can find the connected workspace executor. The launcher still regenerates configuration at startup: dashboard, RPC or CLI config edits are not durable deployment configuration. Use Railway overrides or a reviewed template change for settings that must survive restart.
+`[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager for the retained integration servers; skills execute locally. The launcher still regenerates configuration at startup: dashboard, RPC or CLI config edits are not durable deployment configuration. Use Railway overrides or a reviewed template change for settings that must survive restart.
 
 Before rollout, confirm existing memory, response-cache and audit SQLite files (including WAL/SHM companions) are regular, singly linked, owned by the service user and inaccessible to group/others. v0.8.6 rejects unsafe files. If startup reports this condition, enter recovery mode, stop database writers, back up state and correct the specific file's ownership/mode after checking it is not a symlink or hardlink. Do not recursively change permissions or delete databases to make startup pass.
 
-After deployment, verify private text and voice messages, model switching, a GitHub read through the `github` alias, web search, text browsing, tool discovery, remote skill execution and workspace write/read/command tools. Check that group messages are rejected and the protected executor fixture remains unreadable. Review scheduled-task and heartbeat delivery after restart. None of these live checks is implied by a successful source build.
+After deployment, verify private text and voice messages, model switching, a GitHub read through the `github` alias, web search, text browsing, tool discovery, native skill execution and workspace write/read/command tools. Check that group messages are rejected and native/root commands work only through authenticated entry points. Review scheduled-task and heartbeat delivery after restart. None of these live checks is implied by a successful source build.
 
 The embedded dashboard, ACP, WASM plugin host and WebAuthn build support remain included. New OIDC enrollment, A2A peers, additional providers/search backends, plugin packages and remote browser automation require operator-selected endpoints, credentials and grants. No public endpoint or implicit paid-provider fallback is introduced. Pairing codes are now opaque longer values and admin-gated; remote clients must authenticate and should match the daemon version. Installed WASM packages must target this release's WIT contract and be verified before use.
 
@@ -309,7 +320,7 @@ The capacity is a conservative starting point for `gpt-6.1-sol`, derived from ob
 
 `compact_context = false`, deferred built-in discovery, tool grants, iteration/action limits and the 70,000-character tool-result allowance remain unchanged. Do not set `max_context_tokens = 0` to fix overflow: it disables proactive budget trimming. The pinned runtime's `context_compression` settings are unsupported and do not enable summarization.
 
-The managed [TOOLS guide](../deploy/bot/TOOLS.md#long-tasks-and-sop-authoring) describes bounded phases, workspace checkpoints, targeted reads and SOP proposal syntax. It is guidance, not automatic resumption or an enforced duplicate-review ledger. `/new` starts a fresh Telegram session; save a checkpoint first if the task must continue. Review-request email events dispatch their assigned SOP directly through `/sop/webhook/<sop-name>`, without a chat turn asking the model to start it. The installed SOP must declare that exact webhook trigger and execution ownership; a Manual trigger alone is insufficient. The default rule assigns `github-pr-review`; custom template rules need the optional `sop` field. The adapter reports admission; completion notification belongs in the SOP. See [rule assignments and failure diagnostics](agentmail-events.md#rules).
+The managed [TOOLS guide](../deploy/bot/TOOLS.md#context-diagnostics-and-configuration) describes bounded phases, workspace checkpoints, targeted reads and SOP proposal syntax. It is guidance, not automatic resumption or an enforced duplicate-review ledger. `/new` starts a fresh Telegram session; save a checkpoint first if the task must continue. Review-request email events dispatch their assigned SOP directly through `/sop/webhook/<sop-name>`, without a chat turn asking the model to start it. The installed SOP must declare that exact webhook trigger and execution ownership; a Manual trigger alone is insufficient. The default rule assigns `github-pr-review`; custom template rules need the optional `sop` field. The adapter reports admission; completion notification belongs in the SOP. See [rule assignments and failure diagnostics](agentmail-events.md#rules).
 
 For local context-window errors, inspect sanitized diagnostics for `estimated_tokens`, `model_context_window`, `model_context_window_source`, `context_token_budget` and `provider_attempted`; a fallback/local rejection is not evidence that the provider rejected the request. Keep prompt/tool payload logging off. For rejected SOP proposals, correct the reported fields/Markdown, inspect the candidate and explicitly apply it; do not repeat malformed proposals or assume a rejected proposal was installed.
 
