@@ -160,7 +160,8 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     session
         .configure(&mut cmd, crate::child_policy::Scope::Skills)
         .map_err(|_| "Child filesystem isolation is unavailable".to_string())?;
-    // Separate process group lets timeout cleanup terminate Git descendants.
+    // SAFETY: pre_exec only calls async-signal-safe setsid before exec;
+    // a separate process group lets cleanup terminate Git descendants.
     unsafe {
         cmd.pre_exec(|| {
             if libc::setsid() < 0 {
@@ -188,6 +189,7 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
                 std::thread::sleep(Duration::from_millis(100))
             }
             _ => {
+                // SAFETY: group is the child session ID established by setsid.
                 unsafe {
                     libc::kill(-group, libc::SIGKILL);
                 }
@@ -196,6 +198,7 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
             }
         }
     };
+    // SAFETY: the negative child session ID targets only its process group.
     // Reap descendants even if the direct CLI child exited first.
     unsafe {
         libc::kill(-group, libc::SIGKILL);

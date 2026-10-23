@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::{
     convert::Infallible,
     fs,
-    io::{self, BufRead, Read, Write},
+    io::{self, Read, Write},
     os::{
         fd::AsRawFd,
         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
@@ -361,6 +361,27 @@ fn verify(secret: &[u8], headers: &hyper::HeaderMap, body: &[u8], now: u64) -> b
 // A short exclusive file lock coordinates the supervisor and stdio MCP processes.
 // Event reservations deliberately remain after ambiguous dispatch failures: retries
 // must never start a second credentialed agent task automatically.
+fn lock_state(file: &fs::File, timeout: Duration) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        // SAFETY: file owns a valid descriptor; nonblocking flock only changes its lock.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::WouldBlock && error.kind() != io::ErrorKind::Interrupted {
+            return Err(failure());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Email admission state is busy",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io::Result<T> {
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -374,10 +395,7 @@ fn state<T>(path: &Path, update: impl FnOnce(&mut Value) -> io::Result<T>) -> io
     if !meta.is_file() || meta.nlink() != 1 || meta.permissions().mode() & 0o077 != 0 {
         return Err(failure());
     }
-    // SAFETY: file owns a valid descriptor; flock only changes this open file's lock.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(failure());
-    }
+    lock_state(&file, Duration::from_secs(2))?;
     let mut raw = String::new();
     (&mut file)
         .take((STATE_LIMIT + 1) as u64)
@@ -956,123 +974,141 @@ pub fn supervise(mut command: Command, port: u16, settings: Settings) -> io::Res
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        if port == BACKEND_PORT { return Err(startup_error("PORT must differ from reserved internal port 3887")) }
+        if port == BACKEND_PORT {
+            return Err(startup_error("PORT must differ from reserved internal port 3887"));
+        }
         let settings = Arc::new(settings);
         async_state(settings.clone(), |_| Ok(())).await.map_err(|_| startup_error("admission state is unreadable, unsafe or invalid; preserve the ledger and inspect its permissions and schema"))?;
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         command.process_group(0);
         struct RuntimeChild(std::process::Child);
-        impl Drop for RuntimeChild { fn drop(&mut self) {
-            // SAFETY: child started its own process group before executing.
-            unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL); }
-            let _ = self.0.wait();
-        }}
+        impl Drop for RuntimeChild {
+            fn drop(&mut self) {
+                // SAFETY: child started its own process group before executing.
+                unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL); }
+                let _ = self.0.wait();
+            }
+        }
         let mut child = RuntimeChild(command.spawn()?);
         let connections = Arc::new(Semaphore::new(64));
         let jobs = Arc::new(Semaphore::new(2));
         let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let mut tick = tokio::time::interval(Duration::from_millis(250));
-        loop { tokio::select! {
-            _ = term.recv() => break,
-            _ = tokio::signal::ctrl_c() => break,
-            _ = tick.tick() => if child.0.try_wait()?.is_some() { return Err(io::Error::other("ZeroClaw exited")) },
-            incoming = listener.accept() => {
-                let (stream, peer) = incoming?;
-                let Ok(permit) = connections.clone().try_acquire_owned() else { continue };
-                let settings = settings.clone(); let jobs = jobs.clone();
-                tokio::spawn(async move {
-                    let permit = Arc::new(permit);
-                    let service = service_fn(move |req: Request<Incoming>| {
-                        let settings = settings.clone(); let jobs = jobs.clone();
-                        let permit = permit.clone();
-                        async move {
-                            if req.uri().path() == ROUTE { Ok(receive(req, settings, jobs).await) }
-                            else { proxy(req, peer, &format!("{BACKEND_HOST}:{BACKEND_PORT}"), Some(permit)).await }
-                        }
+        loop {
+            tokio::select! {
+                _ = term.recv() => break,
+                _ = tokio::signal::ctrl_c() => break,
+                _ = tick.tick() => {
+                    if child.0.try_wait()?.is_some() {
+                        return Err(io::Error::other("ZeroClaw exited"));
+                    }
+                },
+                incoming = listener.accept() => {
+                    let (stream, peer) = incoming?;
+                    let Ok(permit) = connections.clone().try_acquire_owned() else {
+                        continue;
+                    };
+                    let settings = settings.clone();
+                    let jobs = jobs.clone();
+                    tokio::spawn(async move {
+                        let permit = Arc::new(permit);
+                        let service = service_fn(move |req: Request<Incoming>| {
+                            let settings = settings.clone();
+                            let jobs = jobs.clone();
+                            let permit = permit.clone();
+                            async move {
+                                if req.uri().path() == ROUTE {
+                                    Ok(receive(req, settings, jobs).await)
+                                } else {
+                                    proxy(req, peer, &format!("{BACKEND_HOST}:{BACKEND_PORT}"), Some(permit)).await
+                                }
+                            }
+                        });
+                        let _ = hyper::server::conn::http1::Builder::new()
+                            .timer(hyper_util::rt::TokioTimer::new())
+                            .header_read_timeout(Duration::from_secs(10))
+                            .max_buf_size(32768)
+                            .serve_connection(TokioIo::new(stream), service)
+                            .with_upgrades()
+                            .await;
                     });
-                    let _ = hyper::server::conn::http1::Builder::new().timer(hyper_util::rt::TokioTimer::new()).header_read_timeout(Duration::from_secs(10)).max_buf_size(32768).serve_connection(TokioIo::new(stream), service).with_upgrades().await;
-                });
+                }
             }
-        }}
+        }
         // Stop and reap before leaving the runtime; no detached daemon survives.
-        drop(child); Ok(())
+        drop(child);
+        Ok(())
     })
 }
 
 /// Narrow management tool: durable enable/disable state, never arbitrary paths.
 pub fn serve_mcp() -> io::Result<()> {
     let settings = Settings::from_env();
-    let mut input = io::stdin().lock();
-    loop {
-        let mut line = Vec::new();
-        if (&mut input).take(4097).read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        if line.len() > 4096 {
-            return Err(failure());
-        }
-        let req: Value = serde_json::from_slice(&line).map_err(|_| failure())?;
-        let Some(id) = req.get("id") else { continue };
-        if req["jsonrpc"] != "2.0" || !(id.is_string() || id.is_i64() || id.is_u64()) {
-            return Err(failure());
-        }
-        let result = match req["method"].as_str() {
-            Some("initialize") => {
-                json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"heimdall-mail","version":"0.1.0"}})
+    crate::mcp_stdio::serve_bounded(
+        &mut io::stdin().lock(),
+        &mut io::stdout().lock(),
+        4096,
+        None,
+        |req| {
+            let id = req.get("id")?.clone();
+            if req["jsonrpc"] != "2.0" || !(id.is_string() || id.is_i64() || id.is_u64()) {
+                return Some(
+                    json!({"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Invalid request"}}),
+                );
             }
-            Some("ping") => json!({}),
-            Some("tools/list") => json!({"tools":[
-                {"name":"filters","description":"List configured email filters, SOP assignments, enabled state and the ten most recent sanitized event diagnostics. Event references are SHA-256 hashes of event IDs. No secrets or email content returned.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
-                {"name":"set_enabled","description":"Enable or disable a configured email filter when the operator requests it. Does not configure Railway ingress or credentials.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"enabled":{"type":"boolean"}},"required":["name","enabled"],"additionalProperties":false}}
-            ]}),
-            Some("tools/call") => {
-                let args = &req["params"]["arguments"];
-                let name = req["params"]["name"].as_str().unwrap_or("");
-                let valid = match name {
-                    "filters" => args.as_object().is_some_and(|a| a.is_empty()),
-                    "set_enabled" => {
-                        args.as_object().is_some_and(|a| a.len() == 2)
-                            && args["name"].as_str().is_some_and(valid_id)
-                            && args["enabled"].is_boolean()
-                    }
-                    _ => false,
-                };
-                if !valid {
-                    writeln!(
-                        io::stdout().lock(),
-                        "{}",
-                        json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":"Use filters with no arguments, or set_enabled with name and enabled"}})
-                    )?;
-                    continue;
+            let result = match req["method"].as_str() {
+                Some("initialize") => {
+                    json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"heimdall-mail","version":"0.1.0"}})
                 }
-                let output = match &settings {
-                    Ok(Some(settings)) => manage(settings, name, args),
-                    Ok(None) => Ok(json!({"configured":false,"hint":"Email ingress is disabled in the template"}).to_string()),
-                    Err(_) => Err(io::Error::other("Email ingress configuration is invalid or credentials are missing")),
-                };
-                match output {
-                    Ok(text) => json!({"content":[{"type":"text","text":text}]}),
-                    Err(_) => {
-                        json!({"isError":true,"content":[{"type":"text","text":"Invalid email configuration, missing credentials, or unavailable admission state"}]})
+                Some("ping") => json!({}),
+                Some("tools/list") => json!({"tools":[
+                    {"name":"filters","description":"List configured email filters, SOP assignments, enabled state and the ten most recent sanitized event diagnostics. Event references are SHA-256 hashes of event IDs. No secrets or email content returned.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+                    {"name":"set_enabled","description":"Enable or disable a configured email filter when the operator requests it. Does not configure Railway ingress or credentials.","inputSchema":{"type":"object","properties":{"name":{"type":"string"},"enabled":{"type":"boolean"}},"required":["name","enabled"],"additionalProperties":false}}
+                ]}),
+                Some("tools/call") => {
+                    let args = &req["params"]["arguments"];
+                    let name = req["params"]["name"].as_str().unwrap_or("");
+                    let valid = match name {
+                        "filters" => args.as_object().is_some_and(|a| a.is_empty()),
+                        "set_enabled" => {
+                            args.as_object().is_some_and(|a| a.len() == 2)
+                                && args["name"].as_str().is_some_and(valid_id)
+                                && args["enabled"].is_boolean()
+                        }
+                        _ => false,
+                    };
+                    if !valid {
+                        return Some(
+                            json!({"jsonrpc":"2.0","id":id,"error":{"code":-32602,"message":"Use filters with no arguments, or set_enabled with name and enabled"}}),
+                        );
+                    }
+                    let output = match &settings {
+                        Ok(Some(settings)) => manage(settings, name, args),
+                        Ok(None) => Ok(json!({
+                            "configured": false,
+                            "hint": "Email ingress is disabled in the template"
+                        })
+                        .to_string()),
+                        Err(_) => Err(io::Error::other(
+                            "Email ingress configuration is invalid or credentials are missing",
+                        )),
+                    };
+                    match output {
+                        Ok(text) => json!({"content":[{"type":"text","text":text}]}),
+                        Err(_) => {
+                            json!({"isError":true,"content":[{"type":"text","text":"Invalid email configuration, missing credentials, or unavailable admission state"}]})
+                        }
                     }
                 }
-            }
-            _ => {
-                writeln!(
-                    io::stdout().lock(),
-                    "{}",
-                    json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unknown method"}})
-                )?;
-                continue;
-            }
-        };
-        writeln!(
-            io::stdout().lock(),
-            "{}",
-            json!({"jsonrpc":"2.0","id":id,"result":result})
-        )?;
-    }
-    Ok(())
+                _ => {
+                    return Some(
+                        json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Unknown method"}}),
+                    );
+                }
+            };
+            Some(json!({"jsonrpc":"2.0","id":id,"result":result}))
+        },
+    )
 }
 
 fn manage(settings: &Settings, name: &str, args: &Value) -> io::Result<String> {

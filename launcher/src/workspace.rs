@@ -1,5 +1,5 @@
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-const LIMIT: usize = 49_152;
+pub(crate) const LIMIT: usize = 49_152;
 use std::{
     ffi::CString,
     fs::File,
@@ -12,7 +12,8 @@ use std::{
 };
 
 pub fn validate_path(path: &str) -> io::Result<()> {
-    if path.is_empty()
+    if path.len() > 1024
+        || path.is_empty()
         || path.contains('\0')
         || Path::new(path)
             .components()
@@ -86,6 +87,7 @@ impl Workspace {
             )
         };
         if result == 0 {
+            // SAFETY: successful fstatat initialized metadata above.
             let metadata = unsafe { metadata.assume_init() };
             if metadata.st_mode & libc::S_IFMT != libc::S_IFREG {
                 return Err(io::Error::other("Destination must be a regular file"));
@@ -111,6 +113,8 @@ impl Workspace {
             )?;
             file.write_all(bytes)?;
             file.sync_all()?;
+            // SAFETY: both descriptors and C strings remain live; rename replaces
+            // the directory entry without following a destination symlink.
             // Atomic replacement never follows a concurrently substituted destination symlink.
             if unsafe {
                 libc::renameat(
@@ -126,6 +130,7 @@ impl Workspace {
             dir.sync_all()?;
             Ok(())
         })();
+        // SAFETY: live directory descriptor and valid temporary C string.
         unsafe {
             libc::unlinkat(dir.as_raw_fd(), temp.as_ptr(), 0);
         }
@@ -133,6 +138,7 @@ impl Workspace {
     }
 }
 fn open_at(dir: &File, name: &CString, flags: i32, mode: u32) -> io::Result<File> {
+    // SAFETY: live directory descriptor and NUL-terminated name; flags reject symlinks.
     let fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),
@@ -144,6 +150,7 @@ fn open_at(dir: &File, name: &CString, flags: i32, mode: u32) -> io::Result<File
     if fd < 0 {
         Err(io::Error::last_os_error())
     } else {
+        // SAFETY: successful openat returned a new owned descriptor.
         Ok(unsafe { File::from_raw_fd(fd) })
     }
 }
@@ -165,7 +172,13 @@ mod tests {
             workspace.read_binary("nested/file").unwrap(),
             b"replacement"
         );
-        for path in ["", "../escape", "/absolute", "nested/../escape"] {
+        for path in [
+            "",
+            "../escape",
+            "/absolute",
+            "nested/../escape",
+            &"a".repeat(1025),
+        ] {
             assert!(workspace.read_binary(path).is_err());
             assert!(workspace.write_binary(path, b"x").is_err());
         }

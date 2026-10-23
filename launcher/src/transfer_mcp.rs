@@ -1,22 +1,15 @@
 //! Bounded Telegram file transfer; local workspace access and explicit recipient authorization.
+use crate::workspace::{LIMIT, Workspace, validate_path};
 use reqwest::blocking::{Client, Response, multipart};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Read, Write};
-use std::path::{Component, Path};
+use std::path::Path;
 use std::time::Duration;
-const LIMIT: usize = 49152;
 const WORKSPACE: &str = "/data/zeroclaw/agents/primary/workspace";
 fn valid_path(path: &str) -> bool {
-    !path.is_empty()
-        && path.len() <= 1024
-        && !path.contains('\0')
-        && Path::new(path)
-            .components()
-            .all(|c| matches!(c, Component::Normal(_)))
+    validate_path(path).is_ok()
 }
 fn read_attachment(source: &str) -> Result<Vec<u8>, &'static str> {
-    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-    use std::os::unix::fs::OpenOptionsExt;
     const ROOT: &str = "/data/zeroclaw/agents/primary/workspace/telegram_files";
     let relative = Path::new(source)
         .strip_prefix(ROOT)
@@ -24,49 +17,9 @@ fn read_attachment(source: &str) -> Result<Vec<u8>, &'static str> {
         .and_then(|p| p.to_str())
         .filter(|p| valid_path(p))
         .ok_or("Use a Telegram attachment path inside telegram_files")?;
-    let root = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(ROOT)
-        .map_err(|_| "Telegram attachment directory unavailable")?;
-    let mut current: OwnedFd = root.into();
-    let components: Vec<_> = Path::new(relative).components().collect();
-    for (i, part) in components.iter().enumerate() {
-        let name = std::ffi::CString::new(part.as_os_str().as_encoded_bytes())
-            .map_err(|_| "Invalid attachment path")?;
-        let flags = libc::O_RDONLY
-            | libc::O_NOFOLLOW
-            | libc::O_CLOEXEC
-            | libc::O_NONBLOCK
-            | if i + 1 < components.len() {
-                libc::O_DIRECTORY
-            } else {
-                0
-            };
-        // SAFETY: owned live descriptor and NUL-terminated component; symlinks are rejected.
-        let fd = unsafe { libc::openat(current.as_raw_fd(), name.as_ptr(), flags) };
-        if fd < 0 {
-            return Err("Cannot open Telegram attachment");
-        }
-        // SAFETY: successful openat returned a new owned descriptor.
-        current = unsafe { OwnedFd::from_raw_fd(fd) };
-    }
-    let file = std::fs::File::from(current);
-    if !file
-        .metadata()
-        .map_err(|_| "Cannot inspect attachment")?
-        .is_file()
-    {
-        return Err("Attachment must be a regular file");
-    }
-    let mut bytes = Vec::new();
-    file.take((LIMIT + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read attachment")?;
-    if bytes.len() > LIMIT {
-        return Err("Transfer exceeds 48 KiB");
-    }
-    Ok(bytes)
+    Workspace::open(Path::new(ROOT))
+        .and_then(|workspace| workspace.read_binary(relative))
+        .map_err(|_| "Cannot read bounded regular Telegram attachment")
 }
 fn status_error(status: u16) -> Option<&'static str> {
     match status {
@@ -326,41 +279,18 @@ pub fn serve() -> io::Result<()> {
     let mut out = io::stdout().lock();
     serve_stream(&mut reader, &mut out, &mut run)
 }
-fn error(id: Value, code: i32, message: &str) -> Value {
-    json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
-}
 fn serve_stream(
     reader: &mut impl BufRead,
     out: &mut impl Write,
     run: &mut impl FnMut(&str, &Value) -> Result<String, &'static str>,
 ) -> io::Result<()> {
-    const REQUEST_LIMIT: usize = 8192;
-    loop {
-        let mut line = Vec::new();
-        if reader
-            .by_ref()
-            .take((REQUEST_LIMIT + 1) as u64)
-            .read_until(b'\n', &mut line)?
-            == 0
-        {
-            return Ok(());
-        }
-        let response = if line.len() > REQUEST_LIMIT {
-            if !line.ends_with(b"\n") {
-                reader.skip_until(b'\n')?;
-            }
-            Some(error(Value::Null, -32700, "Transfer request exceeds 8 KiB"))
-        } else {
-            match serde_json::from_slice(&line) {
-                Ok(request) => handle(request, run),
-                Err(_) => Some(error(Value::Null, -32700, "Invalid JSON")),
-            }
-        };
-        if let Some(response) = response {
-            writeln!(out, "{response}")?;
-            out.flush()?;
-        }
-    }
+    crate::mcp_stdio::serve_bounded(
+        reader,
+        out,
+        8192,
+        Some("Transfer request exceeds 8 KiB"),
+        |request| handle(request, run),
+    )
 }
 
 #[cfg(test)]
