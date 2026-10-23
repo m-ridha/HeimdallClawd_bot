@@ -1058,3 +1058,151 @@ fn startup_errors_identify_configuration_without_echoing_credentials() {
         "AgentMail startup: HEIMDALL_AGENTMAIL_WEBHOOK_SECRET is required and must be Unicode"
     );
 }
+
+#[tokio::test]
+async fn matching_rules_share_one_sop_admission_and_suppress_replay() {
+    multi_sop_event_case(false).await;
+}
+
+#[tokio::test]
+async fn later_sop_failure_retains_earlier_admission_and_suppresses_replay() {
+    multi_sop_event_case(true).await;
+}
+
+async fn multi_sop_event_case(fail_second: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    state(&path, |s| {
+        s["enabled"] = json!({"first":true,"second":true});
+        Ok(())
+    })
+    .unwrap();
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gateway = format!("http://{}", backend.local_addr().unwrap());
+    let (requests_tx, mut requests_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (stop_tx, mut stop_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        loop {
+            let (socket, _) = tokio::select! {
+                _ = &mut stop_rx => break,
+                accepted = backend.accept() => accepted.unwrap(),
+            };
+            let requests_tx = requests_tx.clone();
+            hyper::server::conn::http1::Builder::new().serve_connection(
+                TokioIo::new(socket),
+                service_fn(move |req: Request<Incoming>| {
+                    let requests_tx = requests_tx.clone();
+                    async move {
+                        let path = req.uri().path().to_string();
+                        let authorization = req.headers().get("authorization").cloned();
+                        let idempotency = req.headers().get("x-idempotency-key").cloned();
+                        let body = req.into_body().collect().await.unwrap().to_bytes();
+                        let payload: Value = serde_json::from_slice(&body).unwrap();
+                        requests_tx.send((path.clone(), authorization, idempotency, payload)).unwrap();
+                        let failed = fail_second && path == "/sop/webhook/z-second";
+                        let body = if failed {
+                            json!({"error":"PRIVATE_ERROR"})
+                        } else {
+                            json!({"status":"accepted","source":"webhook","path":path,"results":[{"status":"coalesced","sop":"a-first","run_id":"retained-run"}]})
+                        };
+                        Ok::<_, Infallible>(Response::builder()
+                            .status(if failed { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::OK })
+                            .header("connection", "close")
+                            .body(Full::new(Bytes::from(body.to_string()))).unwrap())
+                    }
+                }),
+            ).await.unwrap();
+        }
+    });
+    let key = test_signing_key();
+    // Reverse SOP order proves dispatch order is sorted, not rule order.
+    let filters = parse_filters(&json!([
+        {"name":"first","sender":"notifications@github.com","contains":"review","sop":if fail_second {"z-second"} else {"a-first"}},
+        {"name":"second","sender":"notifications@github.com","contains":"review","sop":"a-first"}
+    ]).to_string()).unwrap();
+    let (url, front) = ingress(Settings {
+        secret: key.to_vec(),
+        token: "fixture_not_a_live_token".into(),
+        filters,
+        state: path.clone(),
+        paired_tokens: "[]".into(),
+        authorization: None,
+        gateway,
+        telegram: None,
+        gateway_secret: String::new(),
+    })
+    .await;
+    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_multi","message":{"from":"notifications@github.com","text":"PRIVATE_BODY review"}})).unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(&key, &body, now()))
+            .body(body.clone())
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        202
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if state(&path, |s| {
+                Ok(s["events"]["evt_multi"]["status"] != "reserved")
+            })
+            .unwrap()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    state(&path, |s| {
+        let event = &s["events"]["evt_multi"];
+        assert_eq!(event["status"], if fail_second {"uncertain"} else {"accepted"});
+        assert_eq!(event["runs"], json!([{"sop":"a-first","run_id":"retained-run","status":"coalesced"}]));
+        if fail_second {
+            assert_eq!(event["diagnostic"], json!({"stage":"gateway","phase":"response_status","kind":"http","http_status":503,"gateway_completed":false}));
+        }
+        Ok(())
+    }).unwrap();
+    assert_eq!(
+        client
+            .post(&url)
+            .headers(signed(&key, &body, now()))
+            .body(body)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), server)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut paths = Vec::new();
+    while let Some((path, auth, idempotency, payload)) = requests_rx.recv().await {
+        paths.push(path);
+        assert_eq!(auth.unwrap(), "Bearer fixture_not_a_live_token");
+        assert_eq!(idempotency.unwrap(), "evt_multi");
+        assert_eq!(payload["rules"], json!(["first", "second"]));
+        assert!(!payload.to_string().contains("PRIVATE_BODY"));
+    }
+    assert_eq!(
+        paths,
+        if fail_second {
+            vec!["/sop/webhook/a-first", "/sop/webhook/z-second"]
+        } else {
+            vec!["/sop/webhook/a-first"]
+        }
+    );
+    let saved = fs::read_to_string(&path).unwrap();
+    for private in ["PRIVATE_BODY", "PRIVATE_ERROR", "fixture_not_a_live_token"] {
+        assert!(!saved.contains(private));
+    }
+    front.abort();
+}
