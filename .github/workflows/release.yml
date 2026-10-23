@@ -75,7 +75,7 @@ jobs:
           mkdir bot
           tar -xzf "heimdallclawd-$RELEASE_TAG.tar.gz" -C bot
           cd "$GITHUB_WORKSPACE"
-          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG" agent
+          python3 tools/deploy-release.py "$RUNNER_TEMP/release/bot" "$RAILWAY_AGENT_SERVICE_ID" "$RELEASE_TAG"
 
   attach-assets:
     needs: deploy

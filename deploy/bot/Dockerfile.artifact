@@ -1,5 +1,6 @@
 FROM rust:1.99-slim-bookworm AS rust-tools
-RUN rustup component add rustfmt clippy && mkdir -p /opt/heimdall-rust && cp -a "$(rustc --print sysroot)/." /opt/heimdall-rust/ && chmod -R go-w /opt/heimdall-rust
+RUN rustup component add rustfmt clippy && mkdir -p /opt/heimdall-rust && cp -a "$(rustc --print sysroot)/." /opt/heimdall-rust/ && rm -rf /opt/heimdall-rust/share/doc/rust/html /opt/heimdall-rust/share/man \
+    && chmod -R go-w /opt/heimdall-rust
 FROM node:26-bookworm-slim AS command-node
 FROM debian:bookworm-slim AS gh-download
 ARG GH_VERSION=2.102.0
@@ -23,7 +24,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && chmod 440 /etc/sudoers.d/heimdall && visudo -cf /etc/sudoers.d/heimdall
 RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/local/bin/$tool"; done
 ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/data/zeroclaw/.cargo
-RUN gh --version && cargo --version && rustc --version && rustfmt --version && cargo clippy --version \
+RUN gh --version && cargo --version && rustc --version && rustdoc --version && rustfmt --version && cargo clippy --version \
     && python3 --version && curl --version && jq --version && node --version && npm --version \
     && gosu heimdall sudo -n id -u | grep -x 0
 COPY prebuilt/zeroclaw /usr/local/bin/zeroclaw

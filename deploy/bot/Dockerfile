@@ -1,10 +1,3 @@
-FROM rust:1.99-slim-bookworm AS rust-tools
-# Copy real toolchain binaries/sysroot, not rustup proxies needing a writable HOME.
-RUN rustup component add rustfmt clippy \
-    && mkdir -p /opt/heimdall-rust \
-    && cp -a "$(rustc --print sysroot)/." /opt/heimdall-rust/ \
-    && chmod -R go-w /opt/heimdall-rust
-
 FROM rust:1.99-slim-bookworm AS launcher-build
 WORKDIR /launcher
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
@@ -92,42 +85,3 @@ FROM scratch AS release-binaries
 COPY --from=runtime-build /runtime/target/release/zeroclaw /zeroclaw
 COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /heimdall-launcher
 COPY --from=runtime-build /contract-passed /contract-passed
-
-FROM node:26-bookworm-slim AS command-node
-
-FROM debian:bookworm-slim AS gh-download
-ARG GH_VERSION=2.102.0
-ARG GH_SHA256=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/* \
-    && curl --fail --location --retry 3 -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-    && echo "${GH_SHA256}  /tmp/gh.tar.gz" | sha256sum -c - \
-    && tar -xzf /tmp/gh.tar.gz --strip-components=2 -C /usr/local/bin "gh_${GH_VERSION}_linux_amd64/bin/gh"
-
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git lynx openssh-client bash python3 python3-pip python3-venv curl jq sudo build-essential pkg-config libssl-dev ripgrep chromium chromium-driver tini && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 1000 heimdall && useradd --uid 1000 --gid 1000 --no-create-home heimdall
-COPY --from=gh-download /usr/local/bin/gh /usr/local/bin/gh
-COPY --from=rust-tools /opt/heimdall-rust /opt/heimdall-rust
-COPY --from=command-node /usr/local/bin/node /usr/local/bin/node
-COPY --from=command-node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && printf 'heimdall ALL=(ALL:ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/heimdall \
-    && chmod 440 /etc/sudoers.d/heimdall && visudo -cf /etc/sudoers.d/heimdall
-RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/local/bin/$tool"; done
-ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/data/zeroclaw/.cargo
-RUN gh --version && cargo --version && rustc --version && rustfmt --version && cargo clippy --version \
-    && python3 --version && curl --version && jq --version && node --version && npm --version \
-    && gosu heimdall sudo -n id -u | grep -x 0
-COPY --from=runtime-build /runtime/target/release/zeroclaw /usr/local/bin/zeroclaw
-COPY --from=launcher-validation /launcher/target/release/heimdall-launcher /usr/local/bin/heimdall-launcher
-LABEL org.opencontainers.image.title="HeimdallClawd" \
-    io.heimdall.runtime.version="0.8.6" io.heimdall.runtime.revision="c473221313341a853e04122f93bb9bd26b5e6c47"
-COPY deploy/bot/evals /usr/share/heimdall/evals
-ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888
-EXPOSE 3888
-COPY deploy/bot/entrypoint.sh /usr/local/bin/heimdall-entrypoint
-RUN chmod 755 /usr/local/bin/heimdall-entrypoint
-# Native browser service mode selects upstream container-compatible Chrome flags.
-ENV INVOCATION_ID=heimdall-container
-ENTRYPOINT ["/usr/bin/tini", "-g", "--", "/usr/local/bin/heimdall-entrypoint"]
