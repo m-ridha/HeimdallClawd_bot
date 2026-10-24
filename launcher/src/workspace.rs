@@ -1,5 +1,6 @@
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub(crate) const LIMIT: usize = 49_152;
+const TEMP_ATTEMPTS: usize = 100;
 use std::{
     ffi::CString,
     fs::File,
@@ -95,7 +96,15 @@ impl Workspace {
         } else if io::Error::last_os_error().raw_os_error() != Some(libc::ENOENT) {
             return Err(io::Error::last_os_error());
         }
+        let mut attempts = 0;
         let (temp, mut file) = loop {
+            if attempts == TEMP_ATTEMPTS {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Workspace temporary-file retries exhausted",
+                ));
+            }
+            attempts += 1;
             let temp = CString::new(format!(
                 ".heimdall-{}-{}",
                 std::process::id(),
@@ -201,6 +210,18 @@ mod tests {
         assert_eq!(std::fs::read_link(&link).unwrap(), stale);
         assert!(directory.is_dir());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 4);
+
+        // Bound collision work even if the directory contains many stale entries.
+        for counter in 4..104 {
+            std::fs::write(root.path().join(format!("{prefix}-{counter}")), b"retained").unwrap();
+        }
+        let error = workspace.write_binary("blocked", b"content").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+        assert!(!root.path().join("blocked").exists());
+        assert_eq!(
+            std::fs::read(root.path().join(format!("{prefix}-4"))).unwrap(),
+            b"retained"
+        );
     }
 
     #[test]
