@@ -93,7 +93,7 @@ gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider o
 gosu heimdall heimdall-launcher --gemini-login
 ```
 
-If the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created, reload via the paired dashboard or redeploy once so the runtime loads the new Gemini credentials. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
+If the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created (or if a Workspace/Standard Google account requires setting `ZEROCLAW_providers__models__gemini__default__oauth_project`), reload via the paired dashboard or redeploy once so the runtime loads the new Gemini configuration. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
 
 ## Releases and deployment
 
