@@ -14,7 +14,8 @@ Rust 1.99, Cargo, rustfmt, Clippy and GCC. Verify deployed versions. Dependencie
 can be downloaded. Use python3 -B for scripts and jq for JSON. Install tools into
 persistent user directories when possible; system changes made with sudo survive
 only the current container, so durable system dependencies belong in the image.
-CARGO_HOME is /data/zeroclaw/.cargo; keep caches small. One build at a time:
+CARGO_HOME is /tmp/cargo; its cache is lost at container replacement. Keep caches
+small; other caches under HOME remain persistent. One build at a time:
 cargo fmt --all -- --check; cargo test --locked -j 1; cargo clippy --locked -j 1
 --all-targets -- -D warnings. Use CARGO_INCREMENTAL=0 and low debug information
 for limited RAM. Large builds may need Codespaces or authorized Actions. Never

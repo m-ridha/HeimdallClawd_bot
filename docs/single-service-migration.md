@@ -15,10 +15,11 @@ Removing a service does not merge storage allowances. Trial allows a 0.5-GB volu
 The account's actual plan and Full/Limited Trial status need operator confirmation.
 Limited Trial outbound restrictions cannot be bypassed by root or configuration.
 
-Toolchains reside in image layers; project files and the Cargo cache use the
-persistent volume. Large Rust builds or Chromium sessions may exceed the available
-RAM/disk. Use one Cargo job and clean disposable caches; never purge databases,
-sign-in or unknown files to free space. System installs made with sudo disappear
+Toolchains reside in image layers; project files use the persistent volume.
+The Cargo cache uses ephemeral /tmp/cargo and is lost at container replacement;
+other caches under HOME remain persistent. Large Rust builds or Chromium sessions
+may exceed the available RAM/disk. Use one Cargo job and clean disposable caches;
+never purge databases, sign-in or unknown files to free space. System installs made with sudo disappear
 at container replacement; add durable OS dependencies to the Docker recipes.
 
 References: [plans](https://docs.railway.com/pricing/plans),

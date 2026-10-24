@@ -32,6 +32,8 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((output / 'prebuilt' / name).read_bytes()).hexdigest(), lock[field])
                 self.assertIn(lock[field], (output / 'deploy/bot/runtime.sha256').read_text())
             dockerfile = (output / 'Dockerfile').read_text()
+            self.assertIn('ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/tmp/cargo', dockerfile)
+            self.assertIn('ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888', dockerfile)
             self.assertNotRegex(dockerfile, r'\bcargo\s+(?:build|test|install|check)\b')
             self.assertIn('sha256sum -c', dockerfile)
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())

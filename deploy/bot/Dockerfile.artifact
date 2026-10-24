@@ -23,7 +23,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && printf 'heimdall ALL=(ALL:ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/heimdall \
     && chmod 440 /etc/sudoers.d/heimdall && visudo -cf /etc/sudoers.d/heimdall
 RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/local/bin/$tool"; done
-ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/data/zeroclaw/.cargo
+ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/tmp/cargo
 RUN gh --version && cargo --version && rustc --version && rustdoc --version && rustfmt --version && cargo clippy --version \
     && python3 --version && curl --version && jq --version && node --version && npm --version \
     && gosu heimdall sudo -n id -u | grep -x 0

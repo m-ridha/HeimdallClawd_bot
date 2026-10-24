@@ -95,22 +95,25 @@ impl Workspace {
         } else if io::Error::last_os_error().raw_os_error() != Some(libc::ENOENT) {
             return Err(io::Error::last_os_error());
         }
-        let temp = CString::new(format!(
-            ".heimdall-{}",
-            format_args!(
-                "{}-{}",
+        let (temp, mut file) = loop {
+            let temp = CString::new(format!(
+                ".heimdall-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            )
-        ))
-        .unwrap();
-        let operation = (|| {
-            let mut file = open_at(
+            ))
+            .unwrap();
+            match open_at(
                 &dir,
                 &temp,
                 libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
                 0o600,
-            )?;
+            ) {
+                Ok(file) => break (temp, file),
+                Err(error) if error.raw_os_error() == Some(libc::EEXIST) => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        let operation = (|| {
             file.write_all(bytes)?;
             file.sync_all()?;
             // SAFETY: both descriptors and C strings remain live; rename replaces
@@ -158,6 +161,59 @@ fn open_at(dir: &File, name: &CString, flags: i32, mode: u32) -> io::Result<File
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writes_retry_temporary_name_collisions_without_touching_stale_entries() {
+        if std::env::var_os("HEIMDALL_WORKSPACE_COLLISION_TEST").is_none() {
+            // Isolate NEXT from workspace writes running in parallel tests.
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "workspace::tests::writes_retry_temporary_name_collisions_without_touching_stale_entries",
+                ])
+                .env("HEIMDALL_WORKSPACE_COLLISION_TEST", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "collision test failed: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(root.path()).unwrap();
+        let prefix = format!(".heimdall-{}", std::process::id());
+        let stale = root.path().join(format!("{prefix}-0"));
+        let link = root.path().join(format!("{prefix}-1"));
+        let directory = root.path().join(format!("{prefix}-2"));
+        std::fs::write(&stale, b"stale content").unwrap();
+        std::os::unix::fs::symlink(&stale, &link).unwrap();
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(root.path().join("file"), b"old content").unwrap();
+
+        workspace.write_binary("file", b"replacement").unwrap();
+
+        assert_eq!(workspace.read_binary("file").unwrap(), b"replacement");
+        assert_eq!(std::fs::read(&stale).unwrap(), b"stale content");
+        assert_eq!(std::fs::read_link(&link).unwrap(), stale);
+        assert!(directory.is_dir());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 4);
+    }
+
+    #[test]
+    fn temporary_creation_propagates_errors_other_than_collisions() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = Workspace::open(root.path()).unwrap();
+        std::fs::remove_dir(root.path()).unwrap();
+
+        let error = workspace.write_binary("file", b"content").unwrap_err();
+
+        assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+    }
+
     #[test]
     fn bounded_local_transfers_reject_traversal_symlinks_and_special_files() {
         let root = tempfile::tempdir().unwrap();
