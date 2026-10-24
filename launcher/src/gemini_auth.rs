@@ -184,6 +184,16 @@ fn valid_operation_name(name: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '-' | '_'))
 }
 
+fn check_operation_error(lro: &Value) -> io::Result<()> {
+    if let Some(err) = lro.get("error").filter(|err| !err.is_null()) {
+        let code = err["code"].as_i64().unwrap_or(0);
+        return Err(fail(&format!(
+            "Gemini Code Assist onboarding failed with error code {code}; check project permissions and billing"
+        )));
+    }
+    Ok(())
+}
+
 fn ensure_code_assist_ready(
     client: &Client,
     code_assist_base: &str,
@@ -282,6 +292,7 @@ fn ensure_code_assist_ready(
         .send()
         .map_err(|error| transport_error(&error, "Code Assist onboarding"))?;
     let mut lro = read_json_response(onboard_response, "Code Assist onboarding")?;
+    check_operation_error(&lro)?;
 
     let mut attempts = 0;
     while !lro["done"].as_bool().unwrap_or(false) {
@@ -303,7 +314,10 @@ fn ensure_code_assist_ready(
             .send()
             .map_err(|error| transport_error(&error, "Code Assist onboarding poll"))?;
         lro = read_json_response(poll_response, "Code Assist onboarding poll")?;
+        check_operation_error(&lro)?;
     }
+
+    check_operation_error(&lro)?;
 
     if extract_project_id(&lro["response"]).is_some() || project_seed.is_some() {
         return Ok(());
@@ -782,6 +796,115 @@ mod tests {
         assert_eq!(
             validate_project_seed(Some("my-gcp-project-123")).unwrap(),
             Some("my-gcp-project-123".into())
+        );
+    }
+
+    #[test]
+    fn onboarding_terminal_error_with_configured_project_preserves_existing_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let gemini_dir = dir.path().join(".gemini");
+        std::fs::create_dir(&gemini_dir).unwrap();
+        let creds_path = gemini_dir.join("oauth_creds.json");
+        std::fs::write(&creds_path, b"retained-existing-credential").unwrap();
+
+        // Immediate terminal error on onboardUser.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut token_stream, _) = listener.accept().unwrap();
+            let _ = read_http_request(&mut token_stream);
+            write_http_response(
+                &mut token_stream,
+                "200 OK",
+                r#"{"access_token":"ya29.err1","refresh_token":"1//err1","expires_in":3600}"#,
+            );
+
+            let (mut load_stream, _) = listener.accept().unwrap();
+            let _ = read_http_request(&mut load_stream);
+            write_http_response(
+                &mut load_stream,
+                "200 OK",
+                r#"{"allowedTiers":[{"id":"standard-tier","userDefinedCloudaicompanionProject":true,"isDefault":true}]}"#,
+            );
+
+            let (mut onboard_stream, _) = listener.accept().unwrap();
+            let _ = read_http_request(&mut onboard_stream);
+            write_http_response(
+                &mut onboard_stream,
+                "200 OK",
+                r#"{"done":true,"error":{"code":7,"message":"permission denied"}}"#,
+            );
+        });
+
+        let result = exchange_and_store(
+            dir.path(),
+            &format!("http://{addr}/token"),
+            &format!("http://{addr}/v1internal"),
+            "fixture-code",
+            "fixture-verifier",
+            Some("my-gcp-project"),
+            Duration::from_millis(10),
+        );
+        server.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(error.to_string().contains("error code 7"));
+        assert_eq!(
+            std::fs::read(&creds_path).unwrap(),
+            b"retained-existing-credential"
+        );
+
+        // Polled terminal error on onboardUser.
+        let poll_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let poll_addr = poll_listener.local_addr().unwrap();
+        let poll_server = std::thread::spawn(move || {
+            let (mut token_stream, _) = poll_listener.accept().unwrap();
+            let _ = read_http_request(&mut token_stream);
+            write_http_response(
+                &mut token_stream,
+                "200 OK",
+                r#"{"access_token":"ya29.err2","refresh_token":"1//err2","expires_in":3600}"#,
+            );
+
+            let (mut load_stream, _) = poll_listener.accept().unwrap();
+            let _ = read_http_request(&mut load_stream);
+            write_http_response(
+                &mut load_stream,
+                "200 OK",
+                r#"{"allowedTiers":[{"id":"standard-tier","userDefinedCloudaicompanionProject":true,"isDefault":true}]}"#,
+            );
+
+            let (mut onboard_stream, _) = poll_listener.accept().unwrap();
+            let _ = read_http_request(&mut onboard_stream);
+            write_http_response(
+                &mut onboard_stream,
+                "200 OK",
+                r#"{"name":"operations/onboard-fail","done":false}"#,
+            );
+
+            let (mut poll_stream, _) = poll_listener.accept().unwrap();
+            let _ = read_http_request(&mut poll_stream);
+            write_http_response(
+                &mut poll_stream,
+                "200 OK",
+                r#"{"name":"operations/onboard-fail","done":true,"error":{"code":9,"message":"resource exhausted"}}"#,
+            );
+        });
+
+        let poll_result = exchange_and_store(
+            dir.path(),
+            &format!("http://{poll_addr}/token"),
+            &format!("http://{poll_addr}/v1internal"),
+            "fixture-code",
+            "fixture-verifier",
+            Some("my-gcp-project"),
+            Duration::from_millis(10),
+        );
+        poll_server.join().unwrap();
+        let poll_error = poll_result.unwrap_err();
+        assert!(poll_error.to_string().contains("error code 9"));
+        assert_eq!(
+            std::fs::read(&creds_path).unwrap(),
+            b"retained-existing-credential"
         );
     }
 
