@@ -1,12 +1,12 @@
 --- a/crates/zeroclaw-tools/src/text_browser.rs
 +++ b/crates/zeroclaw-tools/src/text_browser.rs
-@@ -6,6 +6,36 @@
- use zeroclaw_config::policy::SecurityPolicy;
+@@ -7,6 +7,41 @@
  
  use crate::helpers::domain_guard;
-+
+ 
 +/// Spawn the browser and collect bounded output while reading.
-+/// Output is capped at 500 KiB; the child is killed and awaited on overflow.
++/// stdout and stderr are drained concurrently; exceeding the 500 KiB stdout
++/// limit kills the child immediately without waiting for stderr EOF.
 +/// kill_on_drop ensures cleanup when the caller drops on timeout or cancellation.
 +async fn heimdall_browser_dump(
 +    browser: &str,
@@ -20,12 +20,16 @@
 +        .stdout(std::process::Stdio::piped())
 +        .stderr(std::process::Stdio::piped())
 +        .spawn()?;
-+    let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
-+    let stderr = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
++    let mut stdout_pipe = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
++    let mut stderr_pipe = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
 +    let mut out = Vec::new();
 +    let mut err = Vec::new();
-+    stdout.take(500_001).read_to_end(&mut out).await?;
-+    stderr.take(32_769).read_to_end(&mut err).await?;
++    let (out_result, err_result) = tokio::join!(
++        stdout_pipe.take(500_001).read_to_end(&mut out),
++        stderr_pipe.take(32_769).read_to_end(&mut err),
++    );
++    out_result?;
++    err_result?;
 +    if out.len() > 500_000 {
 +        child.kill().await?;
 +        let _ = child.wait().await;
@@ -34,10 +38,11 @@
 +    let status = child.wait().await?;
 +    Ok(std::process::Output { status, stdout: out, stderr: err })
 +}
- 
++
  /// Text browser tool: renders web pages as plain text using text-based browsers
  /// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
-@@ -361,13 +391,7 @@
+ /// browsers are unavailable.
+@@ -361,13 +396,7 @@
              self.timeout_secs
          });
  
