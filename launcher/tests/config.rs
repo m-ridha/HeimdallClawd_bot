@@ -103,6 +103,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "custom:https://api.cohere.ai/compatibility/v1",
         ),
         ("memory.embedding-model", "embed-v5.0-fast"),
+        ("storage.sqlite.default.open-timeout-secs", "30"),
         ("memory.embedding-dimensions", "2048"),
         ("knowledge.enabled", "true"),
         ("memory.consolidation-extract-facts", "true"),
@@ -265,7 +266,7 @@ fn requested_capabilities_are_enabled_with_owner_scoped_heartbeat() {
     ] {
         assert_eq!(cfg[section]["enabled"].as_bool(), Some(true), "{section}");
     }
-    assert_eq!(cfg["skills"]["open_skills_enabled"].as_bool(), Some(true));
+    assert_eq!(cfg["skills"]["open_skills_enabled"].as_bool(), Some(false));
     assert_eq!(cfg["skills"]["allow_scripts"].as_bool(), Some(true));
     assert_eq!(
         cfg["runtime_profiles"]["primary"]["parallel_tools"].as_bool(),
@@ -638,4 +639,19 @@ fn native_execution_is_networked_root_capable_without_executor_configuration() {
     }
     assert_eq!(config["backup"]["max_keep"].as_integer(), Some(2));
     assert_eq!(config["data_retention"]["dry_run"].as_bool(), Some(true));
+}
+
+#[test]
+fn sqlite_storage_is_explicit_and_unavailable_bulk_sync_is_disabled() {
+    let rendered = render_config(&["1001".into()], "gpt-6.1-sol").unwrap();
+    let config: toml::Value = toml::from_str(&rendered).unwrap();
+    assert_eq!(
+        config["storage"]["sqlite"]["default"]["open_timeout_secs"].as_integer(),
+        Some(30)
+    );
+    assert_eq!(config["memory"]["backend"].as_str(), Some("sqlite"));
+    assert_eq!(
+        config["skills"]["open_skills_enabled"].as_bool(),
+        Some(false)
+    );
 }

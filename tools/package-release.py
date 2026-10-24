@@ -76,6 +76,7 @@ patch_files = {
     'http_secret_origins_patch_sha256': 'http-secret-origins.patch',
     'browser_output_patch_sha256': 'browser-output.patch',
     'private_telegram_patch_sha256': 'private-telegram.patch',
+    'telegram_startup_patch_sha256': 'telegram-startup.patch',
 }
 provenance.update({
     field: hashlib.sha256(source_file(root, f'deploy/bot/patches/{filename}').read_bytes()).hexdigest()

@@ -61,3 +61,25 @@ fn recovery_starts_without_credentials_and_only_exposes_labeled_health() {
         assert!(!reply.contains("synthetic-invalid-secret"));
     }
 }
+
+#[test]
+fn storage_capacity_is_reported_on_stdout() {
+    if std::env::var_os("HEIMDALL_STORAGE_REPORT_FIXTURE").is_some() {
+        heimdall_launcher::startup::report_storage("/");
+        return;
+    }
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "storage_capacity_is_reported_on_stdout",
+            "--nocapture",
+        ])
+        .env("HEIMDALL_STORAGE_REPORT_FIXTURE", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("Storage /: total_bytes="));
+    assert!(!stderr.contains("Storage /:"));
+}

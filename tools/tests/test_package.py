@@ -46,7 +46,7 @@ class PackageTests(unittest.TestCase):
                 'responses_tool_history_patch_sha256', 'sop_workshop_guidance_patch_sha256',
                 'gateway_admin_auth_patch_sha256', 'http_diagnostics_patch_sha256',
                 'http_secret_origins_patch_sha256', 'browser_output_patch_sha256',
-                'private_telegram_patch_sha256',
+                'private_telegram_patch_sha256', 'telegram_startup_patch_sha256',
             })
             self.assertEqual(lock['browser_output_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())
@@ -66,6 +66,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn('executor_sha256', lock)
             self.assertNotIn('native_child_patch_sha256', lock)
             self.assertNotIn('remote_skills_patch_sha256', lock)
+            self.assertEqual(lock['telegram_startup_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/telegram-startup.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['private_telegram_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['features'], 'agent-runtime,tools-external,tool-project-intel,channel-telegram,gateway,schema-export,plugins-wasm-cranelift,embedded-web,webauthn,channel-acp-server,browser-native')
             self.assertIn('--features ' + lock['features'] + ' --bin zeroclaw', (ROOT / 'deploy/bot/Dockerfile').read_text())
