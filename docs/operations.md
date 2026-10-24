@@ -14,6 +14,33 @@ The public gateway requires pairing; Telegram uses polling and private permitted
 chats. Root-capable tools share this service with credentials. Monitor usage and
 keep caches small. Platform restrictions still apply to root commands.
 
+## Telegram startup and connectivity
+
+A healthy gateway does not prove that Telegram can reach its Bot API. If polling
+or username lookup fails, inspect the sanitized transport category, I/O kind and
+HTTP status in dashboard logs. Test `https://api.telegram.org` from the Railway
+console with a bounded `curl` request **without** including the bot token.
+Compare with another public host; an intermittent TLS timeout is different from
+a confirmed plan-wide egress restriction. Native root access cannot bypass either.
+Keep certificate verification enabled; do not force an address family or configure
+a proxy without evidence and a trusted endpoint. Polling requests have a deadline
+15 seconds longer than their requested long-poll interval and retain the native
+retry/backoff behavior; diagnostics do not replay agent tools.
+
+Telegram's command menu is separate from the agent's tool grants. On an explicit
+`BOT_COMMANDS_TOO_MUCH` response, registration retries with progressively fewer
+menu entries, preserving built-in commands first. Each attempt has a 15-second
+deadline and the capped command list permits at most seven attempts. Other
+rejections and transport failures are not retried by this fallback. Shortening
+the menu does not remove tools or installed skills.
+
+The explicit `[storage.sqlite.default]` entry makes the native storage banner
+agree with the selected SQLite backend. It retains the existing default database
+location and limits waiting to open a locked database to 30 seconds. The previous
+`Memory: none` banner was not evidence that per-agent SQLite memory or separately
+persisted conversation sessions had been disabled. Verify actual recall and
+persistence after deployment rather than relying on the banner alone.
+
 ## Variables
 
 The bot requires `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID`. No Telegram owner ID is hardcoded; omitting it stops startup. Keep token values in Railway variables only. `TELEGRAM_ALLOWED_USER_IDS` accepts comma-separated numeric IDs with optional surrounding spaces; the owner is always included and duplicates are removed. A blank variable means owner only. Empty entries within a nonempty list, zero, negative and malformed entries fail startup. Only private chats from permitted accounts are accepted. All permitted accounts share the agent workspace; conversation keys include the sender identity.
@@ -125,9 +152,9 @@ Build and release procedures, generated checksums/provenance and compile-cache b
 
 Git is installed in the final main-service image. The agent has a dedicated stdio MCP server implemented by `heimdall-launcher --skills-mcp`, exposing only `skills__install` and `skills__list`. Ask Heimdall to install a named skill from the official ZeroClaw registry, or to list its installed skills. The model may also select these tools when a task needs a skill.
 
-The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. A fixed shell bootstrap clones the official registry into its precreated cache when needed, then executes ZeroClaw's native install/audit implementation. The skill name is passed as a validated argument, never interpolated into shell code. The installer forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. These restrictions apply to this installer path. Separately granted native shell and sudo provide broader access subject to platform policy.
+The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. A fixed shell bootstrap clones the official registry into its precreated cache when needed, then executes ZeroClaw's native install/audit implementation. The skill name is passed as a validated argument, never interpolated into shell code. The installer forces the official registry, permits script-containing skills, keeps bulk synchronization off inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. These restrictions apply to this installer path. Separately granted native shell and sudo provide broader access subject to platform policy.
 
-The registry installer targets the primary agent's `managed` bundle, persisted under `/data/zeroclaw/shared/skills/managed`. Additional operator-created native bundles can be attached with the procedure below. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
+The registry installer targets the primary agent's `managed` bundle, persisted under `/data/zeroclaw/shared/skills/managed`. Additional operator-created native bundles can be attached with the procedure below. Bulk Open Skills synchronization is disabled because the pinned upstream repository is unavailable. This does not disable registry installs, existing skill bundles or their persistence. The unused cache at `/data/zeroclaw/shared/open-skills` is preserved; no installed files are deleted. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
 
 Native skill scripts execute locally under ZeroClaw policy. Install dependencies in the main service as needed, then verify actual execution; installation alone is not proof that a skill works.
 

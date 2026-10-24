@@ -346,7 +346,9 @@ max_instances = 16
 max_connections_per_instance = 4
 
 [skills]
-open_skills_enabled = true
+# The upstream bulk-sync repository is unavailable. Managed registry installs
+# and persistent operator bundles remain enabled.
+open_skills_enabled = false
 open_skills_dir = "/data/zeroclaw/shared/open-skills"
 allow_scripts = true
 prompt_injection_mode = "compact"
@@ -470,6 +472,10 @@ transcribe_audio = true
 describe_images = true
 # This runtime documents video summarization as a placeholder.
 summarize_video = false
+
+[storage.sqlite.default]
+# Keep the native database location; bound opening a locked database.
+open_timeout_secs = 30
 
 [memory]
 backend = "sqlite"

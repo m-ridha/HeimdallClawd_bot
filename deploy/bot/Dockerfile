@@ -20,13 +20,14 @@ RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https:
     && echo 'ae1916dd79364f936a6600e8eb143aa1f405750d501f6c5ef7f1a83f717d574c  /tmp/runtime.tar.gz' | sha256sum -c - \
     && tar -xzf /tmp/runtime.tar.gz --strip-components=1 -C /runtime && rm /tmp/runtime.tar.gz
 COPY deploy/bot/patches/private-telegram.patch /tmp/private-telegram.patch
+COPY deploy/bot/patches/telegram-startup.patch /tmp/telegram-startup.patch
 COPY deploy/bot/patches/http-secret-origins.patch /tmp/http-secret-origins.patch
 COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
 COPY deploy/bot/patches/gateway-admin-auth.patch /tmp/gateway-admin-auth.patch
 COPY deploy/bot/patches/sop-workshop-guidance.patch /tmp/sop-workshop-guidance.patch
 COPY deploy/bot/patches/responses-tool-history.patch /tmp/responses-tool-history.patch
 COPY deploy/bot/patches/browser-output.patch /tmp/browser-output.patch
-RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch
+RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/telegram-startup.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web

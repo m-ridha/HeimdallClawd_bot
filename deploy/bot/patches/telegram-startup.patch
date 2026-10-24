@@ -1,0 +1,266 @@
+--- a/crates/zeroclaw-channels/src/telegram.rs
++++ b/crates/zeroclaw-channels/src/telegram.rs
+@@ -442,0 +443,32 @@
++}
++
++// Keep transport diagnostics actionable without retaining token-bearing URLs,
++// response bodies or arbitrary source-error strings.
++fn telegram_transport_diagnostic(error: &reqwest::Error) -> serde_json::Value {
++    use std::error::Error as _;
++    let kind = if error.is_timeout() {
++        "timeout"
++    } else if error.is_connect() {
++        "connect"
++    } else if error.is_decode() {
++        "decode"
++    } else {
++        "request"
++    };
++    let mut source = error.source();
++    let mut io_kind = None;
++    for _ in 0..8 {
++        let Some(cause) = source else { break };
++        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
++            io_kind = Some(format!("{:?}", io.kind()));
++            break;
++        }
++        source = cause.source();
++    }
++    serde_json::json!({
++        "kind": kind,
++        "phase": "request",
++        "io_kind": io_kind,
++        "http_status": error.status().map(|status| status.as_u16()),
++        "hint": "check connectivity, DNS/TLS, proxy and platform egress; do not log request URLs"
++    })
+@@ -3793,34 +3825,69 @@
+-        let body = serde_json::json!({ "commands": commands });
+-
+-        match self.http_client().post(&url).json(&body).send().await {
+-            Ok(resp) if resp.status().is_success() => {
+-                ::zeroclaw_log::record!(
+-                    INFO,
+-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+-                    &format!(
+-                        "Telegram bot commands registered successfully ({} commands)",
+-                        commands.len()
+-                    )
+-                );
+-            }
+-            Ok(resp) => {
+-                let status = resp.status();
+-                let text = resp.text().await.unwrap_or_default();
+-                ::zeroclaw_log::record!(
+-                    WARN,
+-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+-                        .with_attrs(
+-                            ::serde_json::json!({"status": status.to_string(), "text": text})
+-                        ),
+-                    "Failed to register Telegram bot commands:"
+-                );
+-            }
+-            Err(e) => {
+-                ::zeroclaw_log::record!(
+-                    WARN,
+-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+-                        .with_attrs(::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})),
+-                    "Failed to register Telegram bot commands"
+-                );
++        // Menu registration is idempotent. Shrink only on Telegram's explicit
++        // size rejection, never on auth, rate-limit, transport or other errors.
++        // Halving a set of at most 100 commands bounds this to seven requests.
++        loop {
++            let body = serde_json::json!({ "commands": commands });
++            match self
++                .http_client()
++                .post(&url)
++                .json(&body)
++                .timeout(Duration::from_secs(15))
++                .send()
++                .await
++            {
++                Ok(resp) if resp.status().is_success() => {
++                    ::zeroclaw_log::record!(
++                        INFO,
++                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
++                            .with_attrs(serde_json::json!({"registered": commands.len()})),
++                        "Telegram bot commands registered successfully"
++                    );
++                    break;
++                }
++                Ok(mut resp) => {
++                    let status = resp.status();
++                    let mut bytes = Vec::new();
++                    // Error payloads are untrusted and never enter diagnostics.
++                    while let Ok(Some(chunk)) = resp.chunk().await {
++                        if bytes.len() + chunk.len() > 4096 {
++                            bytes.clear();
++                            break;
++                        }
++                        bytes.extend_from_slice(&chunk);
++                    }
++                    let rejection = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
++                    let too_large = status == reqwest::StatusCode::BAD_REQUEST
++                        && rejection
++                            .as_ref()
++                            .and_then(|body| body["description"].as_str())
++                            == Some("Bad Request: BOT_COMMANDS_TOO_MUCH");
++                    if too_large && commands.len() > 1 {
++                        let previous_count = commands.len();
++                        commands.truncate(commands.len() / 2);
++                        ::zeroclaw_log::record!(
++                            WARN,
++                            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
++                                .with_attrs(serde_json::json!({"previous_count": previous_count, "next_count": commands.len()})),
++                            "Telegram command menu rejected by size; retrying a smaller menu"
++                        );
++                        continue;
++                    }
++                    ::zeroclaw_log::record!(
++                        WARN,
++                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
++                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
++                            .with_attrs(serde_json::json!({"http_status": status.as_u16(), "registered": commands.len(), "size_rejected": too_large})),
++                        "Failed to register Telegram bot commands"
++                    );
++                    break;
++                }
++                Err(error) => {
++                    ::zeroclaw_log::record!(
++                        WARN,
++                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
++                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
++                            .with_attrs(telegram_transport_diagnostic(&error)),
++                        "Failed to register Telegram bot commands"
++                    );
++                    break;
++                }
+@@ -4173 +4240,3 @@
+-                        .with_attrs(::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})),
++                        .with_attrs(e.downcast_ref::<reqwest::Error>()
++                            .map(telegram_transport_diagnostic)
++                            .unwrap_or_else(|| serde_json::json!({"kind":"api_response", "phase":"response"}))),
+@@ -8240 +8309,2 @@
+-            let resp = match self.http_client().post(&url).json(&body).send().await {
++            let resp = match self.http_client().post(&url).json(&body)
++                .timeout(Duration::from_secs(poll_timeout_secs + 15)).send().await {
+@@ -8248 +8318 @@
+-                                ::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})
++                                telegram_transport_diagnostic(&e)
+@@ -24312,0 +24383,114 @@
++#[cfg(test)]
++mod heimdall_startup_tests {
++    use super::*;
++    use wiremock::{
++        Mock, MockServer, Request, ResponseTemplate,
++        matchers::{method, path},
++    };
++
++    #[tokio::test]
++    async fn heimdall_command_menu_shrinks_only_after_explicit_size_rejection() {
++        let server = MockServer::start().await;
++        Mock::given(method("POST"))
++            .and(path("/bottest-token/setMyCommands"))
++            .respond_with(|request: &Request| {
++                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
++                if body["commands"].as_array().unwrap().len() > 2 {
++                    ResponseTemplate::new(400).set_body_json(serde_json::json!({
++                        "ok": false, "error_code": 400,
++                        "description": "Bad Request: BOT_COMMANDS_TOO_MUCH"
++                    }))
++                } else {
++                    ResponseTemplate::new(200)
++                        .set_body_json(serde_json::json!({"ok":true,"result":true}))
++                }
++            })
++            .expect(3)
++            .mount(&server)
++            .await;
++        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
++            .with_api_base(server.uri());
++        channel.register_bot_commands().await;
++        let requests = server.received_requests().await.unwrap();
++        let counts: Vec<usize> = requests
++            .iter()
++            .map(|request| {
++                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
++                body["commands"].as_array().unwrap().len()
++            })
++            .collect();
++        assert_eq!(counts, [6, 3, 1]);
++        let last: serde_json::Value = serde_json::from_slice(&requests[2].body).unwrap();
++        assert_eq!(last["commands"][0]["command"], "new");
++    }
++
++    #[tokio::test]
++    async fn heimdall_command_menu_does_not_retry_other_rejections() {
++        for (status, description) in [
++            (401, "Unauthorized"),
++            (429, "Too Many Requests"),
++            (400, "Bad Request: COMMAND_INVALID"),
++            (500, "BOT_COMMANDS_TOO_MUCH"),
++        ] {
++            let server = MockServer::start().await;
++            Mock::given(method("POST"))
++                .and(path("/bottest-token/setMyCommands"))
++                .respond_with(
++                    ResponseTemplate::new(status).set_body_json(serde_json::json!({
++                        "ok":false, "description":description
++                    })),
++                )
++                .expect(1)
++                .mount(&server)
++                .await;
++            let channel =
++                TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
++                    .with_api_base(server.uri());
++            channel.register_bot_commands().await;
++        }
++    }
++
++    #[tokio::test]
++    async fn heimdall_command_menu_stops_when_even_one_command_is_rejected() {
++        let server = MockServer::start().await;
++        Mock::given(method("POST"))
++            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
++                "ok":false, "description":"Bad Request: BOT_COMMANDS_TOO_MUCH"
++            })))
++            .expect(3)
++            .mount(&server)
++            .await;
++        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
++            .with_api_base(server.uri());
++        channel.register_bot_commands().await;
++    }
++
++    #[tokio::test]
++    async fn heimdall_transport_diagnostic_omits_secret_urls() {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
++        drop(listener);
++        let error = reqwest::Client::builder()
++            .no_proxy()
++            .build()
++            .unwrap()
++            .get(format!(
++                "http://{address}/botfixture-private-token/getUpdates?secret=private-value"
++            ))
++            .send()
++            .await
++            .unwrap_err();
++        let diagnostic = telegram_transport_diagnostic(&error);
++        assert_eq!(diagnostic["kind"], "connect");
++        assert_eq!(diagnostic["phase"], "request");
++        let serialized = diagnostic.to_string();
++        for forbidden in [
++            "fixture-private-token",
++            "private-value",
++            "http://",
++            "getUpdates",
++        ] {
++            assert!(!serialized.contains(forbidden));
++        }
++    }
++}

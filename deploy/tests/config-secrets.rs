@@ -42,6 +42,10 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .await
         .unwrap();
     assert_eq!(config.gateway.host, "0.0.0.0");
+    assert_eq!(config.resolve_active_storage().kind(), "sqlite");
+    assert_eq!(config.storage.sqlite["default"].open_timeout_secs, Some(30));
+    assert!(config.storage.sqlite["default"].path.is_none());
+    assert!(!config.skills.open_skills_enabled);
     let pairing = zeroclaw_config::pairing::PairingGuard::new(
         true,
         &config.gateway.paired_tokens,

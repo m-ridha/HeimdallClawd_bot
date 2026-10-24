@@ -87,7 +87,7 @@ pub fn report_storage(path: &str) {
     let usage = unsafe { usage.assume_init() };
     let total = (usage.f_blocks as u128) * (usage.f_frsize as u128);
     let available = (usage.f_bavail as u128) * (usage.f_frsize as u128);
-    eprintln!("Storage {path}: total_bytes={total} available_bytes={available}");
+    println!("Storage {path}: total_bytes={total} available_bytes={available}");
 }
 
 fn respond(mut stream: TcpStream) -> io::Result<()> {

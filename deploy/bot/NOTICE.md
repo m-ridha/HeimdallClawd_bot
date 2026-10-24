@@ -20,6 +20,7 @@ launcher-created registry directory within the existing Landlock profile.
 
 | Patch | Contract not replaced by native configuration |
 | --- | --- |
+| telegram-startup.patch | Retry only explicit Telegram command-menu size rejections with a shrinking menu; bound polling requests and report transport categories without secret URLs or raw error bodies. |
 | private-telegram.patch | Reject non-private Telegram updates before callback/media processing, in addition to account allowlisting. |
 | http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |
 | http-diagnostics.patch | Provide bounded, sanitized actionable HTTP status/category diagnostics without enabling payload logging. |
