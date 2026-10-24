@@ -1,15 +1,14 @@
 --- a/crates/zeroclaw-tools/src/text_browser.rs
 +++ b/crates/zeroclaw-tools/src/text_browser.rs
-@@ -7,6 +7,51 @@
- 
- use crate::helpers::domain_guard;
- 
+@@ -8,0 +9,46 @@
++
 +/// Spawn the browser and collect bounded output while reading.
 +/// stdout and stderr are drained concurrently. The stdout future returns an
 +/// error as soon as it reads 500,001 bytes; tokio::try_join! cancels the
 +/// stderr future immediately so the child is killed without waiting for
 +/// stderr EOF. kill_on_drop handles cleanup on timeout or cancellation.
-+async fn heimdall_browser_dump(
++#[doc(hidden)]
++pub async fn heimdall_browser_dump(
 +    browser: &str,
 +    args: &[String],
 +) -> std::io::Result<std::process::Output> {
@@ -21,8 +20,8 @@
 +        .stdout(std::process::Stdio::piped())
 +        .stderr(std::process::Stdio::piped())
 +        .spawn()?;
-+    let mut stdout_pipe = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
-+    let mut stderr_pipe = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
++    let stdout_pipe = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
++    let stderr_pipe = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
 +    let stdout_fut = async {
 +        let mut out = Vec::new();
 +        stdout_pipe.take(500_001).read_to_end(&mut out).await?;
@@ -48,14 +47,7 @@
 +        }
 +    }
 +}
-+
- /// Text browser tool: renders web pages as plain text using text-based browsers
- /// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
- /// browsers are unavailable.
-@@ -361,13 +400,7 @@
-             self.timeout_secs
-         });
- 
+@@ -364,7 +410 @@
 -        let result = tokio::time::timeout(
 -            timeout,
 -            tokio::process::Command::new(&browser)
@@ -64,6 +56,3 @@
 -        )
 -        .await;
 +        let result = tokio::time::timeout(timeout, heimdall_browser_dump(&browser, &dump_args)).await;
- 
-         match result {
-             Ok(Ok(output)) => {

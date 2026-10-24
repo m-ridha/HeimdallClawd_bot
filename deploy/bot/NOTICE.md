@@ -35,3 +35,5 @@ Remove a patch only after a tested upstream replacement covers its contract.
 Configuration, retries or extra logging do not substitute for missing behavior.
 Artifact provenance retains patch hashes; source and tests stay in the tagged
 repository rather than the runtime-only Railway upload.
+
+Browser-output regressions are compiled and executed from `deploy/tests/browser-output.rs` in the native Linux contract stage. They cover the exact stdout limit, overflow with stderr held open, timeout and cancellation cleanup. The skills bootstrap test uses a local Git fixture; no external registry or credentials are needed.

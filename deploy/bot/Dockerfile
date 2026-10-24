@@ -1,5 +1,6 @@
 FROM rust:1.99-slim-bookworm AS launcher-build
 WORKDIR /launcher
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 COPY launcher/Cargo.toml launcher/Cargo.lock ./
 COPY launcher/src ./src
@@ -46,6 +47,7 @@ ENV HEIMDALL_TEST_RUNTIME=/usr/local/bin/zeroclaw
 RUN cargo test --locked
 
 FROM runtime-source AS native-test-compile
+COPY deploy/tests/browser-output.rs crates/zeroclaw-tools/tests/heimdall_browser_output.rs
 COPY deploy/tests/telegram-transcription.rs crates/zeroclaw-channels/tests/heimdall_transcription.rs
 COPY deploy/tests/logging-privacy.rs crates/zeroclaw-channels/tests/heimdall_logging.rs
 COPY deploy/tests/tool-inventory.rs crates/zeroclaw-runtime/tests/heimdall_inventory.rs
@@ -60,7 +62,7 @@ RUN cargo test --locked -p zeroclaw-channels --no-default-features --features ch
     && cargo test --locked -p zeroclaw-providers --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run \
-    && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --no-run \
+    && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_browser_output --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets --no-run \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --test heimdall_inventory --test heimdall_sop_workshop --no-run
 
@@ -76,7 +78,7 @@ RUN cargo test --locked -p zeroclaw-channels --no-default-features --features ch
     && cargo test --locked -p zeroclaw-providers --lib heimdall \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription \
-    && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins \
+    && cargo test --locked -p zeroclaw-tools --no-default-features --features tools-external --test heimdall_skills_stdio --test heimdall_codespace_stdio --test heimdall_http_origins --test heimdall_browser_output \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --test heimdall_inventory --test heimdall_sop_workshop \
     && /runtime/target/release/zeroclaw eval run --suite /tmp/heimdall-evals --mode replay \

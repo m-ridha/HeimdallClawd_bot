@@ -141,6 +141,12 @@ fn command() -> Command {
     configure_command(&mut command);
     command
 }
+const INSTALL_SCRIPT: &str = r#"set -eu
+if [ ! -d "$2/.git" ]; then
+    git clone --depth 1 "$1" "$2"
+fi
+exec "$3" skills install "$4" --bundle managed"#;
+
 fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     use std::os::unix::process::CommandExt;
     let mut cmd = if tool == "install" {
@@ -151,12 +157,11 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
         configure_command(&mut cmd);
         cmd.args([
             "-c",
-            r#"set -eu
-if [ ! -d /data/zeroclaw/data/skills-registry/.git ]; then
-    git clone --depth 1 https://github.com/zeroclaw-labs/zeroclaw-skills /data/zeroclaw/data/skills-registry
-fi
-exec /usr/local/bin/zeroclaw skills install "$1" --bundle managed"#,
+            INSTALL_SCRIPT,
             "heimdall-skills",
+            "https://github.com/zeroclaw-labs/zeroclaw-skills",
+            "/data/zeroclaw/data/skills-registry",
+            "/usr/local/bin/zeroclaw",
             name.unwrap(),
         ]);
         cmd
@@ -239,6 +244,88 @@ pub fn serve() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bootstrap_clones_empty_cache_and_reuses_existing_checkout() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let cache = root.path().join("cache with spaces");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&cache).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", root.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .current_dir(&source)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "fixture Git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        std::fs::write(source.join("fixture"), b"registry content").unwrap();
+        git(&["add", "fixture"]);
+        git(&[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "fixture",
+        ]);
+        let runtime = root.path().join("runtime stub");
+        std::fs::write(&runtime, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n").unwrap();
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let run = |cache: &std::path::Path| {
+            Command::new("/bin/sh")
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", root.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .args(["-c", INSTALL_SCRIPT, "fixture"])
+                .arg(&source)
+                .arg(cache)
+                .arg(&runtime)
+                .arg("fixture-skill")
+                .output()
+                .unwrap()
+        };
+        assert!(run(&cache).status.success());
+        assert!(cache.join(".git").is_dir());
+        assert_eq!(
+            std::fs::read(cache.join("fixture")).unwrap(),
+            b"registry content"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("runtime stub.args")).unwrap(),
+            "skills\ninstall\nfixture-skill\n--bundle\nmanaged\n"
+        );
+        std::fs::remove_dir_all(&source).unwrap();
+        assert!(
+            run(&cache).status.success(),
+            "existing checkout must not be cloned again"
+        );
+        std::fs::remove_file(root.path().join("runtime stub.args")).unwrap();
+        let missing = root.path().join("missing cache");
+        std::fs::create_dir(&missing).unwrap();
+        assert!(!run(&missing).status.success());
+        assert!(
+            !root.path().join("runtime stub.args").exists(),
+            "failed clone must not invoke installation"
+        );
+    }
+
     #[test]
     fn skill_failures_classify_without_echoing_registry_text() {
         for (text, expected) in [
