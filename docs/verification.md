@@ -2,7 +2,32 @@
 
 This is a historical evidence log, not a current deployment checklist. Each entry applies only to its stated date, commit, runtime or run. Words such as “current,” “pending,” and “not yet deployed” describe that entry's observation; later entries can supersede them. Old tool counts, patch inventories, compiler settings and failures must not be used as current requirements.
 
-For present behavior use [operations](operations.md), [capabilities](capabilities.md), the template and tests. For a rollout, establish the exact deployed commit and perform the relevant [acceptance checks](capabilities.md#live-verification-after-publishing-a-release); a historical passing build or a merged PR does not establish current live behavior. This documentation cleanup did not inspect production or rerun historical checks.
+For present behavior use [operations](operations.md), [capabilities](capabilities.md), the template and tests. For a rollout, establish the exact deployed commit and perform the relevant [acceptance checks](capabilities.md#live-verification-after-publishing-a-release); a historical passing build or a merged PR does not establish current live behavior. Historical checks are not rerun merely by updating this record.
+
+## Single-service validation and rollout — 24 October 2026
+
+[Native Linux validation](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/40077577580)
+passed for source `e3a0d60a1a7e430da68d620d9e4d2f4db37ffb31` before
+PR #40 merged. This covers the native contracts and image checks, including
+browser cleanup, skills bootstrap and runtime sudo access in CI; it does not
+prove those capabilities on Railway.
+
+After the operator applied the migration plan, read-only Railway inspection
+confirmed the main service's 2-vCPU/1-GB ceilings, retained 500-MB `/data` volume,
+public routing to port 3888 and disconnected repository source. The executor
+service was removed; its old workspace volume remained unattached. The operator
+reported taking a backup, needing no workspace import, and confirming sleeping
+was off and the account remained on Free/Trial. Account-plan status alone does
+not establish unrestricted egress.
+
+The [v0.5.1 deployment](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/40084375249)
+failed during image construction: the builder's `no_new_privs` prevented its sudo
+smoke check. The new image did not reach startup. PR #42 separates static build
+checks from running-image elevation checks. Local container checks reproduced
+the failure and verified that separation. The operator reported
+`NoNewPrivs: 0` for Railway PID 1; actual sudo execution in the newly deployed
+image, provider access and the complete single-service acceptance checks still
+require live verification. See [privilege checks](releases.md#build-time-and-runtime-privilege-checks).
 
 ## PR #35 review follow-up — 2026-10-20
 

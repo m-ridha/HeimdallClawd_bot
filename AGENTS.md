@@ -189,6 +189,11 @@ proving the native replacement covers its contract. Re-run native validation for
 patch changes. Do not commit binaries, generated release checksums/provenance or
 upstream source checkouts; do not hand-edit generated artifacts to bypass checks.
 
+Do not require sudo elevation in Docker build steps: builders can set
+`no_new_privs`. Preserve static sudoers/identity checks and separate running-image
+sudo checks; verify live privilege behavior after deployment. See
+[privilege checks](docs/releases.md#build-time-and-runtime-privilege-checks).
+
 IaC owns the main service and retained migration storage; preserve variables
 unmanaged, disconnected repository source, one replica, sleeping policy and the
 pinned placement/resource/volume settings. Keep infrastructure frugal; resource
@@ -201,8 +206,9 @@ RAILWAY_TOKEN stays a production-scoped project-token secret. Keep sanitized
 preflight and explicit User-Agent; do not add railway link to release flow or
 infer token expiry from its Unauthorized response. Never use --include-variables,
 --decrypt-variables or --show-values for routine inspection. Keep plan/state files
-out of Git. Release variables and one-time migration steps live in their owning
-docs, not private handoffs.
+out of Git. Before interactive planning or applying, verify the CLI target project
+and environment; stop if the plan includes unrelated resources. Release variables
+and one-time migration steps live in their owning docs, not private handoffs.
 
 ## Working discipline and documentation
 

@@ -5,8 +5,8 @@ Infrastructure is authored in [`.railway/railway.py`](../.railway/railway.py) us
 ## Inspect a plan
 
 1. Create a Python 3.10+ virtual environment and install `.railway/requirements.txt`.
-2. For interactive account-based use, sign in/link the local CLI to the intended project and environment. The project-token release workflow does **not** use `railway link`.
-3. Run `PATH="/path/to/venv/bin:$PATH" railway config plan` from the repository. Treat it as a read-only check; a clean plan is evidence only for that environment at that time.
+2. For interactive account-based use, sign in/link the local CLI to the intended project and environment, then verify both with `railway status`. The project-token release workflow does **not** use `railway link`.
+3. Run `PATH="/path/to/venv/bin:$PATH" railway config plan` from the repository. Verify the plan targets the expected project and environment; stop if unrelated resources appear. Treat it as a read-only check; a clean plan is evidence only for that environment at that time.
 4. Do not pass `--include-variables`, `--decrypt-variables` or `--show-values` in routine checks. Keep plan/state artifacts out of Git.
 
 ## Apply policy

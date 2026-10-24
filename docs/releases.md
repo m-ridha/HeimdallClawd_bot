@@ -95,3 +95,12 @@ including provenance-only patch inputs. Docker context exclusions independently
 protect credentials; neither exclusion replaces input secret scanning. Compilers,
 Clippy/rustfmt, standard libraries and rustdoc are retained, while installed Rust
 HTML/man reference pages are omitted from the image.
+
+## Build-time and runtime privilege checks
+
+Railway image-build steps can set `no_new_privs`, which blocks sudo elevation.
+The artifact Dockerfile validates the sudoers policy and switching to UID 1000
+without elevating again during the build. GitHub Actions tests actual sudo access
+in a running image. After deployment, verify `gosu heimdall sudo -n id -u` returns
+`0` in the Railway console; a successful image build alone does not prove live
+root access. Do not disable platform safeguards to make an image build pass.

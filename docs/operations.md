@@ -5,7 +5,7 @@ HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher in a single networ
 ## Railway services
 
 The main service listens on 3888, with one replica and sleeping disabled.
-The Trial proposal raises its ceiling to 2 shared vCPU and 1 GB RAM; the agent
+IaC configures a ceiling of 2 shared vCPU and 1 GB RAM; the agent
 volume remains 500 MB at /data. Limits are ceilings, not reserved capacity.
 After Trial, Free has lower CPU/RAM limits. See [migration](single-service-migration.md)
 for storage preservation and the distinction between Trial and Full Trial network access.
@@ -125,7 +125,7 @@ Build and release procedures, generated checksums/provenance and compile-cache b
 
 Git is installed in the final main-service image. The agent has a dedicated stdio MCP server implemented by `heimdall-launcher --skills-mcp`, exposing only `skills__install` and `skills__list`. Ask Heimdall to install a named skill from the official ZeroClaw registry, or to list its installed skills. The model may also select these tools when a task needs a skill.
 
-The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. It invokes ZeroClaw's native install/audit implementation without a shell, forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. These restrictions apply to this installer path. Separately granted native shell and sudo provide broader access subject to platform policy.
+The installer accepts only bare lowercase registry names, not URLs, paths, command options or extra arguments. A fixed shell bootstrap clones the official registry into its precreated cache when needed, then executes ZeroClaw's native install/audit implementation. The skill name is passed as a validated argument, never interpolated into shell code. The installer forces the official registry, permits script-containing skills, disables bulk syncing only inside the short-lived installer subprocess, clears inherited provider/Telegram credentials, and bounds subprocess time and captured output. Git global configuration, hooks and local/ext protocols are disabled for the operation. These restrictions apply to this installer path. Separately granted native shell and sudo provide broader access subject to platform policy.
 
 The registry installer targets the primary agent's `managed` bundle, persisted under `/data/zeroclaw/shared/skills/managed`. Additional operator-created native bundles can be attached with the procedure below. Bulk Open Skills synchronization is enabled separately; its persistent cache is `/data/zeroclaw/shared/open-skills`. Compact skill prompting and `read_skill` keep full skill instructions on demand. Installing a skill grants neither extra tools nor system packages. Registry audits are filters, not a guarantee of safe instructions; tasks still run under the configured tool policy.
 
@@ -217,7 +217,7 @@ The launcher exposes `codespace__status`, `codespace__list`, `codespace__create`
 
 Codespaces compute/storage and GitHub quotas are separate from Railway billing. Idle timeout and retention reduce usage; they are not a hard spending limit. Configure the dedicated GitHub account's budget before creating Codespaces. Never create, delete or execute in a Codespace without a user request. These instructions guide the model; the tool grants themselves permit the operations. Codespaces may expose their own repository credentials to remote commands, so use sandbox repositories and do not configure production secrets there.
 
-Both final image recipes install gh, SSH and the complete native toolkit. Codespaces stays optional remote compute; native shell and sudo can also work on repositories directly. Root commands can access the service credentials.
+The production artifact image recipe installs gh, SSH and the complete native toolkit; the source Dockerfile provides build, test and binary-export targets. Codespaces stays optional remote compute; native shell and sudo can also work on repositories directly. Root commands can access the service credentials.
 
 After deployment, first test GitHub's read-only `/user` API and `codespace__list`. Create a sandbox only when requested, run a harmless remote command, and stop/delete it after verification. These operations have not been live-verified by local tests. Managed instruction files refresh at startup; see [instruction updates](#managed-agent-instructions).
 

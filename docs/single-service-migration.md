@@ -8,7 +8,7 @@ This document is a procedure, not evidence that production has been migrated.
 
 ## Resources
 
-The single-service Trial proposal is a 2 shared-vCPU / 1,000,000,000-byte RAM
+The single-service IaC configures a 2 shared-vCPU / 1,000,000,000-byte RAM
 ceiling, one replica, sleeping disabled and the existing 500-MB /data volume.
 Removing a service does not merge storage allowances. Trial allows a 0.5-GB volume,
 1-GB ephemeral storage and 4-GB image; Free after Trial has lower compute ceilings.
