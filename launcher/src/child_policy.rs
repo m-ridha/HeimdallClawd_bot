@@ -236,6 +236,20 @@ mod linux {
                     false,
                     false,
                 )?;
+                // Upstream ensure_skills_registry clones to data_dir/skills-registry
+                // when HEIMDALL_SKILLS_CACHE is unset. Permit that path so installs
+                // succeed under the real Linux profile without a patch override.
+                // READ on the parent allows traversal; WRITABLE on the registry
+                // directory itself is the write grant. The launcher pre-creates both
+                // at startup so the FDs are available before exec.
+                add(&ruleset, "/data/zeroclaw/data", READ, false, false)?;
+                add(
+                    &ruleset,
+                    "/data/zeroclaw/data/skills-registry",
+                    WRITABLE,
+                    false,
+                    false,
+                )?;
                 for path in [
                     "/data/zeroclaw/agents/primary/workspace/skills",
                     "/data/zeroclaw/shared/plugins",

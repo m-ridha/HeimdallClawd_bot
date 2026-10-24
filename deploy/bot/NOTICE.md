@@ -14,6 +14,9 @@ sessions, typed transcription, WIT interface paths, MCP, local skill execution
 and browser automation use upstream features. The single-service model does not
 need the former remote-skills or native-child patches. General commands have
 explicitly approved root access; narrow integration profiles do not confine them.
+The browser-output patch retains bounded in-flight output and child cleanup that
+upstream does not provide natively; the narrow skills installer uses a
+launcher-created registry directory within the existing Landlock profile.
 
 | Patch | Contract not replaced by native configuration |
 | --- | --- |
@@ -23,6 +26,7 @@ explicitly approved root access; narrow integration profiles do not confine them
 | gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
 | sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
 | responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
+| browser-output.patch | Cap text browser stdout at 500 KiB while reading and kill the child on overflow, timeout or cancellation. Upstream collects an unbounded pipe before truncating; slow or large pages bypass the in-flight memory bound without this patch. |
 
 AgentMail uses native /sop/* admission and the background SOP driver. Synchronous
 /webhook keeps its ordinary upstream timeout; no timeout patch is needed.

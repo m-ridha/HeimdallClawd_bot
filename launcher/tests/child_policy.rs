@@ -64,7 +64,7 @@ fn skills_bootstrap_accepts_existing_data_without_reading_it() {
         "Native isolation tests require root"
     );
     fs::create_dir_all("/data/zeroclaw/shared/skills").unwrap();
-    fs::create_dir_all("/data/zeroclaw/data").unwrap();
+    fs::create_dir_all("/data/zeroclaw/data/skills-registry").unwrap();
     fs::write("/data/zeroclaw/config.toml", "schema_version = 3").unwrap();
     fs::write("/data/zeroclaw/data/private-fixture", "TEST_private_data").unwrap();
     fs::write("/data/zeroclaw/auth-profiles.json", "TEST_private_auth").unwrap();
@@ -72,13 +72,14 @@ fn skills_bootstrap_accepts_existing_data_without_reading_it() {
     let mut probe = Command::new("/bin/sh");
     probe.env_clear().args([
         "-c",
-        "mkdir -p /data/zeroclaw/data && ! cat /data/zeroclaw/data/private-fixture && ! cat /data/zeroclaw/auth-profiles.json",
+        // Can write into skills-registry; cannot read adjacent private files.
+        "echo ok > /data/zeroclaw/data/skills-registry/probe && ! cat /data/zeroclaw/data/private-fixture && ! cat /data/zeroclaw/auth-profiles.json",
     ]);
     session.configure(&mut probe, Scope::Skills).unwrap();
     let output = probe.output().unwrap();
     assert!(
         output.status.success(),
-        "Existing data-directory bootstrap must succeed"
+        "skills-registry must be writable and adjacent private data must remain unreadable"
     );
     assert!(
         output.stdout.is_empty(),

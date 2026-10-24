@@ -222,7 +222,16 @@ fn main() -> io::Result<()> {
     atomic_write(&config_path, &config)?;
     let workspace = Path::new(STATE).join("agents/primary/workspace");
     fs::create_dir_all(&workspace)?;
-    for directory in ["shared/sops", "shared/plugins", "shared/skills/managed"] {
+    for directory in [
+        "shared/sops",
+        "shared/plugins",
+        "shared/skills/managed",
+        // Pre-create so the Landlock rules for the narrow skills installer can open
+        // these paths as FDs before exec: READ on data/ enables traversal and
+        // WRITABLE on data/skills-registry is where upstream clones the registry.
+        "data",
+        "data/skills-registry",
+    ] {
         fs::create_dir_all(Path::new(STATE).join(directory))?;
     }
     heimdall_launcher::instructions::sync(&workspace)?;

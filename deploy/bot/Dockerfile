@@ -24,7 +24,8 @@ COPY deploy/bot/patches/http-diagnostics.patch /tmp/http-diagnostics.patch
 COPY deploy/bot/patches/gateway-admin-auth.patch /tmp/gateway-admin-auth.patch
 COPY deploy/bot/patches/sop-workshop-guidance.patch /tmp/sop-workshop-guidance.patch
 COPY deploy/bot/patches/responses-tool-history.patch /tmp/responses-tool-history.patch
-RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch
+COPY deploy/bot/patches/browser-output.patch /tmp/browser-output.patch
+RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web

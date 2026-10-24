@@ -1,0 +1,54 @@
+--- a/crates/zeroclaw-tools/src/text_browser.rs
++++ b/crates/zeroclaw-tools/src/text_browser.rs
+@@ -6,6 +6,29 @@
+ use zeroclaw_config::policy::SecurityPolicy;
+ 
+ use crate::helpers::domain_guard;
++
++/// Spawn the browser and collect bounded output while reading.
++/// Output is capped at 500 KiB; the child is killed and awaited on overflow.
++/// kill_on_drop ensures cleanup when the caller drops on timeout or cancellation.
++async fn heimdall_browser_dump(
++    browser: &str,
++    args: &[String],
++) -> std::io::Result<std::process::Output> {
++    use tokio::io::AsyncReadExt;
++    let mut child = tokio::process::Command::new(browser)
++        .args(args)
++        .kill_on_drop(true)
++        .stdin(std::process::Stdio::null())
++        .stdout(std::process::Stdio::piped())
++        .stderr(std::process::Stdio::piped())
++        .spawn()?;
++    let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
++    let stderr = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
++    let mut out = Vec::new();
++    let mut err = Vec::new();
++    stdout.take(500_001).read_to_end(&mut out).await?;
++    stderr.take(32_769).read_to_end(&mut err).await?;
++    if out.len() > 500_000 {
++        child.kill().await?;
++        let _ = child.wait().await;
++        return Err(std::io::Error::other("Text browser output limit exceeded"));
++    }
++    let status = child.wait().await?;
++    Ok(std::process::Output { status, stdout: out, stderr: err })
++}
+ 
+ /// Text browser tool: renders web pages as plain text using text-based browsers
+ /// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
+@@ -361,13 +384,7 @@
+             self.timeout_secs
+         });
+ 
+-        let result = tokio::time::timeout(
+-            timeout,
+-            tokio::process::Command::new(&browser)
+-                .args(&dump_args)
+-                .output(),
+-        )
+-        .await;
++        let result = tokio::time::timeout(timeout, heimdall_browser_dump(&browser, &dump_args)).await;
+ 
+         match result {
+             Ok(Ok(output)) => {
