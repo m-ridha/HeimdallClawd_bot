@@ -1231,3 +1231,20 @@ fn oversized_state_update_preserves_readable_ledger_and_reservations() {
     })
     .unwrap();
 }
+
+#[test]
+fn admission_lock_times_out_without_modifying_held_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state");
+    let held = fs::File::create(&path).unwrap();
+    lock_state(&held, Duration::from_secs(1)).unwrap();
+    let contender = fs::File::open(&path).unwrap();
+    assert_eq!(
+        lock_state(&contender, Duration::from_millis(30))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::TimedOut
+    );
+    drop(held);
+    lock_state(&contender, Duration::from_secs(1)).unwrap();
+}

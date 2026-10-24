@@ -1,6 +1,5 @@
 use heimdall_launcher::config::{
-    EXECUTOR_ORIGIN, configured_model, github_authorization, parse_allowed_ids, render_config,
-    secret_overrides,
+    configured_model, github_authorization, parse_allowed_ids, render_config, secret_overrides,
 };
 use std::{
     fs,
@@ -16,11 +15,13 @@ fn fail(message: &str) -> io::Error {
 #[cfg(target_os = "linux")]
 fn prepare_identity() -> io::Result<()> {
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    // SAFETY: geteuid only queries the current effective identity.
     if unsafe { libc::geteuid() } != 0 {
         return Err(fail(
             "Launcher requires the container root identity for initialization",
         ));
     }
+    // SAFETY: static NUL-terminated path; flags reject a symlink and request a directory.
     let raw = unsafe {
         libc::open(
             c"/data".as_ptr(),
@@ -30,17 +31,21 @@ fn prepare_identity() -> io::Result<()> {
     if raw < 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: successful open returned a new owned descriptor.
     let root = unsafe { OwnedFd::from_raw_fd(raw) };
+    // SAFETY: root owns a live directory descriptor; fixed owner/mode values.
     if unsafe { libc::fchown(root.as_raw_fd(), 0, 0) } != 0
         || unsafe { libc::fchmod(root.as_raw_fd(), 0o755) } != 0
     {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: live parent descriptor and static NUL-terminated child name.
     if unsafe { libc::mkdirat(root.as_raw_fd(), c"zeroclaw".as_ptr(), 0o700) } != 0
         && io::Error::last_os_error().raw_os_error() != Some(libc::EEXIST)
     {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: live parent descriptor and static name; flags reject symlinks.
     let raw = unsafe {
         libc::openat(
             root.as_raw_fd(),
@@ -51,7 +56,9 @@ fn prepare_identity() -> io::Result<()> {
     if raw < 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: successful openat returned a new owned descriptor.
     let state = unsafe { OwnedFd::from_raw_fd(raw) };
+    // SAFETY: state owns a live directory descriptor; fixed runtime owner and private mode.
     if unsafe { libc::fchown(state.as_raw_fd(), 1000, 1000) } != 0
         || unsafe { libc::fchmod(state.as_raw_fd(), 0o700) } != 0
     {
@@ -77,12 +84,30 @@ fn prepare_identity() -> io::Result<()> {
 }
 fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
-    let temp = path.with_extension(format!("tmp-{}", std::process::id()));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temp)?;
+    // Exclusive creation plus retries tolerates files left by interrupted boots.
+    let (temp, mut file) = (0..100)
+        .find_map(|attempt| {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_nanos();
+            let temp = path.with_extension(format!("tmp-{}-{nonce}-{attempt}", std::process::id()));
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temp)
+            {
+                Ok(file) => Some(Ok((temp, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .unwrap_or_else(|| {
+            Err(io::Error::other(
+                "Cannot create configuration temporary file",
+            ))
+        })?;
     if let Err(error) = file
         .write_all(content.as_bytes())
         .and_then(|_| file.sync_all())
@@ -91,6 +116,11 @@ fn atomic_write(path: &Path, content: &str) -> io::Result<()> {
         let _ = fs::remove_file(temp);
         return Err(error);
     }
+    fs::File::open(
+        path.parent()
+            .ok_or_else(|| fail("Configuration parent missing"))?,
+    )?
+    .sync_all()?;
     Ok(())
 }
 fn runtime(vars: &[(String, String)]) -> Command {
@@ -122,10 +152,6 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--mail-mcp") {
         return heimdall_launcher::agentmail::serve_mcp();
     }
-    if std::env::args().nth(1).as_deref() == Some("browser-child") {
-        return heimdall_launcher::child_policy::browser();
-    }
-
     if std::env::args().nth(1).as_deref() == Some("--skills-mcp") {
         return heimdall_launcher::skills_mcp::serve();
     }
@@ -170,20 +196,7 @@ fn main() -> io::Result<()> {
     }
     let token =
         std::env::var("TELEGRAM_BOT_TOKEN").map_err(|_| fail("TELEGRAM_BOT_TOKEN is required"))?;
-    let executor = std::env::var("HEIMDALL_EXECUTOR_TOKEN")
-        .map_err(|_| fail("HEIMDALL_EXECUTOR_TOKEN is required"))?;
-    let mut vars = secret_overrides(&token, &executor).map_err(fail)?;
-    match std::env::var("HEIMDALL_EXECUTOR_URL") {
-        Ok(url) if url != EXECUTOR_ORIGIN => {
-            return Err(fail(
-                "HEIMDALL_EXECUTOR_URL must use the configured private executor",
-            ));
-        }
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(fail("Invalid HEIMDALL_EXECUTOR_URL"));
-        }
-        _ => {}
-    }
+    let mut vars = secret_overrides(&token).map_err(fail)?;
     let mail_settings = heimdall_launcher::agentmail::Settings::from_env()?;
     match std::env::var("GITHUB_TOKEN") {
         Ok(token) => vars.push((
@@ -209,7 +222,13 @@ fn main() -> io::Result<()> {
     atomic_write(&config_path, &config)?;
     let workspace = Path::new(STATE).join("agents/primary/workspace");
     fs::create_dir_all(&workspace)?;
-    for directory in ["shared/sops", "shared/plugins", "shared/skills/managed"] {
+    for directory in [
+        "shared/sops",
+        "shared/plugins",
+        "shared/skills/managed",
+        // Landlock opens this directory before the restricted child starts.
+        "data/skills-registry",
+    ] {
         fs::create_dir_all(Path::new(STATE).join(directory))?;
     }
     heimdall_launcher::instructions::sync(&workspace)?;
@@ -228,7 +247,7 @@ fn main() -> io::Result<()> {
         heimdall_launcher::startup::AUTH_TIMEOUT,
     )?;
     println!(
-        "HeimdallClawd: ZeroClaw 0.8.6; {} allowed Telegram user(s); remote workspace MCP; port {port}",
+        "HeimdallClawd: ZeroClaw 0.8.6; {} allowed Telegram user(s); native networked workspace; sudo root access; port {port}",
         ids.len()
     );
     use std::os::unix::process::CommandExt;
@@ -236,4 +255,19 @@ fn main() -> io::Result<()> {
         return heimdall_launcher::agentmail::supervise(runtime(&vars), port, settings);
     }
     Err(heimdall_launcher::startup::configure_daemon(&mut runtime(&vars), port).exec())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn config_write_preserves_unrelated_stale_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let stale = path.with_extension(format!("tmp-{}", std::process::id()));
+        std::fs::write(&stale, "interrupted").unwrap();
+        super::atomic_write(&path, "first").unwrap();
+        super::atomic_write(&path, "second").unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "second");
+        assert_eq!(std::fs::read_to_string(stale).unwrap(), "interrupted");
+    }
 }

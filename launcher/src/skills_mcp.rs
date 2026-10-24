@@ -118,7 +118,6 @@ fn configure_command(command: &mut Command) {
     command
         .env_clear()
         .env("PATH", "/usr/local/bin:/usr/bin:/bin")
-        .env("HOME", STATE)
         .env("ZEROCLAW_CONFIG_DIR", STATE)
         .env(
             "ZEROCLAW_skills__registry_url",
@@ -142,25 +141,42 @@ fn command() -> Command {
     configure_command(&mut command);
     command
 }
+const INSTALL_SCRIPT: &str = r#"set -eu
+if [ ! -d "$2/.git" ]; then
+    git clone --depth 1 "$1" "$2"
+fi
+exec "$3" skills install "$4" --bundle managed"#;
+
 fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     use std::os::unix::process::CommandExt;
-    let mut cmd = command();
-    cmd.arg("skills");
-    if tool == "install" {
-        cmd.args(["install", name.unwrap(), "--bundle", "managed"]);
+    let mut cmd = if tool == "install" {
+        // The cache must exist before Landlock opens it. Upstream skips cloning
+        // existing directories, so bootstrap an empty cache inside the same
+        // cleared-environment, bounded process group before native installation.
+        let mut cmd = Command::new("/bin/sh");
+        configure_command(&mut cmd);
+        cmd.args([
+            "-c",
+            INSTALL_SCRIPT,
+            "heimdall-skills",
+            "https://github.com/zeroclaw-labs/zeroclaw-skills",
+            "/data/zeroclaw/data/skills-registry",
+            "/usr/local/bin/zeroclaw",
+            name.unwrap(),
+        ]);
+        cmd
     } else {
-        cmd.args(["list", "--agent", "primary"]);
-    }
+        let mut cmd = command();
+        cmd.args(["skills", "list", "--agent", "primary"]);
+        cmd
+    };
     let session = crate::child_policy::Session::new()
         .map_err(|_| "Cannot prepare private child state".to_string())?;
-    cmd.env(
-        "HEIMDALL_SKILLS_CACHE",
-        session.directory().join("skills-registry"),
-    );
     session
         .configure(&mut cmd, crate::child_policy::Scope::Skills)
         .map_err(|_| "Child filesystem isolation is unavailable".to_string())?;
-    // Separate process group lets timeout cleanup terminate Git descendants.
+    // SAFETY: pre_exec only calls async-signal-safe setsid before exec;
+    // a separate process group lets cleanup terminate Git descendants.
     unsafe {
         cmd.pre_exec(|| {
             if libc::setsid() < 0 {
@@ -188,6 +204,7 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
                 std::thread::sleep(Duration::from_millis(100))
             }
             _ => {
+                // SAFETY: group is the child session ID established by setsid.
                 unsafe {
                     libc::kill(-group, libc::SIGKILL);
                 }
@@ -196,6 +213,7 @@ fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
             }
         }
     };
+    // SAFETY: the negative child session ID targets only its process group.
     // Reap descendants even if the direct CLI child exited first.
     unsafe {
         libc::kill(-group, libc::SIGKILL);
@@ -226,6 +244,88 @@ pub fn serve() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bootstrap_clones_empty_cache_and_reuses_existing_checkout() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("source");
+        let cache = root.path().join("cache with spaces");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&cache).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", root.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .current_dir(&source)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "fixture Git failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init"]);
+        std::fs::write(source.join("fixture"), b"registry content").unwrap();
+        git(&["add", "fixture"]);
+        git(&[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.test",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "fixture",
+        ]);
+        let runtime = root.path().join("runtime stub");
+        std::fs::write(&runtime, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n").unwrap();
+        std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let run = |cache: &std::path::Path| {
+            Command::new("/bin/sh")
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("HOME", root.path())
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .args(["-c", INSTALL_SCRIPT, "fixture"])
+                .arg(&source)
+                .arg(cache)
+                .arg(&runtime)
+                .arg("fixture-skill")
+                .output()
+                .unwrap()
+        };
+        assert!(run(&cache).status.success());
+        assert!(cache.join(".git").is_dir());
+        assert_eq!(
+            std::fs::read(cache.join("fixture")).unwrap(),
+            b"registry content"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("runtime stub.args")).unwrap(),
+            "skills\ninstall\nfixture-skill\n--bundle\nmanaged\n"
+        );
+        std::fs::remove_dir_all(&source).unwrap();
+        assert!(
+            run(&cache).status.success(),
+            "existing checkout must not be cloned again"
+        );
+        std::fs::remove_file(root.path().join("runtime stub.args")).unwrap();
+        let missing = root.path().join("missing cache");
+        std::fs::create_dir(&missing).unwrap();
+        assert!(!run(&missing).status.success());
+        assert!(
+            !root.path().join("runtime stub.args").exists(),
+            "failed clone must not invoke installation"
+        );
+    }
+
     #[test]
     fn skill_failures_classify_without_echoing_registry_text() {
         for (text, expected) in [

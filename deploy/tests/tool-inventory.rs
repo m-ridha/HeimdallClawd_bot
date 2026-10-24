@@ -120,7 +120,44 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
         })
         .await;
         let names: HashSet<_> = assembled.registry.iter().map(|tool| tool.name()).collect();
+        if !acp {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 2048];
+                socket.read(&mut request).await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 17\r\nConnection: close\r\n\r\nnative-network-ok").await.unwrap();
+            });
+            let shell = assembled
+                .registry
+                .iter()
+                .find(|tool| tool.name() == "shell")
+                .unwrap();
+            let result = shell.execute(serde_json::json!({"command":format!("curl --noproxy '*' --fail --max-time 10 http://{address}/")})).await.unwrap();
+            if !result.success {
+                server.abort();
+                let _ = server.await;
+                panic!("native network command failed: {:?}", result.error);
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(15), server)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(result.output.contains("native-network-ok"));
+        }
+
         for name in ADDED.into_iter().chain([
+            "browser",
+            "file_edit",
+            "content_search",
+            "glob_search",
+            "spawn_subagent",
+            "calculator",
+            "backup",
+            "data_management",
+            "TodoWrite",
             "web_search_tool",
             "text_browser",
             "web_fetch",
@@ -157,11 +194,10 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             "file_read",
             "file_write",
             "git_operations",
-            "screenshot",
             "delegate",
             "schedule",
         ] {
-            assert!(!names.contains(name), "unexpected {name}, ACP={acp}");
+            assert!(names.contains(name), "missing native {name}, ACP={acp}");
         }
         let search = assembled
             .registry
@@ -178,13 +214,46 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             !acp,
             "discovery must honor ACP memory isolation"
         );
-        let denied = search
-            .execute(serde_json::json!({"query":"select:shell"}))
+        // Core tools stay eager; tool_search exposes schemas for deferred built-ins.
+        let hidden = assembled.registry.hidden_builtin_names();
+        assert!(
+            !hidden.contains("shell"),
+            "shell must stay eager, ACP={acp}"
+        );
+        assert!(
+            hidden.contains("git_operations"),
+            "Git schema must start deferred, ACP={acp}"
+        );
+        let selected = search
+            .execute(serde_json::json!({"query":"select:git_operations"}))
             .await
             .unwrap();
+        assert!(selected.success);
+        let schemas: Vec<serde_json::Value> = selected
+            .output
+            .lines()
+            .filter_map(|line| line.strip_prefix("<function>")?.strip_suffix("</function>"))
+            .map(|schema| serde_json::from_str(schema).unwrap())
+            .collect();
+        let [schema] = schemas.as_slice() else {
+            panic!("discovery must return exactly one Git schema, ACP={acp}");
+        };
+        assert_eq!(schema["name"], "git_operations");
+        assert_eq!(schema["parameters"]["type"], "object");
+        assert_eq!(
+            schema["parameters"]["properties"]["operation"]["type"],
+            "string"
+        );
+        assert_eq!(
+            schema["parameters"]["required"],
+            serde_json::json!(["operation"])
+        );
         assert!(
-            !denied.output.contains("<function>"),
-            "discovery must not expose excluded host tools"
+            !assembled
+                .registry
+                .hidden_builtin_names()
+                .contains("git_operations"),
+            "discovery must make the Git schema visible, ACP={acp}"
         );
         assert_eq!(names.contains("deliver_file"), acp);
         for name in ["file_upload", "file_upload_bundle", "file_download"] {

@@ -13,6 +13,7 @@
     "plugins-wasm-cranelift",
     "embedded-web",
     "webauthn",
-    "channel-acp-server"
+    "channel-acp-server",
+    "browser-native"
   ]
 }

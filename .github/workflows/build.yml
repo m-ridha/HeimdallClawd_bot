@@ -149,9 +149,18 @@ jobs:
           cache-to: type=registry,ref=${{ steps.build_cache.outputs.ref }}:validated,mode=max,image-manifest=true,oci-mediatypes=true
       - name: Package and verify deployable bot
         run: |
-          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/runtime/heimdall-launcher" "$RUNNER_TEMP/runtime/heimdall-executor" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
-          docker build --tag heimdall-executor "$RUNNER_TEMP/bot/executor"
+          python3 tools/package-release.py "$RUNNER_TEMP/runtime/zeroclaw" "$RUNNER_TEMP/runtime/heimdall-launcher" "$RUNNER_TEMP/bot" "$RELEASE_TAG" "$(git rev-parse HEAD)"
           docker build --file "$RUNNER_TEMP/bot/Dockerfile" --tag heimdall-bot "$RUNNER_TEMP/bot"
+          image_bytes=$(docker image inspect heimdall-bot --format '{{.Size}}')
+          test "$image_bytes" -lt 4000000000 || { echo "Agent image exceeds Trial's 4 GB limit"; exit 1; }
+          docker run --rm --entrypoint /bin/bash heimdall-bot -euo pipefail -c '
+            gosu heimdall sudo -n cargo --version
+            gosu heimdall sudo -n rustc --version
+            gosu heimdall sudo -n cargo clippy --version
+            gosu heimdall chromium --version
+            chromedriver --version
+          '
+
           tar -czf "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" -C "$RUNNER_TEMP/bot" .
           sha256sum "$RUNNER_TEMP/heimdallclawd-$RELEASE_TAG.tar.gz" | sed "s|$RUNNER_TEMP/||" > "$RUNNER_TEMP/SHA256SUMS"
       - uses: actions/upload-artifact@v7

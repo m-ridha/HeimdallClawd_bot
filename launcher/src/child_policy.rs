@@ -5,7 +5,8 @@ use std::{fs, io, path::PathBuf, process::Command};
 static NEXT: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy)]
 pub enum Scope {
-    Browser,
+    /// Scratch-only profile used to verify inherited child restrictions.
+    Scratch,
     Skills,
     Codespaces,
 }
@@ -33,7 +34,7 @@ impl Session {
     }
     pub fn configure(&self, command: &mut Command, scope: Scope) -> io::Result<()> {
         command.current_dir(&self.path).env("TMPDIR", &self.path);
-        if matches!(scope, Scope::Browser | Scope::Skills) {
+        if matches!(scope, Scope::Scratch | Scope::Skills) {
             command.env("HOME", &self.path);
         }
         #[cfg(target_os = "linux")]
@@ -224,13 +225,22 @@ mod linux {
             false,
         )?;
         match scope {
-            Scope::Browser => {}
+            Scope::Scratch => {}
             Scope::Codespaces => add(&ruleset, "/data/zeroclaw/codespace", WRITABLE, false, false)?,
             Scope::Skills => {
                 add(&ruleset, "/data/zeroclaw/config.toml", READ, false, false)?;
                 add(
                     &ruleset,
                     "/data/zeroclaw/shared/skills",
+                    WRITABLE,
+                    false,
+                    false,
+                )?;
+                // Only the registry subtree is writable. Landlock traversal does
+                // not require READ on the parent (which would expose private data).
+                add(
+                    &ruleset,
+                    "/data/zeroclaw/data/skills-registry",
                     WRITABLE,
                     false,
                     false,
@@ -301,47 +311,5 @@ mod linux {
             });
         }
         Ok(())
-    }
-}
-/// Entry point used only by the pinned text-browser tool; not a model-facing shell.
-pub fn browser() -> io::Result<()> {
-    let args: Vec<String> = std::env::args().skip(2).collect();
-    let Some(name) = args.first() else {
-        return Err(io::Error::other("Browser is required"));
-    };
-    if !matches!(name.as_str(), "lynx" | "links" | "w3m") {
-        return Err(io::Error::other("Unsupported browser"));
-    }
-    #[cfg(target_os = "linux")]
-    let parent = std::process::id() as libc::pid_t;
-    let session = Session::new()?;
-    let mut command = Command::new(format!("/usr/bin/{name}"));
-    command
-        .args(&args[1..])
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin");
-    session.configure(&mut command, Scope::Browser)?;
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-        // SAFETY: prctl is called in the child without allocation or locks.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                if libc::getppid() != parent {
-                    return Err(io::Error::other("Browser supervisor exited"));
-                }
-                Ok(())
-            });
-        }
-    }
-    let status = command.status()?;
-    drop(session);
-    if status.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other("Confined browser failed"))
     }
 }
