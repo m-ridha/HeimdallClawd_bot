@@ -1,6 +1,6 @@
 --- a/crates/zeroclaw-tools/src/text_browser.rs
 +++ b/crates/zeroclaw-tools/src/text_browser.rs
-@@ -6,6 +6,29 @@
+@@ -6,6 +6,36 @@
  use zeroclaw_config::policy::SecurityPolicy;
  
  use crate::helpers::domain_guard;
@@ -37,7 +37,7 @@
  
  /// Text browser tool: renders web pages as plain text using text-based browsers
  /// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
-@@ -361,13 +384,7 @@
+@@ -361,13 +391,7 @@
              self.timeout_secs
          });
  
