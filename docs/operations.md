@@ -327,8 +327,14 @@ Terminal logging privacy: daemon startup omits `--verbose` because a pinned-runt
 
 ## Narrow subprocess profiles
 
-The native-child patch is removed. Native browser and skill commands use
-upstream execution. General root-capable shell access is intentionally trusted
+The native-child patch is removed. The narrow skills installer bootstraps the
+official Git registry in its pre-created cache before invoking native ZeroClaw
+installation. Both run inside the same cleared-environment, bounded process group.
+Only `data/skills-registry` is writable; private data-directory siblings remain
+unreadable. The separate browser-output patch bounds text-browser collection and terminates the child on output overflow;
+kill-on-drop remains enabled for timeout and cancellation.
+
+General root-capable shell access is intentionally trusted
 with the service's credentials and filesystem. Narrow registry/Codespaces MCP
 servers still clear their environments and retain their own scoped child policy;
 these protect those call paths, not the agent from its authorized root commands.

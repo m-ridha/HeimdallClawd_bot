@@ -143,13 +143,28 @@ fn command() -> Command {
 }
 fn execute(tool: &str, name: Option<&str>) -> Result<String, String> {
     use std::os::unix::process::CommandExt;
-    let mut cmd = command();
-    cmd.arg("skills");
-    if tool == "install" {
-        cmd.args(["install", name.unwrap(), "--bundle", "managed"]);
+    let mut cmd = if tool == "install" {
+        // The cache must exist before Landlock opens it. Upstream skips cloning
+        // existing directories, so bootstrap an empty cache inside the same
+        // cleared-environment, bounded process group before native installation.
+        let mut cmd = Command::new("/bin/sh");
+        configure_command(&mut cmd);
+        cmd.args([
+            "-c",
+            r#"set -eu
+if [ ! -d /data/zeroclaw/data/skills-registry/.git ]; then
+    git clone --depth 1 https://github.com/zeroclaw-labs/zeroclaw-skills /data/zeroclaw/data/skills-registry
+fi
+exec /usr/local/bin/zeroclaw skills install "$1" --bundle managed"#,
+            "heimdall-skills",
+            name.unwrap(),
+        ]);
+        cmd
     } else {
-        cmd.args(["list", "--agent", "primary"]);
-    }
+        let mut cmd = command();
+        cmd.args(["skills", "list", "--agent", "primary"]);
+        cmd
+    };
     let session = crate::child_policy::Session::new()
         .map_err(|_| "Cannot prepare private child state".to_string())?;
     session

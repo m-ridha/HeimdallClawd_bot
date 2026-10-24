@@ -226,10 +226,7 @@ fn main() -> io::Result<()> {
         "shared/sops",
         "shared/plugins",
         "shared/skills/managed",
-        // Pre-create so the Landlock rules for the narrow skills installer can open
-        // these paths as FDs before exec: READ on data/ enables traversal and
-        // WRITABLE on data/skills-registry is where upstream clones the registry.
-        "data",
+        // Landlock opens this directory before the restricted child starts.
         "data/skills-registry",
     ] {
         fs::create_dir_all(Path::new(STATE).join(directory))?;

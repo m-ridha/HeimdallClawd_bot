@@ -72,18 +72,61 @@ fn skills_bootstrap_accepts_existing_data_without_reading_it() {
     let mut probe = Command::new("/bin/sh");
     probe.env_clear().args([
         "-c",
-        // Can write into skills-registry; cannot read adjacent private files.
-        "echo ok > /data/zeroclaw/data/skills-registry/probe && ! cat /data/zeroclaw/data/private-fixture && ! cat /data/zeroclaw/auth-profiles.json",
+        // Registry and managed bundle are usable without reading private siblings.
+        r#"
+        set -eu
+        test -d /data/zeroclaw/data
+        mkdir -p /data/zeroclaw/data
+        echo ok > /data/zeroclaw/data/skills-registry/probe
+        test "$(cat /data/zeroclaw/data/skills-registry/probe)" = ok
+        mkdir -p /data/zeroclaw/shared/skills/managed
+        cp /data/zeroclaw/data/skills-registry/probe /data/zeroclaw/shared/skills/managed/probe
+        if cat /data/zeroclaw/data/private-fixture; then exit 1; fi
+        if cat /data/zeroclaw/auth-profiles.json; then exit 1; fi
+        "#,
     ]);
     session.configure(&mut probe, Scope::Skills).unwrap();
     let output = probe.output().unwrap();
     assert!(
         output.status.success(),
-        "skills-registry must be writable and adjacent private data must remain unreadable"
+        "Private cache and managed bundle must be writable; daemon data must stay unreadable"
     );
     assert!(
         output.stdout.is_empty(),
         "Private fixture content must remain unreadable"
     );
+    if let Ok(runtime) = std::env::var("HEIMDALL_TEST_RUNTIME") {
+        // Offline positive native install: a fresh synthetic registry avoids
+        // external services while exercising the actual CLI under Scope::Skills.
+        fs::write(
+            "/data/zeroclaw/config.toml",
+            "schema_version = 3\n[skill_bundles.managed]\ndirectory = \"shared/skills/managed\"\n",
+        )
+        .unwrap();
+        let registry = std::path::Path::new("/data/zeroclaw/data/skills-registry");
+        fs::create_dir_all(registry.join("skills/fixture-skill")).unwrap();
+        fs::write(registry.join(".zeroclaw-skills-registry-sync"), "synced").unwrap();
+        let skill = "---\nname: fixture-skill\ndescription: synthetic fixture\n---\n\nSummarize a short document.\n";
+        fs::write(registry.join("skills/fixture-skill/SKILL.md"), skill).unwrap();
+        let mut install = Command::new(runtime);
+        install
+            .env_clear()
+            .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+            .env("ZEROCLAW_CONFIG_DIR", "/data/zeroclaw")
+            .args(["skills", "install", "fixture-skill", "--bundle", "managed"]);
+        session.configure(&mut install, Scope::Skills).unwrap();
+        let output = install.output().unwrap();
+        assert!(
+            output.status.success(),
+            "Native fixture installation failed"
+        );
+        assert_eq!(
+            fs::read_to_string("/data/zeroclaw/shared/skills/managed/fixture-skill/SKILL.md")
+                .unwrap(),
+            skill
+        );
+    } else {
+        eprintln!("Native skill installation requires HEIMDALL_TEST_RUNTIME");
+    }
     fs::remove_dir_all("/data/zeroclaw").unwrap();
 }

@@ -236,13 +236,8 @@ mod linux {
                     false,
                     false,
                 )?;
-                // Upstream ensure_skills_registry clones to data_dir/skills-registry
-                // when HEIMDALL_SKILLS_CACHE is unset. Permit that path so installs
-                // succeed under the real Linux profile without a patch override.
-                // READ on the parent allows traversal; WRITABLE on the registry
-                // directory itself is the write grant. The launcher pre-creates both
-                // at startup so the FDs are available before exec.
-                add(&ruleset, "/data/zeroclaw/data", READ, false, false)?;
+                // Only the registry subtree is writable. Landlock traversal does
+                // not require READ on the parent (which would expose private data).
                 add(
                     &ruleset,
                     "/data/zeroclaw/data/skills-registry",
