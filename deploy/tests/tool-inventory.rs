@@ -214,13 +214,46 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             !acp,
             "discovery must honor ACP memory isolation"
         );
-        let denied = search
-            .execute(serde_json::json!({"query":"select:shell"}))
+        // Core tools stay eager; tool_search exposes schemas for deferred built-ins.
+        let hidden = assembled.registry.hidden_builtin_names();
+        assert!(
+            !hidden.contains("shell"),
+            "shell must stay eager, ACP={acp}"
+        );
+        assert!(
+            hidden.contains("git_operations"),
+            "Git schema must start deferred, ACP={acp}"
+        );
+        let selected = search
+            .execute(serde_json::json!({"query":"select:git_operations"}))
             .await
             .unwrap();
+        assert!(selected.success);
+        let schemas: Vec<serde_json::Value> = selected
+            .output
+            .lines()
+            .filter_map(|line| line.strip_prefix("<function>")?.strip_suffix("</function>"))
+            .map(|schema| serde_json::from_str(schema).unwrap())
+            .collect();
+        let [schema] = schemas.as_slice() else {
+            panic!("discovery must return exactly one Git schema, ACP={acp}");
+        };
+        assert_eq!(schema["name"], "git_operations");
+        assert_eq!(schema["parameters"]["type"], "object");
+        assert_eq!(
+            schema["parameters"]["properties"]["operation"]["type"],
+            "string"
+        );
+        assert_eq!(
+            schema["parameters"]["required"],
+            serde_json::json!(["operation"])
+        );
         assert!(
-            denied.output.contains("<function>"),
-            "discovery must expose permitted native tools"
+            !assembled
+                .registry
+                .hidden_builtin_names()
+                .contains("git_operations"),
+            "discovery must make the Git schema visible, ACP={acp}"
         );
         assert_eq!(names.contains("deliver_file"), acp);
         for name in ["file_upload", "file_upload_bundle", "file_download"] {
