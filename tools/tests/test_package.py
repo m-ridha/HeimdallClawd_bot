@@ -36,6 +36,7 @@ class PackageTests(unittest.TestCase):
             self.assertIn('ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888', dockerfile)
             self.assertNotRegex(dockerfile, r'\bcargo\s+(?:build|test|install|check)\b')
             self.assertIn('sha256sum -c', dockerfile)
+            self.assertEqual(lock['browser_output_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['sop_workshop_guidance_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/sop-workshop-guidance.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['gateway_admin_auth_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest())

@@ -72,6 +72,7 @@ provenance = {
     'gateway_admin_auth_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest(),
     'http_diagnostics_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/http-diagnostics.patch').read_bytes()).hexdigest(),
     'http_secret_origins_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
+    'browser_output_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest(),
     'private_telegram_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest(),
 }
 (out / 'deploy/bot/artifact.lock.json').write_text(json.dumps(provenance, indent=2) + '\n')
