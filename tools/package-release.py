@@ -67,14 +67,20 @@ provenance = {
     'binary_sha256': digest, 'launcher_sha256': launcher_digest,
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
-    'responses_tool_history_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest(),
-    'sop_workshop_guidance_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/sop-workshop-guidance.patch').read_bytes()).hexdigest(),
-    'gateway_admin_auth_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/gateway-admin-auth.patch').read_bytes()).hexdigest(),
-    'http_diagnostics_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/http-diagnostics.patch').read_bytes()).hexdigest(),
-    'http_secret_origins_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/http-secret-origins.patch').read_bytes()).hexdigest(),
-    'browser_output_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest(),
-    'private_telegram_patch_sha256': hashlib.sha256(source_file(root, 'deploy/bot/patches/private-telegram.patch').read_bytes()).hexdigest(),
 }
+patch_files = {
+    'responses_tool_history_patch_sha256': 'responses-tool-history.patch',
+    'sop_workshop_guidance_patch_sha256': 'sop-workshop-guidance.patch',
+    'gateway_admin_auth_patch_sha256': 'gateway-admin-auth.patch',
+    'http_diagnostics_patch_sha256': 'http-diagnostics.patch',
+    'http_secret_origins_patch_sha256': 'http-secret-origins.patch',
+    'browser_output_patch_sha256': 'browser-output.patch',
+    'private_telegram_patch_sha256': 'private-telegram.patch',
+}
+provenance.update({
+    field: hashlib.sha256(source_file(root, f'deploy/bot/patches/{filename}').read_bytes()).hexdigest()
+    for field, filename in patch_files.items()
+})
 (out / 'deploy/bot/artifact.lock.json').write_text(json.dumps(provenance, indent=2) + '\n')
 (out / 'RELEASE_VERSION').write_text(tag + '\n')
 print(f'Packaged {tag} from {commit}; runtime SHA256 {digest}')
