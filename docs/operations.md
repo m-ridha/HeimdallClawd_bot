@@ -23,9 +23,10 @@ console with a bounded `curl` request **without** including the bot token.
 Compare with another public host; an intermittent TLS timeout is different from
 a confirmed plan-wide egress restriction. Native root access cannot bypass either.
 Keep certificate verification enabled; do not force an address family or configure
-a proxy without evidence and a trusted endpoint. Polling requests have a deadline
-15 seconds longer than their requested long-poll interval and retain the native
-retry/backoff behavior; diagnostics do not replay agent tools.
+a proxy without evidence and a trusted endpoint. Startup probes and username
+lookups have 15-second request deadlines, including response-body reads. Polling
+requests have a deadline 15 seconds longer than their requested long-poll interval
+and retain the native retry/backoff behavior; diagnostics do not replay agent tools.
 
 Telegram's command menu is separate from the agent's tool grants. On an explicit
 `BOT_COMMANDS_TOO_MUCH` response, registration retries with progressively fewer

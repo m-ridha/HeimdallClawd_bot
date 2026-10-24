@@ -1,13 +1,27 @@
 --- a/crates/zeroclaw-channels/src/telegram.rs
 +++ b/crates/zeroclaw-channels/src/telegram.rs
-@@ -442,0 +443,32 @@
+@@ -140,6 +140,8 @@
+ const TELEGRAM_IDLE_POLL_TIMEOUT_SECS: u64 = 30;
+ const TELEGRAM_PENDING_MEDIA_GROUP_POLL_TIMEOUT_SECS: u64 = 1;
+ const TELEGRAM_POLL_LIMIT: usize = 100;
++// One bound for startup API calls; long polling adds its server wait budget.
++const TELEGRAM_API_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+
+ type MediaGroupKey = (i64, String);
+
+@@ -440,6 +442,40 @@
+         dropped += 1;
+     }
+     dropped
 +}
 +
 +// Keep transport diagnostics actionable without retaining token-bearing URLs,
 +// response bodies or arbitrary source-error strings.
 +fn telegram_transport_diagnostic(error: &reqwest::Error) -> serde_json::Value {
 +    use std::error::Error as _;
-+    let kind = if error.is_timeout() {
++    let kind = if error.is_status() {
++        "http_response"
++    } else if error.is_timeout() {
 +        "timeout"
 +    } else if error.is_connect() {
 +        "connect"
@@ -28,12 +42,18 @@
 +    }
 +    serde_json::json!({
 +        "kind": kind,
-+        "phase": "request",
++        "phase": if error.is_status() { "http_response" } else if error.is_decode() { "response_body" } else { "request" },
 +        "io_kind": io_kind,
 +        "http_status": error.status().map(|status| status.as_u16()),
 +        "hint": "check connectivity, DNS/TLS, proxy and platform egress; do not log request URLs"
 +    })
-@@ -3793,34 +3825,69 @@
+ }
+
+ /// Split a message into chunks that respect Telegram's 4096 character limit.
+@@ -3790,40 +3826,75 @@
+         }
+
+         let url = self.api_url("setMyCommands");
 -        let body = serde_json::json!({ "commands": commands });
 -
 -        match self.http_client().post(&url).json(&body).send().await {
@@ -77,7 +97,7 @@
 +                .http_client()
 +                .post(&url)
 +                .json(&body)
-+                .timeout(Duration::from_secs(15))
++                .timeout(TELEGRAM_API_REQUEST_TIMEOUT)
 +                .send()
 +                .await
 +            {
@@ -122,7 +142,7 @@
 +                        WARN,
 +                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
 +                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-+                            .with_attrs(serde_json::json!({"http_status": status.as_u16(), "registered": commands.len(), "size_rejected": too_large})),
++                            .with_attrs(serde_json::json!({"http_status": status.as_u16(), "attempted": commands.len(), "size_rejected": too_large})),
 +                        "Failed to register Telegram bot commands"
 +                    );
 +                    break;
@@ -137,19 +157,86 @@
 +                    );
 +                    break;
 +                }
-@@ -4173 +4240,3 @@
+             }
+         }
+     }
+@@ -4127,11 +4198,13 @@
+     }
+
+     async fn fetch_bot_username(&self) -> anyhow::Result<String> {
+-        let resp = self.http_client().get(self.api_url("getMe")).send().await?;
+-
+-        if !resp.status().is_success() {
+-            anyhow::bail!("Failed to fetch bot info: {}", resp.status());
+-        }
++        let resp = self
++            .http_client()
++            .get(self.api_url("getMe"))
++            .timeout(TELEGRAM_API_REQUEST_TIMEOUT)
++            .send()
++            .await?
++            .error_for_status()?;
+
+         let data: serde_json::Value = resp.json().await?;
+         let result = data
+@@ -4170,7 +4243,9 @@
+                     WARN,
+                     ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                         .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
 -                        .with_attrs(::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})),
 +                        .with_attrs(e.downcast_ref::<reqwest::Error>()
 +                            .map(telegram_transport_diagnostic)
 +                            .unwrap_or_else(|| serde_json::json!({"kind":"api_response", "phase":"response"}))),
-@@ -8240 +8309,2 @@
--            let resp = match self.http_client().post(&url).json(&body).send().await {
-+            let resp = match self.http_client().post(&url).json(&body)
-+                .timeout(Duration::from_secs(poll_timeout_secs + 15)).send().await {
-@@ -8248 +8318 @@
+                     "Failed to fetch bot username"
+                 );
+                 None
+@@ -8108,14 +8183,21 @@
+                 "timeout": 0,
+                 "allowed_updates": ["message", "callback_query"]
+             });
+-            match self.http_client().post(&url).json(&probe).send().await {
++            match self
++                .http_client()
++                .post(&url)
++                .json(&probe)
++                .timeout(TELEGRAM_API_REQUEST_TIMEOUT)
++                .send()
++                .await
++            {
+                 Err(e) => {
+                     ::zeroclaw_log::record!(
+                         WARN,
+                         ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                             .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                             .with_attrs(
 -                                ::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})
 +                                telegram_transport_diagnostic(&e)
-@@ -24312,0 +24383,114 @@
+                             ),
+                         "startup probe error; retrying in 5s"
+                     );
+@@ -8237,7 +8319,8 @@
+                 "allowed_updates": ["message", "callback_query"]
+             });
+
+-            let resp = match self.http_client().post(&url).json(&body).send().await {
++            let resp = match self.http_client().post(&url).json(&body)
++                .timeout(Duration::from_secs(poll_timeout_secs) + TELEGRAM_API_REQUEST_TIMEOUT).send().await {
+                 Ok(r) => r,
+                 Err(e) => {
+                     ::zeroclaw_log::record!(
+@@ -8245,7 +8328,7 @@
+                         ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                             .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                             .with_attrs(
+-                                ::serde_json::json!({"error": zeroclaw_runtime::security::scrub(&format!("{}", e))})
++                                telegram_transport_diagnostic(&e)
+                         ),
+                         "poll error"
+                     );
+@@ -24310,3 +24393,193 @@
+         }
+     }
+ }
 +#[cfg(test)]
 +mod heimdall_startup_tests {
 +    use super::*;
@@ -262,5 +349,81 @@
 +        ] {
 +            assert!(!serialized.contains(forbidden));
 +        }
++    }
++    #[tokio::test]
++    async fn heimdall_username_rejection_retains_status_without_private_payload() {
++        let server = MockServer::start().await;
++        Mock::given(method("GET"))
++            .and(path("/bottest-token/getMe"))
++            .respond_with(ResponseTemplate::new(401).set_body_string("fixture-private-response"))
++            .expect(1)
++            .mount(&server)
++            .await;
++        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
++            .with_api_base(server.uri());
++        let error = channel.fetch_bot_username().await.unwrap_err();
++        let transport = error
++            .downcast_ref::<reqwest::Error>()
++            .expect("typed HTTP status");
++        let diagnostic = telegram_transport_diagnostic(transport);
++        assert_eq!(diagnostic["http_status"], 401);
++        assert_eq!(diagnostic["kind"], "http_response");
++        assert_eq!(diagnostic["phase"], "http_response");
++        for forbidden in ["test-token", "fixture-private-response", "http://", "getMe"] {
++            assert!(!diagnostic.to_string().contains(forbidden));
++        }
++    }
++
++    #[tokio::test]
++    async fn heimdall_delayed_startup_probe_times_out_and_reaches_registration() {
++        use wiremock::matchers::body_partial_json;
++        use zeroclaw_api::channel::Channel;
++        let server = MockServer::start().await;
++        Mock::given(method("POST"))
++            .and(path("/bottest-token/getUpdates"))
++            .and(body_partial_json(serde_json::json!({"timeout":0})))
++            .respond_with(
++                ResponseTemplate::new(200)
++                    .set_body_json(serde_json::json!({"ok":true,"result":[]}))
++                    .set_delay(Duration::from_secs(60)),
++            )
++            .up_to_n_times(1)
++            .expect(1)
++            .with_priority(1)
++            .mount(&server)
++            .await;
++        Mock::given(method("POST"))
++            .and(path("/bottest-token/getUpdates"))
++            .respond_with(
++                ResponseTemplate::new(200)
++                    .set_body_json(serde_json::json!({"ok":true,"result":[]})),
++            )
++            .with_priority(2)
++            .mount(&server)
++            .await;
++        let registered = Arc::new(tokio::sync::Notify::new());
++        let notify = registered.clone();
++        Mock::given(method("POST"))
++            .and(path("/bottest-token/setMyCommands"))
++            .respond_with(move |_: &Request| {
++                notify.notify_one();
++                ResponseTemplate::new(200)
++                    .set_body_json(serde_json::json!({"ok":true,"result":true}))
++            })
++            .expect(1)
++            .mount(&server)
++            .await;
++        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
++            .with_api_base(server.uri());
++        let (tx, _rx) = tokio::sync::mpsc::channel(1);
++        let listener = tokio::spawn(async move { channel.listen(tx).await });
++        // Includes the 15-second request deadline and native 5-second retry delay.
++        let outcome = tokio::time::timeout(Duration::from_secs(35), registered.notified()).await;
++        listener.abort();
++        assert!(listener.await.unwrap_err().is_cancelled());
++        assert!(
++            outcome.is_ok(),
++            "stalled startup probe never reached menu registration"
++        );
 +    }
 +}
