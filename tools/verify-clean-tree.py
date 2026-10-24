@@ -28,7 +28,7 @@ for raw in git('ls-files', '-z').split(b'\0'):
         problems.append('build/runtime artifact indexed: ' + name)
     if path.parts[0] == '.railway' and name not in {'.railway/railway.py', '.railway/README.md', '.railway/requirements.txt'}:
         problems.append('unexpected Railway state indexed: ' + name)
-    if path.name in {'auth.json', 'auth-profiles.json', '.secret_key', '.env'} or path.suffix in {'.db', '.db-wal', '.db-shm'}:
+    if path.name in {'auth.json', 'auth-profiles.json', 'oauth_creds.json', '.secret_key', '.env'} or path.suffix in {'.db', '.db-wal', '.db-shm'}:
         problems.append('private state indexed: ' + name)
 if args.history:
     for commit in git('rev-list', '--all').decode().splitlines():

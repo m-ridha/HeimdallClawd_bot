@@ -23,6 +23,16 @@ class CleanTreeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(b'unexpected Railway state', result.stderr)
 
+    def test_private_oauth_credential_files_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            subprocess.run(['git', 'init', '-q', directory], check=True)
+            (root / 'oauth_creds.json').write_text('{}')
+            subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), 'retired-fixture'], cwd=root, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'private state indexed: oauth_creds.json', result.stderr)
+
     def test_history_finds_removed_content(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

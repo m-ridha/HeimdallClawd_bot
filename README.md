@@ -82,18 +82,16 @@ Deployment-specific values and secrets live in Railway variables. Shared non-sec
 | heimdallclawd | `PORT` | Set explicitly (3888); Railway's injected port overrides Docker's default |
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
 | heimdallclawd | `ZEROCLAW_providers__models__openrouter__free__api_key` | Optional key for the `openrouter/free` route |
-| heimdallclawd | `ZEROCLAW_providers__models__gemini__default__oauth_client_id` | Optional Google OAuth client ID for the `/model gemini` (`gemini-3.8-flash`) device login |
-| heimdallclawd | `ZEROCLAW_providers__models__gemini__default__oauth_client_secret` | Optional Google OAuth client secret for the `/model gemini` device login |
-| heimdallclawd | `ZEROCLAW_providers__models__gemini__default__oauth_project` | Optional GCP project ID seed for Gemini Code Assist OAuth discovery |
+| heimdallclawd | `ZEROCLAW_providers__models__gemini__default__oauth_project` | Optional GCP project ID seed if Gemini Code Assist OAuth requires an explicit project |
 | heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token for native gh/Git, HTTP requests and Codespaces; no `Bearer` prefix |
 | heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` list, or standalone `*` for GitHub-authorized repositories; see [GitHub setup](docs/operations.md#github-access) |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
 
-Sign in to ChatGPT once from the bot's Railway dashboard terminal (and optionally sign in to Gemini once its OAuth client variables are set); never paste authentication files or tokens into chat, Git or logs:
+Sign in to ChatGPT once from the bot's Railway dashboard terminal (and optionally sign in to Gemini for the `/model gemini` route); never paste authentication files or tokens into chat, Git or logs:
 
 ```sh
 gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider openai-codex --device-code
-gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider gemini --device-code
+gosu heimdall heimdall-launcher --gemini-login
 ```
 
 See [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.

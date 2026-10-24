@@ -71,13 +71,13 @@ For an interactive device sign-in, use the bot's Railway dashboard terminal:
 gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider openai-codex --device-code
 ```
 
-To also sign in for the optional `/model gemini` (`gemini-3.8-flash`) subscription route, first set `ZEROCLAW_providers__models__gemini__default__oauth_client_id` and `ZEROCLAW_providers__models__gemini__default__oauth_client_secret` (and optional `ZEROCLAW_providers__models__gemini__default__oauth_project`) in the service's Railway Variables, redeploy once so the runtime inherits those overrides, and run:
+To also sign in for the optional `/model gemini` (`gemini-3.8-flash`) subscription route, run the headless Gemini OAuth helper in the Railway dashboard terminal:
 
 ```sh
-gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider gemini --device-code
+gosu heimdall heimdall-launcher --gemini-login
 ```
 
-The Gemini profile is stored alongside `openai-codex` in `/data/zeroclaw/auth-profiles.json` (`gemini:default`) and refreshes automatically when `/model gemini` is used. If no managed `gemini:default` profile is present, `gemini.default` also accepts a Gemini CLI OAuth cache at `/data/zeroclaw/.gemini/oauth_creds.json` or an explicit `ZEROCLAW_providers__models__gemini__default__api_key` override. Startup validates only the default `openai-codex` sign-in.
+Open the printed Google authorization URL in your browser, approve access, and paste the resulting authorization code (or full redirect URL) back into the terminal. The launcher exchanges the PKCE code and writes `/data/zeroclaw/.gemini/oauth_creds.json` (`0600`, owned by `heimdall`) with refresh credentials included so ZeroClaw refreshes expired tokens automatically when `/model gemini` is selected. Reload via the paired dashboard (or redeploy/restart) if the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created. Set `ZEROCLAW_providers__models__gemini__default__oauth_project` in Railway Variables only if your Google account requires an explicit GCP project ID for Code Assist onboarding. Startup validates only the default `openai-codex` sign-in.
 
 Complete the official login page yourself. Never paste authentication files or tokens into chat, source control, or logs.
 
@@ -110,7 +110,7 @@ After deploying, ask the bot: “Use Tavily to search for the latest stable Rust
 
 ## Switching models in Telegram
 
-The ChatGPT subscription model remains the default. The template also defines two optional routes: `gemini` (`gemini.default` with `gemini-3.8-flash` and `auth_mode = "o_auth"`) and `free` (`openrouter.free` with `openrouter/free`). For Gemini OAuth device sign-in, set `ZEROCLAW_providers__models__gemini__default__oauth_client_id` and `ZEROCLAW_providers__models__gemini__default__oauth_client_secret` (plus optional `ZEROCLAW_providers__models__gemini__default__oauth_project`) privately in Railway Variables and complete `gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider gemini --device-code`; alternatively provide `/data/zeroclaw/.gemini/oauth_creds.json` or `ZEROCLAW_providers__models__gemini__default__api_key`. Add or replace `ZEROCLAW_providers__models__openrouter__free__api_key` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. ZeroClaw reads native environment overrides directly; they are not written into TOML. All API-backed provider credentials use the same `ZEROCLAW_providers__models__PROVIDER__ALIAS__api_key` convention.
+The ChatGPT subscription model remains the default. The template also defines two optional routes: `gemini` (`gemini.default` with `gemini-3.8-flash` and `auth_mode = "o_auth"`) and `free` (`openrouter.free` with `openrouter/free`). For Gemini OAuth sign-in, run `gosu heimdall heimdall-launcher --gemini-login` to write `/data/zeroclaw/.gemini/oauth_creds.json` (plus optional `ZEROCLAW_providers__models__gemini__default__oauth_project` if your account requires an explicit GCP project seed, or `ZEROCLAW_providers__models__gemini__default__api_key` for API-key auth). Add or replace `ZEROCLAW_providers__models__openrouter__free__api_key` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. ZeroClaw reads native environment overrides directly; they are not written into TOML. All API-backed provider credentials use the same `ZEROCLAW_providers__models__PROVIDER__ALIAS__api_key` convention.
 
 Send `/model gemini` to select `gemini-3.8-flash` on the Gemini route, or `/model free` to select OpenRouter's free router for your conversation. Send `/model codex` to return to the configured ChatGPT subscription model. `/model` displays the current selection. Routes change the provider and model together, while retaining the primary agent, its conversation and the same permitted tools. These are session overrides; verify the current selection after a restart. No automatic paid-provider fallback is configured.
 
