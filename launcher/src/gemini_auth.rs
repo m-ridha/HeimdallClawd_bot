@@ -6,7 +6,7 @@ use reqwest::blocking::Client;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -26,30 +26,20 @@ fn fail(message: &str) -> io::Error {
     io::Error::other(message)
 }
 
-fn random_bytes<const N: usize>() -> io::Result<[u8; N]> {
+fn random_token() -> io::Result<String> {
     let mut file = File::open("/dev/urandom")
         .map_err(|_| fail("Cannot open /dev/urandom for OAuth PKCE challenge"))?;
-    let mut bytes = [0u8; N];
+    let mut bytes = [0u8; 32];
     file.read_exact(&mut bytes)
         .map_err(|_| fail("Cannot read random bytes for OAuth PKCE challenge"))?;
-    Ok(bytes)
+    Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{byte:02x}");
-    }
-    out
+fn pkce_challenge(verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
-pub fn pkce_challenge(verifier: &str) -> String {
-    let digest = Sha256::digest(verifier.as_bytes());
-    URL_SAFE_NO_PAD.encode(digest)
-}
-
-pub fn build_authorization_url(challenge: &str, state: &str) -> io::Result<String> {
+fn build_authorization_url(challenge: &str, state: &str) -> io::Result<String> {
     let url = Url::parse_with_params(
         AUTH_ENDPOINT,
         &[
@@ -68,7 +58,7 @@ pub fn build_authorization_url(challenge: &str, state: &str) -> io::Result<Strin
     Ok(url.into())
 }
 
-pub fn parse_authorization_input(raw_input: &str, expected_state: &str) -> io::Result<String> {
+fn parse_authorization_input(raw_input: &str, expected_state: &str) -> io::Result<String> {
     let trimmed = raw_input.trim();
     if trimmed.is_empty() {
         return Err(fail("Authorization code is required"));
@@ -76,21 +66,16 @@ pub fn parse_authorization_input(raw_input: &str, expected_state: &str) -> io::R
 
     let candidate = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         let parsed = Url::parse(trimmed).map_err(|_| fail("Invalid callback URL"))?;
-        let mut extracted_code = None;
-        let mut extracted_state = None;
-        for (key, value) in parsed.query_pairs() {
-            if key == "code" && extracted_code.is_none() {
-                extracted_code = Some(value.into_owned());
-            } else if key == "state" && extracted_state.is_none() {
-                extracted_state = Some(value.into_owned());
-            }
-        }
-        if let Some(state) = extracted_state
-            && state != expected_state
+        if parsed
+            .query_pairs()
+            .any(|(key, value)| key == "state" && value != expected_state)
         {
             return Err(fail("OAuth state mismatch; restart --gemini-login"));
         }
-        extracted_code.ok_or_else(|| fail("Callback URL does not contain a code parameter"))?
+        parsed
+            .query_pairs()
+            .find_map(|(key, value)| (key == "code").then(|| value.into_owned()))
+            .ok_or_else(|| fail("Callback URL does not contain a code parameter"))?
     } else {
         trimmed.to_owned()
     };
@@ -105,25 +90,6 @@ pub fn parse_authorization_input(raw_input: &str, expected_state: &str) -> io::R
     }
 
     Ok(candidate)
-}
-
-fn read_bounded_line(reader: &mut dyn Read) -> io::Result<String> {
-    let mut bytes = Vec::new();
-    let mut limited = reader.take((INPUT_LIMIT + 1) as u64);
-    let mut byte = [0u8; 1];
-    while bytes.len() <= INPUT_LIMIT {
-        let count = limited
-            .read(&mut byte)
-            .map_err(|_| fail("Failed reading authorization code from stdin"))?;
-        if count == 0 || byte[0] == b'\n' {
-            break;
-        }
-        bytes.push(byte[0]);
-    }
-    if bytes.len() > INPUT_LIMIT {
-        return Err(fail("Authorization input exceeded 4096 bytes"));
-    }
-    String::from_utf8(bytes).map_err(|_| fail("Authorization input must be valid UTF-8"))
 }
 
 fn status_error(status: u16) -> io::Error {
@@ -148,14 +114,7 @@ fn transport_error(error: &reqwest::Error) -> io::Error {
     }
 }
 
-fn form_urlencoded(pairs: &[(&str, &str)]) -> io::Result<String> {
-    let mut url =
-        Url::parse("http://localhost").map_err(|_| fail("Cannot initialize form encoder"))?;
-    url.query_pairs_mut().extend_pairs(pairs);
-    Ok(url.query().unwrap_or_default().to_owned())
-}
-
-pub fn exchange_and_store(
+fn exchange_and_store(
     state_dir: &Path,
     token_endpoint: &str,
     code: &str,
@@ -171,19 +130,23 @@ pub fn exchange_and_store(
         .build()
         .map_err(|_| fail("Cannot initialize Gemini OAuth HTTP client"))?;
 
-    let body = form_urlencoded(&[
-        ("client_id", CLIENT_ID),
-        ("client_secret", CLIENT_SECRET),
-        ("code", code),
-        ("code_verifier", verifier),
-        ("redirect_uri", REDIRECT_URI),
-        ("grant_type", "authorization_code"),
-    ])?;
+    let form = Url::parse_with_params(
+        "http://localhost",
+        &[
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("redirect_uri", REDIRECT_URI),
+            ("grant_type", "authorization_code"),
+        ],
+    )
+    .map_err(|_| fail("Cannot encode Gemini OAuth token request"))?;
 
     let response = client
         .post(token_endpoint)
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .body(body)
+        .body(form.query().unwrap_or_default().to_owned())
         .send()
         .map_err(|error| transport_error(&error))?;
 
@@ -222,14 +185,12 @@ pub fn exchange_and_store(
         .map_err(|_| fail("System clock is before UNIX_EPOCH"))?
         .as_millis() as i64;
     let expiry_date = now_ms.saturating_add(expires_in.saturating_mul(1000));
-    let scope = payload["scope"].as_str().unwrap_or(SCOPES);
-    let token_type = payload["token_type"].as_str().unwrap_or("Bearer");
 
     let mut document = json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "token_type": token_type,
-        "scope": scope,
+        "token_type": payload["token_type"].as_str().unwrap_or("Bearer"),
+        "scope": payload["scope"].as_str().unwrap_or(SCOPES),
         "expiry_date": expiry_date,
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
@@ -252,20 +213,26 @@ pub fn exchange_and_store(
     Ok(())
 }
 
+/// Run the interactive headless Google Code Assist OAuth PKCE flow and store `.gemini/oauth_creds.json`.
 pub fn run_interactive(state_dir: &Path) -> io::Result<()> {
-    let verifier_bytes = random_bytes::<32>()?;
-    let state_bytes = random_bytes::<32>()?;
-    let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+    let verifier = random_token()?;
+    let state = random_token()?;
     let challenge = pkce_challenge(&verifier);
-    let state = hex_encode(&state_bytes);
     let auth_url = build_authorization_url(&challenge, &state)?;
 
     println!("Open the following URL in your browser to sign in to Gemini:\n\n{auth_url}\n");
     print!("Paste the authorization code (or full redirect URL) and press Enter: ");
     io::stdout().flush()?;
 
-    let mut stdin = io::stdin().lock();
-    let line = read_bounded_line(&mut stdin)?;
+    let mut line = String::new();
+    io::stdin()
+        .lock()
+        .take((INPUT_LIMIT + 1) as u64)
+        .read_line(&mut line)
+        .map_err(|_| fail("Failed reading authorization code from stdin"))?;
+    if line.len() > INPUT_LIMIT {
+        return Err(fail("Authorization input exceeded 4096 bytes"));
+    }
     let code = parse_authorization_input(&line, &state)?;
 
     exchange_and_store(state_dir, TOKEN_ENDPOINT, &code, &verifier)?;

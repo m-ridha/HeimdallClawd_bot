@@ -186,8 +186,7 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("codex")
         && r["model_provider"].as_str() == Some("openai.codex")));
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("gemini")
-        && r["model_provider"].as_str() == Some("gemini.default")
-        && r["model"].as_str() == Some("gemini-3.8-flash")));
+        && r["model_provider"].as_str() == Some("gemini.default")));
 }
 
 #[test]
@@ -209,7 +208,6 @@ fn codex_route_tracks_the_configured_model() {
         .iter()
         .find(|route| route["hint"].as_str() == Some("gemini"))
         .unwrap();
-    assert_eq!(gemini["model_provider"].as_str(), Some("gemini.default"));
     assert_eq!(gemini["model"].as_str(), Some("gemini-3.8-flash"));
 }
 
