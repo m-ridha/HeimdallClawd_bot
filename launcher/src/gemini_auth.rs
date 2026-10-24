@@ -218,6 +218,20 @@ fn ensure_code_assist_ready(
         .map_err(|error| transport_error(&error, "Code Assist project check"))?;
     let load_payload = read_json_response(load_response, "Code Assist project check")?;
 
+    let has_current_tier = load_payload
+        .get("currentTier")
+        .and_then(Value::as_object)
+        .is_some_and(|tier| !tier.is_empty());
+
+    if has_current_tier {
+        if extract_project_id(&load_payload).is_some() || project_seed.is_some() {
+            return Ok(());
+        }
+        return Err(fail(
+            "Gemini account requires a Google Cloud Project ID; set ZEROCLAW_providers__models__gemini__default__oauth_project in Railway Variables, redeploy, and re-run --gemini-login",
+        ));
+    }
+
     let allowed_tiers = load_payload["allowedTiers"].as_array();
     let ineligible_tiers = load_payload["ineligibleTiers"].as_array();
     let requires_validation = ineligible_tiers.is_some_and(|tiers| {
@@ -237,19 +251,6 @@ fn ensure_code_assist_ready(
 
     if extract_project_id(&load_payload).is_some() {
         return Ok(());
-    }
-
-    let has_current_tier = load_payload
-        .get("currentTier")
-        .and_then(Value::as_object)
-        .is_some_and(|tier| !tier.is_empty());
-    if has_current_tier {
-        if project_seed.is_some() {
-            return Ok(());
-        }
-        return Err(fail(
-            "Gemini account requires a Google Cloud Project ID; set ZEROCLAW_providers__models__gemini__default__oauth_project in Railway Variables, redeploy, and re-run --gemini-login",
-        ));
     }
 
     let selected_tier = allowed_tiers.and_then(|tiers| {
@@ -967,6 +968,84 @@ mod tests {
             std::fs::read(&creds_path).unwrap(),
             b"retained-existing-credential"
         );
+    }
+
+    #[test]
+    fn active_tier_with_ineligible_other_tier_accepts_configured_and_server_projects() {
+        // Active tier with configured project and an ineligible other tier.
+        let configured_dir = tempfile::tempdir().unwrap();
+        let configured_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let configured_addr = configured_listener.local_addr().unwrap();
+        let configured_server = std::thread::spawn(move || {
+            let (mut token_stream, _) = configured_listener.accept().unwrap();
+            let _ = read_http_request(&mut token_stream);
+            write_http_response(
+                &mut token_stream,
+                "200 OK",
+                r#"{"access_token":"ya29.active-cfg","refresh_token":"1//active-cfg","expires_in":3600}"#,
+            );
+
+            let (mut load_stream, _) = configured_listener.accept().unwrap();
+            let _ = read_http_request(&mut load_stream);
+            write_http_response(
+                &mut load_stream,
+                "200 OK",
+                r#"{"currentTier":{"id":"standard-tier"},"ineligibleTiers":[{"tierId":"free-tier","reasonCode":"INELIGIBLE_ACCOUNT"}]}"#,
+            );
+        });
+
+        let configured_result = exchange_and_store(
+            configured_dir.path(),
+            &format!("http://{configured_addr}/token"),
+            &format!("http://{configured_addr}/v1internal"),
+            "fixture-code",
+            "fixture-verifier",
+            Some("my-gcp-project"),
+            Duration::from_millis(10),
+        );
+        configured_server.join().unwrap();
+        configured_result.unwrap();
+        assert!(
+            configured_dir
+                .path()
+                .join(".gemini/oauth_creds.json")
+                .is_file()
+        );
+
+        // Active tier with server-returned project and an ineligible other tier.
+        let server_dir = tempfile::tempdir().unwrap();
+        let server_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let server_addr = server_listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut token_stream, _) = server_listener.accept().unwrap();
+            let _ = read_http_request(&mut token_stream);
+            write_http_response(
+                &mut token_stream,
+                "200 OK",
+                r#"{"access_token":"ya29.active-srv","refresh_token":"1//active-srv","expires_in":3600}"#,
+            );
+
+            let (mut load_stream, _) = server_listener.accept().unwrap();
+            let _ = read_http_request(&mut load_stream);
+            write_http_response(
+                &mut load_stream,
+                "200 OK",
+                r#"{"currentTier":{"id":"free-tier"},"cloudaicompanionProject":"gen-lang-client-fixture","ineligibleTiers":[{"tierId":"standard-tier","reasonCode":"INELIGIBLE_ACCOUNT"}]}"#,
+            );
+        });
+
+        let server_result = exchange_and_store(
+            server_dir.path(),
+            &format!("http://{server_addr}/token"),
+            &format!("http://{server_addr}/v1internal"),
+            "fixture-code",
+            "fixture-verifier",
+            None,
+            Duration::from_millis(10),
+        );
+        server.join().unwrap();
+        server_result.unwrap();
+        assert!(server_dir.path().join(".gemini/oauth_creds.json").is_file());
     }
 
     #[test]
