@@ -218,26 +218,37 @@ fn ensure_code_assist_ready(
         .map_err(|error| transport_error(&error, "Code Assist project check"))?;
     let load_payload = read_json_response(load_response, "Code Assist project check")?;
 
+    let allowed_tiers = load_payload["allowedTiers"].as_array();
+    let ineligible_tiers = load_payload["ineligibleTiers"].as_array();
+    let requires_validation = ineligible_tiers.is_some_and(|tiers| {
+        tiers.iter().any(|tier| {
+            tier["reasonCode"].as_str() == Some("VALIDATION_REQUIRED")
+                || tier.get("validationUrl").is_some_and(|url| !url.is_null())
+        })
+    });
+    if requires_validation
+        || (allowed_tiers.is_none_or(Vec::is_empty)
+            && ineligible_tiers.is_some_and(|tiers| !tiers.is_empty()))
+    {
+        return Err(fail(
+            "Gemini account is ineligible or requires account verification in Google Cloud before headless login",
+        ));
+    }
+
     if extract_project_id(&load_payload).is_some() {
         return Ok(());
     }
-    if load_payload.get("currentTier").is_some() {
+
+    let has_current_tier = load_payload
+        .get("currentTier")
+        .and_then(Value::as_object)
+        .is_some_and(|tier| !tier.is_empty());
+    if has_current_tier {
         if project_seed.is_some() {
             return Ok(());
         }
         return Err(fail(
             "Gemini account requires a Google Cloud Project ID; set ZEROCLAW_providers__models__gemini__default__oauth_project in Railway Variables, redeploy, and re-run --gemini-login",
-        ));
-    }
-
-    let allowed_tiers = load_payload["allowedTiers"].as_array();
-    if allowed_tiers.is_none_or(Vec::is_empty)
-        && load_payload["ineligibleTiers"]
-            .as_array()
-            .is_some_and(|tiers| !tiers.is_empty())
-    {
-        return Err(fail(
-            "Gemini account is ineligible or requires account verification in Google Cloud before headless login",
         ));
     }
 
@@ -709,7 +720,7 @@ mod tests {
             write_http_response(
                 &mut load_stream,
                 "200 OK",
-                r#"{"allowedTiers":[{"id":"free-tier","isDefault":true}]}"#,
+                r#"{"currentTier":null,"allowedTiers":[{"id":"free-tier","isDefault":true}]}"#,
             );
 
             let (mut onboard_stream, _) = listener.accept().unwrap();
@@ -902,6 +913,56 @@ mod tests {
         poll_server.join().unwrap();
         let poll_error = poll_result.unwrap_err();
         assert!(poll_error.to_string().contains("error code 9"));
+        assert_eq!(
+            std::fs::read(&creds_path).unwrap(),
+            b"retained-existing-credential"
+        );
+    }
+
+    #[test]
+    fn null_tier_with_configured_project_rejects_verification_and_preserves_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let gemini_dir = dir.path().join(".gemini");
+        std::fs::create_dir(&gemini_dir).unwrap();
+        let creds_path = gemini_dir.join("oauth_creds.json");
+        std::fs::write(&creds_path, b"retained-existing-credential").unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut token_stream, _) = listener.accept().unwrap();
+            let _ = read_http_request(&mut token_stream);
+            write_http_response(
+                &mut token_stream,
+                "200 OK",
+                r#"{"access_token":"ya29.validation-req","refresh_token":"1//val","expires_in":3600}"#,
+            );
+
+            let (mut load_stream, _) = listener.accept().unwrap();
+            let _ = read_http_request(&mut load_stream);
+            write_http_response(
+                &mut load_stream,
+                "200 OK",
+                r#"{"currentTier":null,"ineligibleTiers":[{"reasonCode":"VALIDATION_REQUIRED","validationUrl":"https://example.com/verify"}]}"#,
+            );
+        });
+
+        let result = exchange_and_store(
+            dir.path(),
+            &format!("http://{addr}/token"),
+            &format!("http://{addr}/v1internal"),
+            "fixture-code",
+            "fixture-verifier",
+            Some("my-gcp-project"),
+            Duration::from_millis(10),
+        );
+        server.join().unwrap();
+        let error = result.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("ineligible or requires account verification")
+        );
         assert_eq!(
             std::fs::read(&creds_path).unwrap(),
             b"retained-existing-credential"
