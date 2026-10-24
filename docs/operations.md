@@ -71,6 +71,14 @@ For an interactive device sign-in, use the bot's Railway dashboard terminal:
 gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider openai-codex --device-code
 ```
 
+To also sign in for the optional `/model gemini` (`gemini-3.8-flash`) subscription route, first set `ZEROCLAW_providers__models__gemini__default__oauth_client_id` and `ZEROCLAW_providers__models__gemini__default__oauth_client_secret` (and optional `ZEROCLAW_providers__models__gemini__default__oauth_project`) in the service's Railway Variables, redeploy once so the runtime inherits those overrides, and run:
+
+```sh
+gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider gemini --device-code
+```
+
+The Gemini profile is stored alongside `openai-codex` in `/data/zeroclaw/auth-profiles.json` (`gemini:default`) and refreshes automatically when `/model gemini` is used. If no managed `gemini:default` profile is present, `gemini.default` also accepts a Gemini CLI OAuth cache at `/data/zeroclaw/.gemini/oauth_creds.json` or an explicit `ZEROCLAW_providers__models__gemini__default__api_key` override. Startup validates only the default `openai-codex` sign-in.
+
 Complete the official login page yourself. Never paste authentication files or tokens into chat, source control, or logs.
 
 Conversation history uses `/data/zeroclaw/data/sessions/sessions.db`; the agent's SQLite memory lives under its workspace within `/data/zeroclaw/agents/primary/workspace`. These paths survive image replacement while the volume remains attached. User files now live in the agent workspace; migrate old files before retiring old storage. A volume is persistent storage, not a backup: retain a private backup before deleting a volume or service. An additional database is unnecessary for this single-instance setup.
@@ -102,9 +110,9 @@ After deploying, ask the bot: “Use Tavily to search for the latest stable Rust
 
 ## Switching models in Telegram
 
-The ChatGPT subscription model remains the default. Add or replace `ZEROCLAW_providers__models__openrouter__free__api_key` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. ZeroClaw reads the native environment override directly; it is not written into TOML. All API-backed provider credentials use the same `ZEROCLAW_providers__models__PROVIDER__ALIAS__api_key` convention.
+The ChatGPT subscription model remains the default. The template also defines two optional routes: `gemini` (`gemini.default` with `gemini-3.8-flash` and `auth_mode = "o_auth"`) and `free` (`openrouter.free` with `openrouter/free`). For Gemini OAuth device sign-in, set `ZEROCLAW_providers__models__gemini__default__oauth_client_id` and `ZEROCLAW_providers__models__gemini__default__oauth_client_secret` (plus optional `ZEROCLAW_providers__models__gemini__default__oauth_project`) privately in Railway Variables and complete `gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider gemini --device-code`; alternatively provide `/data/zeroclaw/.gemini/oauth_creds.json` or `ZEROCLAW_providers__models__gemini__default__api_key`. Add or replace `ZEROCLAW_providers__models__openrouter__free__api_key` privately in the bot service's Railway Variables to enable the optional `openrouter/free` route. ZeroClaw reads native environment overrides directly; they are not written into TOML. All API-backed provider credentials use the same `ZEROCLAW_providers__models__PROVIDER__ALIAS__api_key` convention.
 
-Send `/model free` to select OpenRouter's free router for your conversation. Send `/model codex` to return to the configured subscription model. `/model` displays the current selection. Routes change the provider and model together, while retaining the primary agent, its conversation and the same permitted tools. These are session overrides; verify the current selection after a restart. No automatic paid-provider fallback is configured.
+Send `/model gemini` to select `gemini-3.8-flash` on the Gemini route, or `/model free` to select OpenRouter's free router for your conversation. Send `/model codex` to return to the configured ChatGPT subscription model. `/model` displays the current selection. Routes change the provider and model together, while retaining the primary agent, its conversation and the same permitted tools. These are session overrides; verify the current selection after a restart. No automatic paid-provider fallback is configured.
 
 OpenRouter's free router chooses an available free model supporting the request's features, including tool calling. Its availability, context capacity and rate limits vary; see [the free-router guide](https://openrouter.ai/docs/guides/routing/routers/free-router) and [limits](https://openrouter.ai/docs/api_reference/limits). Selecting this route sends the conversation and tool results needed for the request to OpenRouter and its selected provider. Railway infrastructure usage still counts toward the account budget.
 
@@ -392,7 +400,7 @@ The default Codex profile declares `context_window = 475_000` under `[providers.
 
 Existing native `ZEROCLAW_...` Railway overrides take precedence over the template; update or remove an old context-budget override if it would mask these defaults.
 
-The capacity is a conservative starting point for `gpt-6.1-sol`, derived from observed local Codex metadata (500,000 tokens with 95% usable), not live verification of the Railway subscription route. The [OpenAI API model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) describes API capacity; do not assume every subscription route exposes the same limit. Check the deployed model metadata before increasing it. When changing the template model, remove the old capacity or configure verified capacity for the new provider/model. Native route resolution also prevents a different selected model or OpenRouter route from borrowing Codex capacity. An unconfigured capacity remains unknown even if a runtime fallback uses the working budget.
+The capacity is a conservative starting point for `gpt-6.1-sol`, derived from observed local Codex metadata (500,000 tokens with 95% usable), not live verification of the Railway subscription route. The [OpenAI API model page](https://developers.openai.com/api/docs/models/gpt-6.1-sol) describes API capacity; do not assume every subscription route exposes the same limit. Check the deployed model metadata before increasing it. When changing the template model, remove the old capacity or configure verified capacity for the new provider/model. Native route resolution also prevents a different selected model, the Gemini route or the OpenRouter route from borrowing Codex capacity. An unconfigured capacity remains unknown even if a runtime fallback uses the working budget.
 
 `compact_context = false`, deferred built-in discovery, tool grants, iteration/action limits and the 70,000-character tool-result allowance remain unchanged. Do not set `max_context_tokens = 0` to fix overflow: it disables proactive budget trimming. The pinned runtime's `context_compression` settings are unsupported and do not enable summarization.
 

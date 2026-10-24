@@ -78,6 +78,8 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     let mut vars = secret_overrides(token).unwrap();
     let deepgram_key = "fixture_deepgram_private_value";
     let cohere_key = "fixture_cohere_private_value";
+    let gemini_client_id = "fixture_gemini_oauth_client_id";
+    let gemini_client_secret = "fixture_gemini_oauth_client_secret";
     vars.push((
         "ZEROCLAW_providers__transcription__deepgram__voice__api_key".into(),
         deepgram_key.into(),
@@ -86,12 +88,22 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         "ZEROCLAW_memory__embedding_api_key".into(),
         cohere_key.into(),
     ));
+    vars.push((
+        "ZEROCLAW_providers__models__gemini__default__oauth_client_id".into(),
+        gemini_client_id.into(),
+    ));
+    vars.push((
+        "ZEROCLAW_providers__models__gemini__default__oauth_client_secret".into(),
+        gemini_client_secret.into(),
+    ));
     for (property, expected) in [
         (
             "peer_groups.telegram_home.external-peers",
             "[\"1001\", \"1002\"]",
         ),
         ("providers.models.openai.codex.requires-openai-auth", "true"),
+        ("providers.models.gemini.default.model", "gemini-3.8-flash"),
+        ("providers.models.gemini.default.auth-mode", "o_auth"),
         ("heartbeat.enabled", "true"),
         ("heartbeat.to", "1001"),
         ("media_pipeline.enabled", "true"),
@@ -151,6 +163,8 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     assert!(!saved.contains(&secret));
     assert!(!saved.contains(deepgram_key));
     assert!(!saved.contains(cohere_key));
+    assert!(!saved.contains(gemini_client_id));
+    assert!(!saved.contains(gemini_client_secret));
 }
 
 #[test]
@@ -165,11 +179,27 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
         cfg["providers"]["models"]["openrouter"]["free"]["model"].as_str(),
         Some("openrouter/free")
     );
+    assert_eq!(
+        cfg["providers"]["models"]["gemini"]["default"]["model"].as_str(),
+        Some("gemini-3.8-flash")
+    );
+    assert_eq!(
+        cfg["providers"]["models"]["gemini"]["default"]["auth_mode"].as_str(),
+        Some("o_auth")
+    );
+    assert!(
+        cfg["providers"]["models"]["gemini"]["default"]
+            .get("context_window")
+            .is_none()
+    );
     let routes = cfg["model_routes"].as_array().unwrap();
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("free")
         && r["model_provider"].as_str() == Some("openrouter.free")));
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("codex")
         && r["model_provider"].as_str() == Some("openai.codex")));
+    assert!(routes.iter().any(|r| r["hint"].as_str() == Some("gemini")
+        && r["model_provider"].as_str() == Some("gemini.default")
+        && r["model"].as_str() == Some("gemini-3.8-flash")));
 }
 
 #[test]
@@ -187,6 +217,12 @@ fn codex_route_tracks_the_configured_model() {
         .find(|route| route["hint"].as_str() == Some("free"))
         .unwrap();
     assert_eq!(free["model"].as_str(), Some("openrouter/free"));
+    let gemini = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("gemini"))
+        .unwrap();
+    assert_eq!(gemini["model_provider"].as_str(), Some("gemini.default"));
+    assert_eq!(gemini["model"].as_str(), Some("gemini-3.8-flash"));
 }
 
 #[test]

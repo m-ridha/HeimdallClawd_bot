@@ -8,6 +8,8 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     let tavily_key = concat!("tvly-test-", "placeholder_secret_abcdef");
     let deepgram_key = "fixture_deepgram_private_value";
     let cohere_key = "fixture_cohere_private_value";
+    let gemini_client_id = "fixture_gemini_oauth_client_id";
+    let gemini_client_secret = "fixture_gemini_oauth_client_secret";
     // This integration test has one current-thread case, in a separate test process.
     unsafe {
         std::env::set_var("ZEROCLAW_CONFIG_DIR", temp.path());
@@ -28,6 +30,14 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         std::env::set_var(
             "ZEROCLAW_providers__models__openrouter__free__api_key",
             openrouter_key,
+        );
+        std::env::set_var(
+            "ZEROCLAW_providers__models__gemini__default__oauth_client_id",
+            gemini_client_id,
+        );
+        std::env::set_var(
+            "ZEROCLAW_providers__models__gemini__default__oauth_client_secret",
+            gemini_client_secret,
         );
         std::env::set_var("ZEROCLAW_channels__telegram__home__bot_token", token);
         std::env::set_var(
@@ -80,6 +90,24 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
             .model_provider,
         "openrouter.free"
     );
+    let gemini = &config.providers.models.gemini["default"];
+    assert_eq!(gemini.base.model.as_deref(), Some("gemini-3.8-flash"));
+    assert_eq!(
+        gemini.auth_mode,
+        Some(zeroclaw_config::schema::AuthMode::OAuth)
+    );
+    assert_eq!(gemini.oauth_client_id.as_deref(), Some(gemini_client_id));
+    assert_eq!(
+        gemini.oauth_client_secret.as_deref(),
+        Some(gemini_client_secret)
+    );
+    let gemini_route = config
+        .model_routes
+        .iter()
+        .find(|r| r.hint == "gemini")
+        .unwrap();
+    assert_eq!(gemini_route.model_provider, "gemini.default");
+    assert_eq!(gemini_route.model, "gemini-3.8-flash");
     let custom = config.providers.models.find("anthropic", "custom").unwrap();
     assert_eq!(custom.model.as_deref(), Some("placeholder-model"));
     assert_eq!(custom.api_key.as_deref(), Some("sk-ant-fixture-private"));
@@ -122,6 +150,11 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         None,
         "The router must not inherit the Codex capacity",
     );
+    assert_eq!(
+        config.model_provider_context_window_opt("gemini.default", "gemini-3.8-flash"),
+        None,
+        "The Gemini route must not inherit the Codex capacity",
+    );
     config.save().await.unwrap();
     let saved = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(!saved.contains("sk-ant-fixture-private"));
@@ -129,6 +162,8 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(!saved.contains(tavily_key));
     assert!(!saved.contains(deepgram_key));
     assert!(!saved.contains(cohere_key));
+    assert!(!saved.contains(gemini_client_id));
+    assert!(!saved.contains(gemini_client_secret));
     assert!(!saved.contains(token));
     assert!(!saved.contains("fixture_adapter_bearer_01234567890123456789"));
 }
