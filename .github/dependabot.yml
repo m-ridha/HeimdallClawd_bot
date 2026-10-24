@@ -6,7 +6,6 @@ updates:
   - package-ecosystem: "cargo"
     directories:
       - "/launcher"
-      - "/executor"
     schedule:
       interval: "weekly"
     commit-message:
@@ -14,9 +13,7 @@ updates:
 
   - package-ecosystem: "docker"
     directories:
-      - "/executor"
       - "/deploy/bot"
-      - "/deploy/executor"
     schedule:
       interval: "weekly"
     commit-message:

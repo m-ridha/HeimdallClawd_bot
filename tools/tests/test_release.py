@@ -17,7 +17,7 @@ ENV = {'RAILWAY_PROJECT_ID': SERVICE, 'RAILWAY_ENVIRONMENT_ID': SERVICE}
 
 class DeploymentHealthTests(unittest.TestCase):
     def run_with(self, responses, *, github_actions=False):
-        with patch.object(sys, 'argv', ['deploy-release.py', '.', SERVICE, 'v0.1.0', 'executor']), patch.dict(os.environ, {**ENV, 'GITHUB_ACTIONS': 'true' if github_actions else 'false'}), patch.object(deploy, 'railway', side_effect=responses) as cli, patch.object(deploy.time, 'sleep') as sleep:
+        with patch.object(sys, 'argv', ['deploy-release.py', '.', SERVICE, 'v0.1.0']), patch.dict(os.environ, {**ENV, 'GITHUB_ACTIONS': 'true' if github_actions else 'false'}), patch.object(deploy, 'railway', side_effect=responses) as cli, patch.object(deploy.time, 'sleep') as sleep:
             deploy.main()
         return cli, sleep
 
@@ -36,7 +36,7 @@ class DeploymentHealthTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             self.run_with([{'deploymentId': DEPLOYMENT}, [{'id': DEPLOYMENT, 'status': 'SUCCESS'}]])
-        self.assertIn('executor: SUCCESS', output.getvalue())
+        self.assertIn('agent: SUCCESS', output.getvalue())
         self.assertNotIn(SERVICE, output.getvalue())
         self.assertNotIn(DEPLOYMENT, output.getvalue())
         with self.assertRaises(RuntimeError) as error, contextlib.redirect_stdout(io.StringIO()):
@@ -57,7 +57,7 @@ class DeploymentHealthTests(unittest.TestCase):
 
     def test_timeout_does_not_disclose_identifiers(self):
         with patch.object(deploy.time, 'monotonic', side_effect=[0, 901]), contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(RuntimeError, 'executor: deployment did not become healthy') as error:
+            with self.assertRaisesRegex(RuntimeError, 'agent: deployment did not become healthy') as error:
                 self.run_with([{'deploymentId': DEPLOYMENT}])
         self.assertNotIn(DEPLOYMENT, str(error.exception))
 
@@ -69,7 +69,7 @@ class DeploymentHealthTests(unittest.TestCase):
                 [{'id': DEPLOYMENT, 'status': 'TEST_private_response_payload'}],
                 [{'id': DEPLOYMENT, 'status': 'SUCCESS'}],
             ])
-        self.assertIn('executor: not yet listed', output.getvalue())
+        self.assertIn('agent: not yet listed', output.getvalue())
         self.assertNotIn('TEST_private_response_payload', output.getvalue())
 
     def test_failed_target_is_not_hidden_by_older_success(self):

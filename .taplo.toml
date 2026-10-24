@@ -10,6 +10,8 @@ align_comments = true
 crlf = false
 # Indentation to use
 indent_string = "\t"
+# Allowed blank lines between entries
+allowed_blank_lines = 1
 # Add trailing newline to the source
 trailing_newline = true
 

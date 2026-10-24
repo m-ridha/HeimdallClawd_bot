@@ -8,3 +8,5 @@ pub mod skill_bundles;
 pub mod skills_mcp;
 pub mod startup;
 pub mod transfer_mcp;
+
+mod workspace;

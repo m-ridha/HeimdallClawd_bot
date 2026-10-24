@@ -13,9 +13,9 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
     let original = base();
     let mut installed: toml::Value = toml::from_str(&original).unwrap();
     installed["skill_bundles"].as_table_mut().unwrap().insert(
-        "superpowers".into(),
+        "custom-workflow".into(),
         toml::toml! {
-            directory = "shared/custom-superpowers"
+            directory = "shared/custom-custom-workflow"
             include = ["brainstorming"]
             exclude = ["dispatching-parallel-agents"]
         }
@@ -40,20 +40,21 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
             .unwrap(),
         &[
             toml::Value::from("managed"),
+            toml::Value::from("custom-workflow"),
             toml::Value::from("ponytail"),
             toml::Value::from("superpowers")
         ]
     );
     assert_eq!(
-        cfg["skill_bundles"]["superpowers"]["directory"].as_str(),
-        Some("shared/custom-superpowers")
+        cfg["skill_bundles"]["custom-workflow"]["directory"].as_str(),
+        Some("shared/custom-custom-workflow")
     );
     assert_eq!(
-        cfg["skill_bundles"]["superpowers"]["include"][0].as_str(),
+        cfg["skill_bundles"]["custom-workflow"]["include"][0].as_str(),
         Some("brainstorming")
     );
     assert_eq!(
-        cfg["skill_bundles"]["superpowers"]["exclude"][0].as_str(),
+        cfg["skill_bundles"]["custom-workflow"]["exclude"][0].as_str(),
         Some("dispatching-parallel-agents")
     );
     assert_eq!(cfg["gateway"]["require_pairing"].as_bool(), Some(true));
@@ -65,9 +66,9 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
     removed["skill_bundles"]
         .as_table_mut()
         .unwrap()
-        .remove("superpowers");
+        .remove("custom-workflow");
     let restarted = attach(&original, Some(&toml::to_string(&removed).unwrap())).unwrap();
-    assert!(!restarted.contains("superpowers"));
+    assert!(!restarted.contains("custom-workflow"));
 }
 
 #[test]
@@ -85,7 +86,7 @@ fn first_boot_and_managed_policy_stay_template_owned() {
             .as_array()
             .unwrap()
             .len(),
-        1
+        3
     );
 }
 

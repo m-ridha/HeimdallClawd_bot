@@ -1,0 +1,58 @@
+--- a/crates/zeroclaw-tools/src/text_browser.rs
++++ b/crates/zeroclaw-tools/src/text_browser.rs
+@@ -8,0 +9,46 @@
++
++/// Spawn the browser and collect bounded output while reading.
++/// stdout and stderr are drained concurrently. The stdout future returns an
++/// error as soon as it reads 500,001 bytes; tokio::try_join! cancels the
++/// stderr future immediately so the child is killed without waiting for
++/// stderr EOF. kill_on_drop handles cleanup on timeout or cancellation.
++#[doc(hidden)]
++pub async fn heimdall_browser_dump(
++    browser: &str,
++    args: &[String],
++) -> std::io::Result<std::process::Output> {
++    use tokio::io::AsyncReadExt;
++    let mut child = tokio::process::Command::new(browser)
++        .args(args)
++        .kill_on_drop(true)
++        .stdin(std::process::Stdio::null())
++        .stdout(std::process::Stdio::piped())
++        .stderr(std::process::Stdio::piped())
++        .spawn()?;
++    let stdout_pipe = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
++    let stderr_pipe = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
++    let stdout_fut = async {
++        let mut out = Vec::new();
++        stdout_pipe.take(500_001).read_to_end(&mut out).await?;
++        if out.len() > 500_000 {
++            return Err(std::io::Error::other("Text browser output limit exceeded"));
++        }
++        std::io::Result::Ok(out)
++    };
++    let stderr_fut = async {
++        let mut err = Vec::new();
++        stderr_pipe.take(32_769).read_to_end(&mut err).await?;
++        std::io::Result::Ok(err)
++    };
++    match tokio::try_join!(stdout_fut, stderr_fut) {
++        Ok((out, err)) => {
++            let status = child.wait().await?;
++            Ok(std::process::Output { status, stdout: out, stderr: err })
++        }
++        Err(e) => {
++            child.kill().await?;
++            let _ = child.wait().await;
++            Err(e)
++        }
++    }
++}
+@@ -364,7 +410 @@
+-        let result = tokio::time::timeout(
+-            timeout,
+-            tokio::process::Command::new(&browser)
+-                .args(&dump_args)
+-                .output(),
+-        )
+-        .await;
++        let result = tokio::time::timeout(timeout, heimdall_browser_dump(&browser, &dump_args)).await;

@@ -1,73 +1,68 @@
 # Enabled capabilities
 
-This catalog describes the checked-in template, build features and tool policy. Environment overrides and deployed images can differ; use the dated [verification record](verification.md) for evidence, not this catalog as a live-health claim. Heartbeat is enabled for the owner; headless browser automation and browser delegation are not configured because Tavily provides search/content access rather than a WebDriver or browser-agent service.
+This describes checked-in configuration, not a live verification claim. The main
+service runs native tools with internet and passwordless sudo root access.
 
-| Capability | Configuration / use |
+| Capability | Configuration and prerequisites |
 | --- | --- |
-| Scheduled agent tasks | Scheduler enabled; cron_add/list/update/remove/run/runs permitted. Ask for a reminder or recurring report, specifying timezone. Use agent jobs with Telegram announce delivery; shell-only jobs remain unavailable. SQLite state is under the persistent ZeroClaw data directory. |
-| Parallel tools | Enabled for independent actions. Executor accepts two concurrent jobs; scheduler and SOP concurrency are capped at one. Further simultaneous executor work can report busy; retry after the running work completes. |
-| SOPs | Definitions persist under `/data/zeroclaw/shared/sops`; list/execute/advance/status/approve/workshop tools are allowed. Reusable procedures must be created before execution. |
-| Pipelines | execute_pipeline enabled with twelve-step maximum and an explicit subtool allowlist. |
-| Hooks / email ingress | Lifecycle hook framework enabled. Optional signed AgentMail adapter uses native SOP webhook dispatch. Sender/content rules start disabled and can assign an installed webhook-triggered SOP; notifications without an SOP do not call a model; mail__filters exposes enabled state and recent safe diagnostics, and mail__set_enabled changes flags. See [setup and limits](operations.md#agentmail-email-events). |
-| WASM plugins | Cranelift WASM runtime included, plugin loading/discovery enabled under `/data/zeroclaw/shared/plugins`. Maximum four logical instances, 32 MiB linear memory per store and ten-second calls. No plugin is bundled. Plugin-specific configuration, egress and exact tool grants are still required when installing a package; plugin limits do not cap total process memory. |
-| Open Skills | Bulk community collection sync enabled in `/data/zeroclaw/shared/open-skills`. Compact prompting reads individual skill instructions with read_skill. First synchronization consumes disk/network and can slow startup. |
-| Operator skill bundles | Native CLI bundles are assigned to primary by `heimdall-launcher --refresh-skills`, then activated with authenticated dashboard reload. Extra bundle definitions, directory mappings and filters survive startup/redeployment on the existing volume. See [operator procedure](operations.md#operator-installed-skill-bundles). |
-| Skill scripts | Script-containing skills allowed. Shell/script manifest tools copy up to 32 regular UTF-8 files, 64 KiB each / 256 KiB total, into the executor and run there. Symlinks are rejected. Operating-system dependencies and interpreter availability still matter; arbitrary downloaded packages are not installed automatically. |
-| Web access | Tavily search, bounded web_fetch and http_request, Lynx text_browser, and automatic enrichment of up to two incoming links. Public hosts allowed; private-host access remains restricted. |
-| GitHub | Optional environment-backed GitHub REST authentication and restricted Codespaces status/list/create/stop/delete/exec tools. Requires one owner-configured `GITHUB_TOKEN`; Codespaces supports an explicit repository list or standalone `*` for GitHub-authorized repositories; separate GitHub billing. See [setup](operations.md#github-access) and the [repository workflow](github-workflow.md). |
-| Telegram messaging | Poll, reaction, channel_room, ask_user and send_via tools allowed. Actual operations depend on Telegram support, bot permissions and configured peers. No other chat channel is installed. |
-| File transfer | transfer__send delivers executor files to an explicitly specified allowlisted Telegram recipient. transfer__import imports incoming files from the primary agent's telegram_files directory. transfer__receive accepts a Telegram file_id. Binary transfers are capped at 48 KiB; larger files are rejected. Native deliver_file is ACP-oriented, and native file_upload/file_download tools still need owner-configured endpoints. |
-| Offline development | Executor Git, Python 3 standard library, jq and pinned Rust/Cargo/rustfmt/Clippy support local work within the same UID, memory, time/output and syscall limits. No credentials, networking, pip or automatic dependency downloads. See [offline Rust tooling](../executor/README.md#offline-rust-tooling); use Codespaces or authorized CI when dependencies/resources are unavailable. |
-| Tool discovery | Full built-in availability is selected explicitly; deferred built-in schemas are retrieved with `tool_search`. Exact execution grants still apply, and MCP tools remain eagerly connected for remote skill scripts. |
-| Extra MCP servers | MCP remains enabled and supports owner-configured additional servers/bundles. No unknown external service is connected automatically. |
+| Shell, filesystem and Git | Native shell/read/write/edit/search/Git; full autonomy and command admission, 300-second shell timeout. Root can access credentials and change the bot. |
+| Development toolkit | Final image includes gh, Git, Bash, Python 3, curl, jq, Node/npm, SSH, ripgrep, GCC and pinned Rust/Cargo/rustfmt/Clippy. Dependencies can be downloaded. Large builds may exceed Trial resources. |
+| Scheduling | Agent cron tools plus native shell schedule; Telegram delivery requires explicit recipient and a known timezone. |
+| Delegation | Native spawn_subagent/delegate granted; reachable targets and recursion limits remain upstream policy. Work shares credentials/resources. |
+| Parallel tools, pipelines, SOPs | Enabled; pipeline remains explicitly scoped and capped at twelve steps. SOP definitions/approval/state persist. |
+| Skills and hooks | Native skill scripts, registry install/list, Open Skills sync and lifecycle hooks. Files and registered bundle definitions persist on the same /data volume; startup restores assignments. Refresh plus reload is for new bundles without restarting. See [skill persistence](operations.md#operator-installed-skill-bundles). |
+| WASM plugins | Cranelift host enabled with discovery and bounded plugin calls. No plugin bundled; packages need exact tool grants and their own configuration. |
+| Web and browser | Tavily search, fetch, HTTP, Lynx and native local Chromium automation. ChromeDriver is loopback-only; no remote browser account required. Public URL restrictions remain on web tools; shell networking is broader. |
+| Media | image_info; Deepgram voice with existing key; media preprocessing. No desktop screenshot environment; browser screenshots use browser actions. Upstream video summarization is a placeholder. |
+| Messaging | Telegram polls/reactions/notifications and small bounded transfers. Room/delivery/upload tools depend on the active channel or endpoint. No new messaging account is configured. |
+| Memory, sessions, knowledge | SQLite, Cohere semantic retrieval with existing key, graph capture, fact extraction, snapshots, MMR and bounded cache. Session send appends history rather than delivering a notification. |
+| Local utilities | Calculator, weather, canvas, TodoWrite, llm_task, model switch/routing, proxy configuration and peer messaging tools granted. Runtime/provider and peer prerequisites still apply. |
+| Backup and data management | Backup tool retains at most two archives of selected data directories; no automatic schedule. Retention tool is preview-only upstream. Same-volume archives are not independent backups. |
+| Project/cloud/security reports | Enabled advisory tools and report templates; analysis does not establish external remediation. |
+| GitHub | Native Git/gh using GITHUB_TOKEN, exact-origin github HTTP alias and optional Codespaces compute. GitHub permissions/billing remain separate. |
+| Email | Existing signed AgentMail sender/content admission and native SOP dispatch; rule toggles and safe diagnostics. No automatic replay. |
+| Dashboard and ACP | Embedded paired public dashboard, remote reload policy and ACP support. Compatible clients require setup. |
+| Diagnostics and evaluation | Redacted rotating diagnostics; tool/prompt payload capture off. Synthetic replay harness wired in CI; not model-quality evidence. |
 
 ## Configurable native integrations
 
-The primary profile contains 58 exact policy grants; this is not the exposed Telegram inventory. Native deliver_file is ACP-only, endpoint-gated transfer tools are omitted without endpoints, and ACP excludes persistent memory tools. The additions below preserve the private executor and gateway authentication. Some supported features still require operator configuration; build support alone does not make an integration functional.
-
-| Capability | Status and limits |
-| --- | --- |
-| Voice transcription | Enabled with Deepgram `nova-3`, automatic language detection and an 8 MiB / 120-second input limit. The primary agent selects `deepgram.voice`; its Railway API key is required. ChatGPT sign-in does not supply a transcription or embedding API key. |
-| Heartbeat | Enabled for `primary`, hourly, two-phase, two-minute task timeout, 24 run records. Delivery is explicitly to `TELEGRAM_OWNER_ID`. Empty task instructions do no work. See [operations](operations.md#heartbeat). |
-| Automatic media processing | Enabled for images and audio. Audio requires the Deepgram key; visual understanding depends on the selected model. Video summarization remains off because this revision documents it as a placeholder. |
-| Image inspection / screenshots | `image_info` is granted with native workspace path guards for agent-side images. Executor files must be transferred first. Native screenshot is not granted: it starts an agent-container shell and needs a desktop. Remote capture requires an external service. |
-| Session management | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` granted. sessions_send appends a user message to history only; it does not notify Telegram or start a turn. Use send_via for delivery. These inspect the shared bot session store; permitted accounts should be trusted to share that visibility. Reset/delete tools are not registered by this runtime's tool factory. |
-| Knowledge graph / bundles | Persistent graph enabled at `/data/zeroclaw/data/knowledge.db`, capped at 10,000 nodes, with `knowledge` granted. Named bundles exist in the schema but no bundle ingestion implementation was found in this pinned runtime; use graph capture instead. |
-| Semantic memory | Hybrid retrieval configured with Cohere `embed-v5.0-fast` through its OpenAI-compatible endpoint, 2,048 dimensions and a 1,024-entry embedding cache. The separate Railway key is required; ChatGPT sign-in is not used for embeddings. |
-| Memory enhancements | SQLite fact extraction and hygiene snapshots enabled. Native recall reranking is enabled with MMR, duplicate collapse and a two-times candidate pool; it uses no separate reranking API. Bounded response cache: 128 disk / 16 hot entries, 15-minute TTL. Upstream bypasses response caching when tools are available. Memory store/recall/forget tools granted. Snapshots on the same volume are not backups. |
-| Project intelligence | `project_intel` and `report_template` granted. Analyze supplied Git/issue summaries and produce reports; they do not automatically connect a project or tracker. |
-| Cloud / security | `cloud_ops`, `cloud_patterns`, `security_ops` granted. Advisory analysis, vulnerability parsing and playbook guidance; no cloud credentials or automatic infrastructure remediation added. Approval gates retained. |
-| ACP / editors | ACP channel build support included, primary agent selected by default, its existing MCP bundles enabled for ACP, maximum four sessions / 30-minute idle timeout. Gateway pairing remains required. Clients connect to the paired agent gateway; client-side editor/ACP integration still needs setup. |
-| Embedded dashboard | Dashboard assets built from the pinned source and bundled via `embedded-web`. Shares the agent's public listener with pairing required. Native authentication permits paired daemon reload and SOP administration with remote administration enabled; the proxy preserves pairing status and HTTP upgrades. Shutdown and pairing-code secrets remain console-only. |
-| Remote nodes | Configuration prepared for two nodes; disabled until a shared authentication token and remote client are configured. LAN mDNS stays off on Railway. No tunnel service is installed. |
-| Diagnostics | Rotating diagnostics: 1 MiB rotation threshold, three archives, three-day archive retention. Tool I/O and LLM payload capture remain off, per owner preference. The threshold is a rotation trigger, not a strict per-event/disk quota. |
-| WebAuthn | Compiled support included; inactive until the actual HTTPS relying-party domain/origin and client access are configured. Existing subscription sign-in remains the model authentication. |
-| Evaluation harness | Bundled synthetic replay fixture, run during native validation. It tests harness wiring with a deterministic echo tool, not live model quality or the production executor. This runtime does not implement live evaluation mode. |
+Remote nodes, mDNS, tunnels, WebAuthn enrollment, A2A peers, additional chat
+channels, vendor coding CLIs, additional model/search providers and hardware
+require actual endpoints, clients, credentials or devices. They are not activated
+by an all-tools selector. No automatic paid-provider fallback is configured.
+Browser delegation requires a separate browser-agent CLI; local browser automation
+is available instead. OIDC and hardware cannot be made useful by enabling flags
+without prerequisites. See the [patch rationale](../deploy/bot/NOTICE.md).
 
 ## Additional MCP servers and plugins
 
-Use Railway native environment overrides for endpoint credentials; never commit them. A new MCP server needs its transport and URL/command configuration, a named MCP bundle listing that server, the bundle appended to `agents.primary.mcp_bundles`, and its exact prefixed tool names appended to `risk_profiles.primary.allowed_tools` and `auto_approve` when desired. Keep the existing workspace, skills and transfer bundles and tool entries. Registering a server alone does not grant its tools.
-
-WASM plugin packages similarly need their exported tool names granted explicitly. Use the pinned ZeroClaw plugin CLI in the Railway dashboard terminal for package installation; configure only required host capabilities and network destinations. Enabling the framework does not install a package or a browser CLI.
-
-Do not edit `/data/zeroclaw/config.toml` expecting changes to survive startup: the launcher regenerates it. Use the maintained template or native `ZEROCLAW_...` environment overrides.
+The retained MCP bundles are skills, transfer, Codespaces and mail. New servers
+need transport configuration, an attached bundle and exact prefixed grants in
+allowed_tools/auto_approve; pipeline access is separate. Registration grants
+nothing. Keep secrets in Railway native environment overrides, never TOML.
 
 ## Live verification after publishing a release
 
-1. Ask for a reminder in two minutes, delivered to your Telegram conversation; list it, wait for delivery and inspect its run history. Then create and cancel a second reminder. Confirm timezones for recurring jobs.
-2. Fetch a public URL and run a Tavily search. Ask for text navigation on a simple public website. Confirm actual tool results.
-3. Ask for two independent file reads concurrently, then repeat the protected fixture check. Confirm both reads succeed and `/run/heimdall-control/probe` still returns Permission denied.
-4. Ask Heimdall to send the existing small `zeroclaw-ready.txt` as a Telegram document. Upload a small binary file and ask it to import it into the executor. Verify byte-for-byte contents with a checksum.
-5. Install a suitable small registry skill, read its instructions, and run a compatible script tool. Verify the command runs in the executor and that missing dependencies are reported accurately.
-6. Create a simple SOP and a short permitted pipeline. Verify state persists after a restart. Install and test a specific WASM plugin separately before depending on it.
+1. Verify versions for gh, Python, jq, curl, Node/npm, Cargo, rustc, rustfmt and
+   cargo clippy; run sudo -n id -u and confirm root access.
+2. Clone an authorized test repository, edit/test on a feature branch and create
+   a PR only when instructed; verify actual results and remote state.
+3. Exercise native local file operations, a public download, a browser page and
+   screenshot. Confirm ChromeDriver has no public Railway port.
+4. Round-trip a small Telegram file and verify its checksum/recipient.
+5. Test an installed native skill, a scheduled reminder, heartbeat, SOP and
+   pipeline; confirm state after restart and that group messages are rejected.
+6. Check signed email admission and diagnostics without replaying old events.
 
-Scheduled work, proactive messages and automatic link enrichment consume provider/search quotas. Monitor Railway costs separately and choose an appropriate budget for the deployment.
+Monitor resource use: tool availability does not mean every Rust build or browser
+workload fits 1 GB RAM, 1 GB ephemeral storage or 500 MB persistent storage.
 
 ## Boundaries and further reading
 
-- [GitHub workflow](github-workflow.md): API-first repository edits, offline tools, remote compute and SSH-key behavior. A Codespaces failure does not establish GitHub API access failure.
-- [Trusted users](operations.md#trusted-telegram-users): every allowed account shares configured credentialed tools, memory/sessions and workspace visibility.
-- [Recovery](operations.md#authentication-and-storage-recovery): operator-only offline maintenance; a green recovery health check is not a working assistant.
-- [Native child isolation](operations.md#native-child-process-isolation): credential/filesystem profiles, kernel prerequisites and remaining limitations.
-- [Runtime upgrades](operations.md#upgrading-to-zeroclaw-v086): state safety and integration acceptance checks for the pinned release.
-- [Context budgets and long tasks](operations.md#context-budgets-and-long-tasks): bounded phases and checkpoints are guidance, not automatic continuation or guaranteed task completion.
+- [Execution migration](single-service-migration.md)
+- [GitHub workflow](github-workflow.md)
+- [Trusted users](operations.md#trusted-telegram-users)
+- [Recovery](operations.md#authentication-and-storage-recovery)
+- [Narrow subprocess profiles](operations.md#narrow-subprocess-profiles)
+- [Runtime upgrade](operations.md#upgrading-to-zeroclaw-v086)
+- [Context budgets](operations.md#context-budgets-and-long-tasks)

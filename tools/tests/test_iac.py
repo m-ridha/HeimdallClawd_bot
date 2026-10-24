@@ -15,12 +15,11 @@ class InfrastructureSafetyTests(unittest.TestCase):
         self.assertEqual(graph['variables'], {'managed': False})
         resources = {resource['address']: resource for resource in graph['resources']}
         self.assertEqual(set(resources), {
-            'service.heimdallclawd', 'service.heimdall-executor',
+            'service.heimdallclawd',
             'volume.heimdall-data', 'volume.executor-workspace',
         })
         for service_name, volume_name, mount, size in [
             ('heimdallclawd', 'heimdall-data', '/data', 500),
-            ('heimdall-executor', 'executor-workspace', '/data/workspace', 200),
         ]:
             service = resources['service.' + service_name]
             self.assertNotIn('variables', service)
@@ -34,3 +33,7 @@ class InfrastructureSafetyTests(unittest.TestCase):
             self.assertEqual(volume['config']['region'], 'asia-southeast1-eqsg3a')
             self.assertEqual(service['deploy']['healthcheckPath'], '/health')
             self.assertEqual(service['deploy']['multiRegionConfig'], {'asia-southeast1-eqsg3a': {'numReplicas': 1}})
+
+        self.assertEqual(resources['service.heimdallclawd']['deploy']['limitOverride'],
+                         {'containers': {'cpu': 2, 'memoryBytes': 1000000000}})
+        self.assertEqual(resources['volume.executor-workspace']['config']['sizeMB'], 200)
