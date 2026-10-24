@@ -78,8 +78,6 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     let mut vars = secret_overrides(token).unwrap();
     let deepgram_key = "fixture_deepgram_private_value";
     let cohere_key = "fixture_cohere_private_value";
-    let gemini_client_id = "fixture_gemini_oauth_client_id";
-    let gemini_client_secret = "fixture_gemini_oauth_client_secret";
     vars.push((
         "ZEROCLAW_providers__transcription__deepgram__voice__api_key".into(),
         deepgram_key.into(),
@@ -87,14 +85,6 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     vars.push((
         "ZEROCLAW_memory__embedding_api_key".into(),
         cohere_key.into(),
-    ));
-    vars.push((
-        "ZEROCLAW_providers__models__gemini__default__oauth_client_id".into(),
-        gemini_client_id.into(),
-    ));
-    vars.push((
-        "ZEROCLAW_providers__models__gemini__default__oauth_client_secret".into(),
-        gemini_client_secret.into(),
     ));
     for (property, expected) in [
         (
@@ -163,8 +153,6 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
     assert!(!saved.contains(&secret));
     assert!(!saved.contains(deepgram_key));
     assert!(!saved.contains(cohere_key));
-    assert!(!saved.contains(gemini_client_id));
-    assert!(!saved.contains(gemini_client_secret));
 }
 
 #[test]

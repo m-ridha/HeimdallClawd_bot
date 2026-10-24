@@ -82,7 +82,6 @@ Deployment-specific values and secrets live in Railway variables. Shared non-sec
 | heimdallclawd | `PORT` | Set explicitly (3888); Railway's injected port overrides Docker's default |
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
 | heimdallclawd | `ZEROCLAW_providers__models__openrouter__free__api_key` | Optional key for the `openrouter/free` route |
-| heimdallclawd | `ZEROCLAW_providers__models__gemini__default__oauth_project` | Optional GCP project ID seed if Gemini Code Assist OAuth requires an explicit project |
 | heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token for native gh/Git, HTTP requests and Codespaces; no `Bearer` prefix |
 | heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` list, or standalone `*` for GitHub-authorized repositories; see [GitHub setup](docs/operations.md#github-access) |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
@@ -94,7 +93,7 @@ gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider o
 gosu heimdall heimdall-launcher --gemini-login
 ```
 
-If the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created (or if you add `ZEROCLAW_providers__models__gemini__default__oauth_project` to an existing Railway service), reload via the paired dashboard or redeploy once so the runtime loads the new Gemini credentials. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
+If the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created, reload via the paired dashboard or redeploy once so the runtime loads the new Gemini credentials. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
 
 ## Releases and deployment
 

@@ -8,8 +8,6 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     let tavily_key = concat!("tvly-test-", "placeholder_secret_abcdef");
     let deepgram_key = "fixture_deepgram_private_value";
     let cohere_key = "fixture_cohere_private_value";
-    let gemini_client_id = "fixture_gemini_oauth_client_id";
-    let gemini_client_secret = "fixture_gemini_oauth_client_secret";
     // This integration test has one current-thread case, in a separate test process.
     unsafe {
         std::env::set_var("ZEROCLAW_CONFIG_DIR", temp.path());
@@ -30,14 +28,6 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         std::env::set_var(
             "ZEROCLAW_providers__models__openrouter__free__api_key",
             openrouter_key,
-        );
-        std::env::set_var(
-            "ZEROCLAW_providers__models__gemini__default__oauth_client_id",
-            gemini_client_id,
-        );
-        std::env::set_var(
-            "ZEROCLAW_providers__models__gemini__default__oauth_client_secret",
-            gemini_client_secret,
         );
         std::env::set_var("ZEROCLAW_channels__telegram__home__bot_token", token);
         std::env::set_var(
@@ -95,11 +85,6 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert_eq!(
         gemini.auth_mode,
         Some(zeroclaw_config::schema::AuthMode::OAuth)
-    );
-    assert_eq!(gemini.oauth_client_id.as_deref(), Some(gemini_client_id));
-    assert_eq!(
-        gemini.oauth_client_secret.as_deref(),
-        Some(gemini_client_secret)
     );
     let gemini_route = config
         .model_routes
@@ -162,8 +147,6 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(!saved.contains(tavily_key));
     assert!(!saved.contains(deepgram_key));
     assert!(!saved.contains(cohere_key));
-    assert!(!saved.contains(gemini_client_id));
-    assert!(!saved.contains(gemini_client_secret));
     assert!(!saved.contains(token));
     assert!(!saved.contains("fixture_adapter_bearer_01234567890123456789"));
 }
