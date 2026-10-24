@@ -18,6 +18,10 @@ requires_openai_auth = true
 model = "openrouter/free"
 wire_api = "chat_completions"
 
+[providers.models.gemini.default]
+model = "gemini-3.8-flash"
+auth_mode = "o_auth"
+
 [[model_routes]]
 hint = "codex"
 model_provider = "openai.codex"
@@ -27,6 +31,11 @@ model = "gpt-6.1-sol"
 hint = "free"
 model_provider = "openrouter.free"
 model = "openrouter/free"
+
+[[model_routes]]
+hint = "gemini"
+model_provider = "gemini.default"
+model = "gemini-3.8-flash"
 
 [providers.transcription.deepgram.voice]
 model = "nova-3"
