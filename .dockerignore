@@ -18,6 +18,7 @@ docs
 **/*.key
 **/auth.json
 **/auth-profiles.json
+**/oauth_creds.json
 **/.secret_key
 **/*.db
 **/*.db-shm

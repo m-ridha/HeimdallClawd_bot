@@ -149,6 +149,14 @@ fn main() -> io::Result<()> {
         println!("Skill bundles assigned to primary; use authenticated /admin/reload to activate");
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("--gemini-login") {
+        #[cfg(target_os = "linux")]
+        // SAFETY: geteuid only queries this process's effective identity.
+        if unsafe { libc::geteuid() } == 0 {
+            drop_runtime_identity()?;
+        }
+        return heimdall_launcher::gemini_auth::run_interactive(Path::new(STATE));
+    }
     if std::env::args().nth(1).as_deref() == Some("--mail-mcp") {
         return heimdall_launcher::agentmail::serve_mcp();
     }
