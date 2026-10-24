@@ -1,6 +1,6 @@
 # HeimdallClawd
 
-A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) with a Rust launcher on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on persistent volumes, and runs native networked commands in the main service, with explicitly enabled root access. Optional GitHub Codespaces commands run remotely in repositories admitted by the configured policy and GitHub permissions. It keeps working while your own computer is off.
+A private Telegram assistant that runs [ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) with a Rust launcher on Railway. It signs in with a ChatGPT subscription, keeps conversation history and workspace files on the persistent `/data` volume, and runs native networked commands in the main service, with explicitly enabled root access. Optional GitHub Codespaces commands run remotely in repositories admitted by the configured policy and GitHub permissions. It keeps working while your own computer is off.
 
 These capabilities describe repository configuration; the deployed release can differ. Contributor instructions are in [AGENTS.md](AGENTS.md). See [operations](docs/operations.md) for configuration, authentication, persistence and limits; [verification](docs/verification.md) for observed checks and what is not yet live-verified; and [capabilities](docs/capabilities.md) for activation limits and live tests.
 
@@ -98,7 +98,7 @@ See [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skil
 
 Publishing a stable (non-prerelease) GitHub Release with a `vX.Y.Z` tag deploys that tag's source after a main-ancestry check. A tag push alone, a draft or a prerelease never deploys. The workflow builds and tests the binaries natively, applies the Railway infrastructure plan, deploys the agent and waits for its exact deployment to report `SUCCESS`, and finally attaches the verified package and `SHA256SUMS` to the existing release. Use a new version rather than moving a published tag.
 
-Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a project token scoped to the production environment) and variables `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_AGENT_SERVICE_ID`. See [versioned releases](docs/releases.md) for the step-by-step process, caching and recovery.
+Configure the GitHub `production` environment with secret `RAILWAY_TOKEN` (a project token scoped to the production environment) and variables `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_AGENT_SERVICE_ID`. See [versioned releases](docs/releases.md) for the step-by-step process, caching and recovery, including separate [build-time and runtime privilege checks](docs/releases.md#build-time-and-runtime-privilege-checks).
 
 Infrastructure is defined in [`.railway/railway.py`](.railway/railway.py) with Railway CLI 5.68.0 and Python SDK 0.7.0. Service variables are unmanaged by IaC and volumes are preserved. See [IaC operations](docs/railway-iac.md) and [.railway/README.md](.railway/README.md).
 

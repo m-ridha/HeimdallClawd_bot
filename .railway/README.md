@@ -1,6 +1,6 @@
 # Railway Python infrastructure
 
-The single authoring file is `railway.py`. The service name, volume names/mounts, regions, replica counts, resource limits, health checks and restart retry settings are versioned here. Application code is uploaded only by the stable-release workflow; the repository source are disconnected to prevent direct GitHub push deployment.
+The single authoring file is `railway.py`. The service name, volume names/mounts, regions, replica counts, resource limits, health checks and restart retry settings are versioned here. Application code is uploaded only by the stable-release workflow; the repository source is disconnected to prevent direct GitHub push deployment.
 
 Service variables are **unmanaged**. IaC does not read, create, change or delete them. Keep Telegram tokens/IDs, API keys and future model variables exclusively in Railway. The agent volume stays attached; retired storage is retained until migration is verified.
 
@@ -11,6 +11,7 @@ Use Python 3.10+ and Railway CLI 5.68.0:
 ```sh
 python3 -m venv /tmp/heimdall-iac
 /tmp/heimdall-iac/bin/pip install -r .railway/requirements.txt
+railway status  # Verify the intended project and environment before planning.
 PATH="/tmp/heimdall-iac/bin:$PATH" railway config plan
 ```
 
