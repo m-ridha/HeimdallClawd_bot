@@ -24,9 +24,11 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && chmod 440 /etc/sudoers.d/heimdall && visudo -cf /etc/sudoers.d/heimdall
 RUN for tool in cargo rustc rustdoc rustfmt cargo-fmt clippy-driver cargo-clippy; do ln -s "/opt/heimdall-rust/bin/$tool" "/usr/local/bin/$tool"; done
 ENV PATH=/opt/heimdall-rust/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin CARGO_HOME=/tmp/cargo
+# Railway image-build steps may set no_new_privs. Validate policy above and
+# identity switching here; exercise sudo elevation in CI runtime containers.
 RUN gh --version && cargo --version && rustc --version && rustdoc --version && rustfmt --version && cargo clippy --version \
     && python3 --version && curl --version && jq --version && node --version && npm --version \
-    && command -v gosu && gosu heimdall sudo -n id -u | grep -x 0
+    && command -v gosu && command -v sudo && test "$(gosu heimdall id -u)" = 1000
 COPY prebuilt/zeroclaw /usr/local/bin/zeroclaw
 COPY prebuilt/heimdall-launcher /usr/local/bin/heimdall-launcher
 COPY deploy/bot/runtime.sha256 /tmp/runtime.sha256

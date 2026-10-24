@@ -36,6 +36,12 @@ class PackageTests(unittest.TestCase):
             self.assertIn('ENV HOME=/data/zeroclaw ZEROCLAW_CONFIG_DIR=/data/zeroclaw PORT=3888', dockerfile)
             self.assertNotRegex(dockerfile, r'\bcargo\s+(?:build|test|install|check)\b')
             self.assertIn('sha256sum -c', dockerfile)
+            self.assertIn('visudo -cf /etc/sudoers.d/heimdall', dockerfile)
+            self.assertIn('test "$(gosu heimdall id -u)" = 1000', dockerfile)
+            self.assertNotIn('gosu heimdall sudo', dockerfile)
+            workflow = (ROOT / '.github/workflows/build.yml').read_text()
+            self.assertIn('gosu heimdall sudo -n cargo --version', workflow)
+
             self.assertEqual({key for key in lock if key.endswith('_patch_sha256')}, {
                 'responses_tool_history_patch_sha256', 'sop_workshop_guidance_patch_sha256',
                 'gateway_admin_auth_patch_sha256', 'http_diagnostics_patch_sha256',
