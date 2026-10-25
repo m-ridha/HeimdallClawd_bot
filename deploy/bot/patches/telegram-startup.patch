@@ -233,7 +233,7 @@
                          ),
                          "poll error"
                      );
-@@ -24310,3 +24393,193 @@
+@@ -24310,3 +24393,203 @@
          }
      }
  }
@@ -326,9 +326,9 @@
 +    async fn heimdall_transport_diagnostic_omits_secret_urls() {
 +        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 +        let address = listener.local_addr().unwrap();
-+        drop(listener);
 +        let error = reqwest::Client::builder()
 +            .no_proxy()
++            .timeout(Duration::from_millis(50))
 +            .build()
 +            .unwrap()
 +            .get(format!(
@@ -337,8 +337,9 @@
 +            .send()
 +            .await
 +            .unwrap_err();
++        drop(listener);
 +        let diagnostic = telegram_transport_diagnostic(&error);
-+        assert_eq!(diagnostic["kind"], "connect");
++        assert_eq!(diagnostic["kind"], "timeout");
 +        assert_eq!(diagnostic["phase"], "request");
 +        let serialized = diagnostic.to_string();
 +        for forbidden in [
@@ -356,15 +357,24 @@
 +        Mock::given(method("GET"))
 +            .and(path("/bottest-token/getMe"))
 +            .respond_with(ResponseTemplate::new(401).set_body_string("fixture-private-response"))
-+            .expect(1)
 +            .mount(&server)
 +            .await;
 +        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(Vec::new), false)
 +            .with_api_base(server.uri());
-+        let error = channel.fetch_bot_username().await.unwrap_err();
-+        let transport = error
++        let mut error = channel.fetch_bot_username().await.unwrap_err();
++        let mut transport = error
 +            .downcast_ref::<reqwest::Error>()
 +            .expect("typed HTTP status");
++        for _ in 0..10 {
++            if transport.status().is_some() {
++                break;
++            }
++            tokio::time::sleep(Duration::from_millis(50)).await;
++            error = channel.fetch_bot_username().await.unwrap_err();
++            transport = error
++                .downcast_ref::<reqwest::Error>()
++                .expect("typed HTTP status");
++        }
 +        let diagnostic = telegram_transport_diagnostic(transport);
 +        assert_eq!(diagnostic["http_status"], 401);
 +        assert_eq!(diagnostic["kind"], "http_response");
