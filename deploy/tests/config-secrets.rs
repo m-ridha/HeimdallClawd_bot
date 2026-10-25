@@ -81,7 +81,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         "openrouter.free"
     );
     let gemini = &config.providers.models.gemini["default"];
-    assert_eq!(gemini.base.model.as_deref(), Some("gemini-2.5-flash"));
+    assert_eq!(gemini.base.model.as_deref(), Some("gemini-3.5-flash"));
     assert_eq!(gemini.auth_mode, None);
     let gemini_route = config
         .model_routes
@@ -89,7 +89,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .find(|r| r.hint == "gemini")
         .unwrap();
     assert_eq!(gemini_route.model_provider, "gemini.default");
-    assert_eq!(gemini_route.model, "gemini-2.5-flash");
+    assert_eq!(gemini_route.model, "gemini-3.5-flash");
     let custom = config.providers.models.find("anthropic", "custom").unwrap();
     assert_eq!(custom.model.as_deref(), Some("placeholder-model"));
     assert_eq!(custom.api_key.as_deref(), Some("sk-ant-fixture-private"));
@@ -133,7 +133,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         "The router must not inherit the Codex capacity",
     );
     assert_eq!(
-        config.model_provider_context_window_opt("gemini.default", "gemini-2.5-flash"),
+        config.model_provider_context_window_opt("gemini.default", "gemini-3.5-flash"),
         None,
         "The Gemini route must not inherit the Codex capacity",
     );

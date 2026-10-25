@@ -92,7 +92,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "[\"1001\", \"1002\"]",
         ),
         ("providers.models.openai.codex.requires-openai-auth", "true"),
-        ("providers.models.gemini.default.model", "gemini-2.5-flash"),
+        ("providers.models.gemini.default.model", "gemini-3.5-flash"),
         ("heartbeat.enabled", "true"),
         ("heartbeat.to", "1001"),
         ("media_pipeline.enabled", "true"),
@@ -168,7 +168,7 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
     );
     assert_eq!(
         cfg["providers"]["models"]["gemini"]["default"]["model"].as_str(),
-        Some("gemini-2.5-flash")
+        Some("gemini-3.5-flash")
     );
     assert!(
         cfg["providers"]["models"]["gemini"]["default"]
@@ -208,7 +208,7 @@ fn codex_route_tracks_the_configured_model() {
         .iter()
         .find(|route| route["hint"].as_str() == Some("gemini"))
         .unwrap();
-    assert_eq!(gemini["model"].as_str(), Some("gemini-2.5-flash"));
+    assert_eq!(gemini["model"].as_str(), Some("gemini-3.5-flash"));
 }
 
 #[test]
