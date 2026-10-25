@@ -219,8 +219,9 @@ task authorization. Do not delegate unless explicitly requested or required by
 applicable instructions. Preserve user edits; do not include unrelated files in
 commits. A backlog is not implementation authorization; append ideas to docs/ideas.md.
 
-Use `<type>: [<scope>] <subject>` or `<type>: <subject>` with concise present-tense
-subjects; types are feat/fix/docs/style/refactor/test/chore. Branches use
+Use `<type>(<scope>): <subject>` with concise present-tense subjects (for example,
+`fix(logging): honor payload capture policy`). Follow [semantic commit messages](https://gist.github.com/joshbuchea/6f47e86d2510bce28f8e7f42ae84c716);
+types are feat/fix/docs/style/refactor/test/chore. Branches use
 `<type>/<short-kebab-case-subject>`. Use feat/fix for shipped behavior; chore for
 build/dependency/CI maintenance. Keep commits reviewable; avoid unrelated style
 churn. Create PRs instead of pushing main. Follow [the PR template](.github/pull_request_template.md)
