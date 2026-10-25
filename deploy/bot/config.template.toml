@@ -19,8 +19,7 @@ model = "openrouter/free"
 wire_api = "chat_completions"
 
 [providers.models.gemini.default]
-model = "gemini-3.8-flash"
-auth_mode = "o_auth"
+model = "gemini-2.5-flash"
 
 [[model_routes]]
 hint = "codex"
@@ -35,7 +34,7 @@ model = "openrouter/free"
 [[model_routes]]
 hint = "gemini"
 model_provider = "gemini.default"
-model = "gemini-3.8-flash"
+model = "gemini-2.5-flash"
 
 [providers.transcription.deepgram.voice]
 model = "nova-3"

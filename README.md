@@ -7,7 +7,7 @@ These capabilities describe repository configuration; the deployed release can d
 ## Features
 
 - Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Additional permitted users are fully trusted operators: they share the workspace, accessible memory/sessions and configured credentialed tools. See the [privilege model](docs/operations.md#trusted-telegram-users) before adding anyone.
-- ChatGPT subscription sign-in with `gpt-6.1-sol` selected in the config template, plus optional Gemini OAuth (`gemini-3.8-flash`) and OpenRouter free routes. Switch in Telegram with `/model gemini`, `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
+- ChatGPT subscription sign-in with `gpt-6.1-sol` selected in the config template, plus optional Gemini (`gemini-2.5-flash`) and OpenRouter free routes. Switch in Telegram with `/model gemini`, `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
 - Native shell/filesystem/Git, internet access, and passwordless sudo root execution. The main image includes gh, Python 3, curl, jq, Node/npm, Bash, SSH, and pinned Rust/Cargo/rustfmt/Clippy.
 - Tavily web search, bounded web fetch and HTTP requests, and a Lynx text browser. Tavily is search, not an interactive browser.
 - Scheduled agent tasks (reminders, recurring reports), SOPs and permitted multi-step pipelines.
@@ -86,14 +86,13 @@ Deployment-specific values and secrets live in Railway variables. Shared non-sec
 | heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` list, or standalone `*` for GitHub-authorized repositories; see [GitHub setup](docs/operations.md#github-access) |
 | heimdallclawd | `AGENTMAIL_AUTHORIZATION` | Optional full `Bearer ...` value for the AgentMail secret reference |
 
-Sign in to ChatGPT once from the bot's Railway dashboard terminal (and optionally sign in to Gemini for the `/model gemini` route); never paste authentication files or tokens into chat, Git or logs:
+Sign in to ChatGPT once from the bot's Railway dashboard terminal (or configure optional provider API keys in Railway Variables); never paste authentication files or tokens into chat, Git or logs:
 
 ```sh
 gosu heimdall zeroclaw auth login --config-dir /data/zeroclaw --model-provider openai-codex --device-code
-gosu heimdall heimdall-launcher --gemini-login
 ```
 
-If the daemon was already running when `/data/zeroclaw/.gemini/oauth_creds.json` was first created (or if a Workspace/Standard Google account requires setting `ZEROCLAW_providers__models__gemini__default__oauth_project`), reload via the paired dashboard or redeploy once so the runtime loads the new Gemini configuration. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
+For the `/model gemini` route, set `ZEROCLAW_providers__models__gemini__default__api_key` in Railway Variables using a Google AI Studio API key (or run `gosu heimdall heimdall-launcher --gemini-login` for enterprise Code Assist OAuth). If the daemon was already running when credentials or variables were added, reload via the paired dashboard or redeploy once so the runtime loads the new provider configuration. See [authentication setup](docs/operations.md#authentication-and-state) and [operations](docs/operations.md) for provider setup, Tavily, AgentMail, skills and the tool boundary.
 
 ## Releases and deployment
 
