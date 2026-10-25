@@ -233,7 +233,7 @@
                          ),
                          "poll error"
                      );
-@@ -24310,3 +24393,197 @@
+@@ -24310,3 +24393,203 @@
          }
      }
  }
@@ -324,16 +324,22 @@
 +
 +    #[tokio::test]
 +    async fn heimdall_transport_diagnostic_omits_secret_urls() {
++        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
++        let address = listener.local_addr().unwrap();
 +        let error = reqwest::Client::builder()
 +            .no_proxy()
++            .timeout(Duration::from_millis(50))
 +            .build()
 +            .unwrap()
-+            .get("http://127.0.0.1:9/botfixture-private-token/getUpdates?secret=private-value")
++            .get(format!(
++                "http://{address}/botfixture-private-token/getUpdates?secret=private-value"
++            ))
 +            .send()
 +            .await
 +            .unwrap_err();
++        drop(listener);
 +        let diagnostic = telegram_transport_diagnostic(&error);
-+        assert_eq!(diagnostic["kind"], "connect");
++        assert_eq!(diagnostic["kind"], "timeout");
 +        assert_eq!(diagnostic["phase"], "request");
 +        let serialized = diagnostic.to_string();
 +        for forbidden in [
