@@ -113,3 +113,68 @@ fn heimdall_capture_policy_preserves_only_explicit_captures() {
         assert!(unrelated.attrs_str().contains("non-tool-metadata"));
     }
 }
+
+#[test]
+fn heimdall_failed_tools_do_not_persist_input_or_errors() {
+    let _guard = zeroclaw_log::__private_test_writer_lock();
+    zeroclaw_log::try_install_capture_subscriber();
+    for (mode, denylisted) in [("off", false), ("full", true)] {
+        let directory = tempfile::tempdir().unwrap();
+        let config = LogConfig {
+            log_persistence: "rotating".into(),
+            log_persistence_path: "diagnostics.jsonl".into(),
+            log_persistence_max_entries_per_segment: 1,
+            log_persistence_rotate_daily: false,
+            log_tool_io: mode.into(),
+            log_tool_io_denylist: if denylisted {
+                vec!["shell".into()]
+            } else {
+                vec![]
+            },
+            ..LogConfig::default()
+        };
+        zeroclaw_log::init_from_config(&config, directory.path());
+        let failure = || {
+            Event::new(module_path!(), Action::Fail)
+                .with_category(EventCategory::Tool)
+                .with_outcome(zeroclaw_log::EventOutcome::Failure)
+                .with_duration(3)
+                .with_attrs(json!({
+                    "tool": "shell", "tool_call_id": "failed-call",
+                    "input": {"command": "synthetic-private-command"},
+                    "error": "synthetic-private-error", "output": "synthetic-private-output"
+                }))
+        };
+        // Match execute_one_tool's failed result and exception producers.
+        zeroclaw_log::record!(WARN, failure(), "tool failed: shell");
+        zeroclaw_log::record!(ERROR, failure(), "tool error: shell");
+        zeroclaw_log::flush_for_test().unwrap();
+        let files: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+            .collect();
+        assert!(files.len() >= 2, "must check active and rotated files");
+        let mut severities = Vec::new();
+        for path in files {
+            let contents = std::fs::read_to_string(path).unwrap();
+            assert!(!contents.contains("synthetic-private-command"));
+            assert!(!contents.contains("synthetic-private-error"));
+            assert!(!contents.contains("synthetic-private-output"));
+            for line in contents.lines() {
+                let event: serde_json::Value = serde_json::from_str(line).unwrap();
+                if event["attributes"]["tool_call_id"] != "failed-call" {
+                    continue;
+                }
+                assert_eq!(event["attributes"]["tool"], "shell");
+                assert_eq!(event["event"]["outcome"], "failure");
+                for field in ["input", "error", "output"] {
+                    assert!(event["attributes"].get(field).is_none());
+                }
+                severities.push(event["severity_text"].as_str().unwrap().to_owned());
+            }
+        }
+        severities.sort();
+        assert_eq!(severities, ["ERROR", "WARN"]);
+    }
+}

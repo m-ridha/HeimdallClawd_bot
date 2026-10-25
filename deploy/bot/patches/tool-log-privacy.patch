@@ -1,6 +1,6 @@
 --- a/crates/zeroclaw-log/src/writer.rs
 +++ b/crates/zeroclaw-log/src/writer.rs
-@@ -545,6 +545,33 @@
+@@ -545,6 +545,34 @@
      })
  }
  
@@ -14,6 +14,7 @@
 +    if !is_tool && !fields.contains_key("tool") {
 +        return;
 +    }
++    fields.remove("input");
 +    fields.remove("arguments");
 +    fields.remove("result");
 +    fields.remove("output");
@@ -25,7 +26,7 @@
 +                .is_some_and(|tool| state.policy.is_tool_denylisted(tool))
 +    });
 +    if !allowed {
-+        for key in ["tool_input", "tool_output", "error_reason"] {
++        for key in ["tool_input", "tool_output", "error", "error_reason"] {
 +            fields.remove(key);
 +        }
 +    }
@@ -34,7 +35,7 @@
  /// Emit one event. Always fans out to the broadcast hook + tracing event.
  /// If persistence is enabled, hands the serialized value to the disk
  /// worker via a bounded `try_send`. The hot path performs no file I/O.
-@@ -559,7 +586,8 @@
+@@ -559,7 +587,8 @@
  /// (the schema migration tool, tests) can invoke it too, but production
  /// code should go through the macro so the `tracing::event!` carries the
  /// correct `file:line` source info.

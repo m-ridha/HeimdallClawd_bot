@@ -67,10 +67,10 @@ Subscription credentials live in `/data/zeroclaw`, together with configuration a
 
 ### Diagnostic payload privacy and credential containment
 
-The tool-log-privacy patch removes legacy raw `arguments`, `result` and `output`
+The tool-log-privacy patch removes legacy raw `input`, `arguments`, `result` and `output`
 attributes from tool diagnostic events before terminal formatting, broadcast,
 export and persistence. Explicit `tool_input`/`tool_output` capture also obeys
-`log_tool_io` and its denylist; free-form tool `error_reason` is omitted when
+`log_tool_io` and its denylist; free-form tool `error` and `error_reason` are omitted when
 capture is off because it may contain tool content. Outcome and duration remain.
 Keep capture off in production. This changes
 logging only: tools still receive their inputs and the agent still receives
