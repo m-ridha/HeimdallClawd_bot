@@ -27,7 +27,8 @@ fn heimdall_tool_payloads_stay_out_of_active_and_rotated_logs() {
     let attributes = json!({
         "tool": "shell", "tool_call_id": "fixture-call", "duration_ms": 3,
         "success": true, "arguments": marker, "result": result, "output": marker,
-        "tool_input": marker, "tool_output": marker, "error_reason": marker
+        "input": marker, "error": marker, "tool_input": marker, "tool_output": marker,
+        "error_reason": marker
     });
     zeroclaw_log::record!(
         INFO,
@@ -63,12 +64,14 @@ fn heimdall_tool_payloads_stay_out_of_active_and_rotated_logs() {
             assert_eq!(event["attributes"]["success"], true);
             assert_eq!(event["attributes"]["tool_call_id"], "fixture-call");
             for field in [
+                "input",
                 "arguments",
                 "result",
                 "output",
+                "error",
+                "error_reason",
                 "tool_input",
                 "tool_output",
-                "error_reason",
             ] {
                 assert!(event["attributes"].get(field).is_none());
             }
@@ -101,10 +104,19 @@ fn heimdall_capture_policy_preserves_only_explicit_captures() {
         zeroclaw_log::init_from_config(&config, directory.path());
         let event = Event::new(module_path!(), Action::Start)
             .with_category(EventCategory::Tool)
-            .with_attrs(json!({"tool": "shell", "arguments": "raw-input", "result": "raw-output", "tool_input": "already-redacted", "tool_output": "already-redacted", "success": true}));
+            .with_attrs(json!({
+                "tool": "shell", "input": "raw-input", "arguments": "raw-input",
+                "result": "raw-output", "output": "raw-output", "error": "raw-error",
+                "error_reason": "raw-error", "tool_input": "already-redacted",
+                "tool_output": "already-redacted", "success": true
+            }));
         let attrs: serde_json::Value = serde_json::from_str(&event.attrs_str()).unwrap();
         assert!(attrs.get("arguments").is_none());
         assert!(attrs.get("result").is_none());
+        assert!(attrs.get("input").is_none());
+        assert!(attrs.get("output").is_none());
+        assert!(attrs.get("error").is_none());
+        assert!(attrs.get("error_reason").is_none());
         assert_eq!(attrs.get("tool_input").is_some(), expected);
         assert_eq!(attrs.get("tool_output").is_some(), expected);
         assert_eq!(attrs["success"], true);
@@ -118,7 +130,12 @@ fn heimdall_capture_policy_preserves_only_explicit_captures() {
 fn heimdall_failed_tools_do_not_persist_input_or_errors() {
     let _guard = zeroclaw_log::__private_test_writer_lock();
     zeroclaw_log::try_install_capture_subscriber();
-    for (mode, denylisted) in [("off", false), ("full", true)] {
+    for (mode, denylisted) in [
+        ("off", false),
+        ("redacted", false),
+        ("full", false),
+        ("full", true),
+    ] {
         let directory = tempfile::tempdir().unwrap();
         let config = LogConfig {
             log_persistence: "rotating".into(),
