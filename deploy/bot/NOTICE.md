@@ -20,6 +20,8 @@ launcher-created registry directory within the existing Landlock profile.
 
 | Patch | Contract not replaced by native configuration |
 | --- | --- |
+| tool-log-privacy.patch | Remove raw legacy tool arguments/results at the logging boundary and enforce the tool-I/O opt-out before terminal, broadcast, export and persistence. Tool execution and conversation history remain unchanged. |
+| security-dependencies.patch | Update the pinned runtime lockfile to rustls-webpki 0.103.16, webpki-roots 1.0.10 and ctutils 0.4.4 for RustSec advisories 2026-0382, 2026-0381 and 2026-0385. |
 | telegram-startup.patch | Retry only explicit Telegram command-menu size rejections with a shrinking menu; bound polling requests and report transport categories without secret URLs or raw error bodies. |
 | private-telegram.patch | Reject non-private Telegram updates before callback/media processing, in addition to account allowlisting. |
 | http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |

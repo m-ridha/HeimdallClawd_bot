@@ -1,0 +1,61 @@
+--- a/crates/zeroclaw-log/src/writer.rs
++++ b/crates/zeroclaw-log/src/writer.rs
+@@ -545,6 +545,33 @@
+     })
+ }
+ 
++/// Apply the capture opt-out before terminal, export, broadcast or disk sinks.
++/// Unknown initialization state fails closed. Raw legacy arguments/results are
++/// never an alternative to the policy-controlled tool_input/tool_output path.
++pub(crate) fn filter_tool_payloads(attributes: &mut Value, is_tool: bool) {
++    let Some(fields) = attributes.as_object_mut() else {
++        return;
++    };
++    if !is_tool && !fields.contains_key("tool") {
++        return;
++    }
++    fields.remove("arguments");
++    fields.remove("result");
++    fields.remove("output");
++    let allowed = current_state().is_some_and(|state| {
++        state.policy.tool_io.captures_io()
++            && !fields
++                .get("tool")
++                .and_then(Value::as_str)
++                .is_some_and(|tool| state.policy.is_tool_denylisted(tool))
++    });
++    if !allowed {
++        for key in ["tool_input", "tool_output", "error_reason"] {
++            fields.remove(key);
++        }
++    }
++}
++
+ /// Emit one event. Always fans out to the broadcast hook + tracing event.
+ /// If persistence is enabled, hands the serialized value to the disk
+ /// worker via a bounded `try_send`. The hot path performs no file I/O.
+@@ -559,7 +586,8 @@
+ /// (the schema migration tool, tests) can invoke it too, but production
+ /// code should go through the macro so the `tracing::event!` carries the
+ /// correct `file:line` source info.
+-pub fn record_event(event: LogEvent) {
++pub fn record_event(mut event: LogEvent) {
++    filter_tool_payloads(&mut event.attributes, event.event.category == "tool");
+     // `serde(skip)` on `ephemeral_attributes` keeps this value — the one
+     // that reaches disk — free of broadcast-only secrets.
+     let value = match serde_json::to_value(&event) {
+--- a/crates/zeroclaw-log/src/event.rs
++++ b/crates/zeroclaw-log/src/event.rs
+@@ -572,7 +572,11 @@
+     #[must_use]
+     pub fn attrs_str(&self) -> String {
+         match &self.attrs {
+-            Some(v) => serde_json::to_string(v).unwrap_or_default(),
++            Some(v) => {
++                let mut attributes = v.clone();
++                crate::writer::filter_tool_payloads(&mut attributes, self.category_str() == "tool");
++                serde_json::to_string(&attributes).unwrap_or_default()
++            }
+             None => String::new(),
+         }
+     }

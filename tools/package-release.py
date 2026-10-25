@@ -69,6 +69,8 @@ provenance = {
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
 }
 patch_files = {
+    'tool_log_privacy_patch_sha256': 'tool-log-privacy.patch',
+    'security_dependencies_patch_sha256': 'security-dependencies.patch',
     'responses_tool_history_patch_sha256': 'responses-tool-history.patch',
     'sop_workshop_guidance_patch_sha256': 'sop-workshop-guidance.patch',
     'gateway_admin_auth_patch_sha256': 'gateway-admin-auth.patch',
