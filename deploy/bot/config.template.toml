@@ -36,6 +36,16 @@ hint = "gemini"
 model_provider = "gemini.default"
 model = "gemini-2.5-flash"
 
+[[model_routes]]
+hint = "gemini.2.0-flash"
+model_provider = "gemini.default"
+model = "gemini-2.0-flash"
+
+[[model_routes]]
+hint = "gemini-2.0-flash"
+model_provider = "gemini.default"
+model = "gemini-2.0-flash"
+
 [providers.transcription.deepgram.voice]
 model = "nova-3"
 

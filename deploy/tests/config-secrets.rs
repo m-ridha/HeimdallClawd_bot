@@ -90,6 +90,13 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .unwrap();
     assert_eq!(gemini_route.model_provider, "gemini.default");
     assert_eq!(gemini_route.model, "gemini-2.5-flash");
+    let gemini_20_route = config
+        .model_routes
+        .iter()
+        .find(|r| r.hint == "gemini.2.0-flash")
+        .unwrap();
+    assert_eq!(gemini_20_route.model_provider, "gemini.default");
+    assert_eq!(gemini_20_route.model, "gemini-2.0-flash");
     let custom = config.providers.models.find("anthropic", "custom").unwrap();
     assert_eq!(custom.model.as_deref(), Some("placeholder-model"));
     assert_eq!(custom.api_key.as_deref(), Some("sk-ant-fixture-private"));
@@ -136,6 +143,11 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         config.model_provider_context_window_opt("gemini.default", "gemini-2.5-flash"),
         None,
         "The Gemini route must not inherit the Codex capacity",
+    );
+    assert_eq!(
+        config.model_provider_context_window_opt("gemini.default", "gemini-2.0-flash"),
+        None,
+        "The Gemini 2.0 route must not inherit the Codex capacity",
     );
     config.save().await.unwrap();
     let saved = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
