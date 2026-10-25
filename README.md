@@ -7,7 +7,7 @@ These capabilities describe repository configuration; the deployed release can d
 ## Features
 
 - Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Additional permitted users are fully trusted operators: they share the workspace, accessible memory/sessions and configured credentialed tools. See the [privilege model](docs/operations.md#trusted-telegram-users) before adding anyone.
-- ChatGPT subscription sign-in with `gpt-6.1-sol` selected in the config template, plus optional Gemini (`gemini-2.5-flash`, `gemini-2.0-flash`) and OpenRouter free routes. Switch in Telegram with `/model gemini`, `/model gemini.2.0-flash`, `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
+- ChatGPT subscription sign-in with `gpt-6.1-sol` selected in the config template, plus optional Gemini (`gemini-2.5-flash`) and OpenRouter free routes. Switch in Telegram with `/model gemini`, `/model free` and `/model codex`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
 - Native shell/filesystem/Git, internet access, and passwordless sudo root execution. The main image includes gh, Python 3, curl, jq, Node/npm, Bash, SSH, and pinned Rust/Cargo/rustfmt/Clippy.
 - Tavily web search, bounded web fetch and HTTP requests, and a Lynx text browser. Tavily is search, not an interactive browser.
 - Scheduled agent tasks (reminders, recurring reports), SOPs and permitted multi-step pipelines.
