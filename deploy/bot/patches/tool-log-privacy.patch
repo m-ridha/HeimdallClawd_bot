@@ -59,3 +59,121 @@
              None => String::new(),
          }
      }
+--- a/crates/zeroclaw-runtime/src/observability/otel.rs
++++ b/crates/zeroclaw-runtime/src/observability/otel.rs
+@@ -28,6 +28,7 @@
+     /// export boundary (`record_event` + attribute builders) consults a stable
+     /// privacy policy that no other observer can overwrite.
+     content_config: OtelContentConfig,
++    tool_log_policy: zeroclaw_log::ResolvedPolicy,
+     tracer_provider: SdkTracerProvider,
+     meter_provider: SdkMeterProvider,
+
+@@ -57,6 +58,26 @@
+ }
+
+ impl OtelObserver {
++    /// Keep the shared denylist instance-owned, independent of writer setup.
++    pub(crate) fn with_tool_denylist(mut self, denylist: &[String]) -> Self {
++        self.tool_log_policy = zeroclaw_log::ResolvedPolicy::from_config(
++            &zeroclaw_log::LogConfig {
++                log_tool_io_denylist: denylist.to_vec(),
++                ..zeroclaw_log::LogConfig::default()
++            },
++            std::path::Path::new("."),
++        );
++        self
++    }
++
++    fn content_for_tool(&self, tool: &str) -> OtelContentConfig {
++        let mut config = self.content_config;
++        if self.tool_log_policy.is_tool_denylisted(tool) {
++            config.tool_io_policy = OtelContentPolicy::Off;
++        }
++        config
++    }
++
+     /// Create a new OTel observer exporting to the given OTLP endpoint.
+     /// Uses HTTP/protobuf transport (port 4318 by default).
+     /// Falls back to `http://localhost:4318` if no endpoint is provided.
+@@ -225,6 +246,10 @@
+
+         Ok(Self {
+             content_config,
++            tool_log_policy: zeroclaw_log::ResolvedPolicy::from_config(
++                &zeroclaw_log::LogConfig::default(),
++                std::path::Path::new("."),
++            ),
+             tracer_provider,
+             meter_provider: meter_provider_clone,
+             agent_starts,
+@@ -380,7 +405,7 @@
+                 // observer's instance-owned tool I/O policy.
+                 span_attrs.extend(tool_start_content_attrs(
+                     arguments.as_deref(),
+-                    self.content_config,
++                    self.content_for_tool(tool),
+                 ));
+
+                 let parent_cx = self.parent_cx_for(turn_id.as_deref());
+@@ -811,7 +836,7 @@
+                 span_attrs.extend(tool_result_content_attrs(
+                     arguments.as_deref(),
+                     result.as_deref(),
+-                    self.content_config,
++                    self.content_for_tool(tool),
+                 ));
+                 let parent_cx = self.parent_cx_for(turn_id.as_deref());
+                 let mut span = tracer.build_with_context(
+@@ -1366,6 +1391,39 @@
+         .expect("observer creation should not fail with valid endpoint format")
+     }
+
++    #[tokio::test]
++    async fn heimdall_otel_shared_denylist_precedes_content_processing() {
++        for policy in [OtelContentPolicy::Redacted, OtelContentPolicy::Full] {
++            let mut observer = test_observer().with_tool_denylist(&["shell".into()]);
++            observer.content_config = tool_io_full_config();
++            observer.content_config.tool_io_policy = policy;
++            let denied = observer.content_for_tool("shell");
++            assert!(tool_start_content_attrs(Some("synthetic-private-input"), denied).is_empty());
++            assert!(
++                tool_result_content_attrs(
++                    Some("synthetic-private-input"),
++                    Some("synthetic-private-output"),
++                    denied
++                )
++                .is_empty()
++            );
++            let allowed = observer.content_for_tool("file_read");
++            assert_eq!(allowed.tool_io_policy, policy);
++            assert_eq!(tool_start_content_attrs(Some("{}"), allowed).len(), 2);
++            assert_eq!(
++                tool_result_content_attrs(Some("{}"), Some("fixture"), allowed).len(),
++                4
++            );
++            // Another observer must not inherit the first observer's denylist.
++            let mut other = test_observer();
++            other.content_config = tool_io_full_config();
++            assert_eq!(
++                other.content_for_tool("shell").tool_io_policy,
++                OtelContentPolicy::Full
++            );
++        }
++    }
++
+     #[test]
+     fn otel_observer_name() {
+         let obs = test_observer();
+--- a/crates/zeroclaw-runtime/src/observability/mod.rs
++++ b/crates/zeroclaw-runtime/src/observability/mod.rs
+@@ -375,7 +375,9 @@
+                     config.otel_service_name.as_deref(),
+                     config.otel_headers.clone(),
+                     content_config,
+-                ) {
++                )
++                .map(|observer| observer.with_tool_denylist(&config.log_tool_io_denylist))
++                {
+                     Ok(obs) => {
+                         warn_otel_content_policy(content_config);

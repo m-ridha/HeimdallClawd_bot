@@ -64,6 +64,7 @@ COPY deploy/tests/config-secrets.rs crates/zeroclaw-config/tests/heimdall_secret
 # read at test runtime, and must not invalidate the expensive test compiler layer.
 RUN cargo test --locked -p zeroclaw-log --test heimdall_tool_privacy --no-run \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall --no-run \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features observability-otel --lib heimdall_otel --no-run \
     && cargo test --locked -p zeroclaw-providers --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run \
@@ -81,6 +82,7 @@ COPY deploy/bot/evals /tmp/heimdall-evals
 ENV HEIMDALL_TEST_DAEMON_VERBOSE=0 HEIMDALL_TEST_TOOLS=/tmp/heimdall-TOOLS.md HEIMDALL_TEST_CONFIG=/tmp/heimdall-config.toml HEIMDALL_TEST_SKILLS_MCP=/usr/local/bin/heimdall-launcher
 RUN cargo test --locked -p zeroclaw-log --test heimdall_tool_privacy \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --lib heimdall \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features observability-otel --lib heimdall_otel \
     && cargo test --locked -p zeroclaw-providers --lib heimdall \
     && cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall \
     && cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription \
