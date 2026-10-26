@@ -4,6 +4,27 @@ This is a historical evidence log, not a current deployment checklist. Each entr
 
 For present behavior use [operations](operations.md), [capabilities](capabilities.md), the template and tests. For a rollout, establish the exact deployed commit and perform the relevant [acceptance checks](capabilities.md#live-verification-after-publishing-a-release); a historical passing build or a merged PR does not establish current live behavior. Historical checks are not rerun merely by updating this record.
 
+## Diagnostic privacy and cryptographic dependencies — 2026-10-25
+
+The pinned runtime's tool preparation and completion paths log legacy arguments,
+results and output outside the capture helper. Two synthetic logging contracts
+fail on the original source and pass with tool-log-privacy.patch; the fixture
+runs a harmless local command and checks the real logging pipeline, including
+active and rotated JSONL files. It does not exercise a live model/tool loop.
+All 167 upstream logging unit tests, portable launcher tests, strict launcher
+Clippy, formatting and all 20 Python checks (with the Railway SDK) pass locally
+on macOS. All ten patches apply with zero fuzz to the checksum-verified archive.
+Linux-gated launcher behavior and optional installed-runtime tests are not
+established by these local results; build-only Linux validation remains required.
+
+The launcher and runtime 0.103 TLS chain now resolve rustls-webpki 0.103.16,
+webpki-roots 1.0.10 and ctutils 0.4.4. The runtime lock also contains webpki
+0.102.8 through optional rumqttc/channel-mqtt, outside the configured feature
+set; this is not a clean bill of health for every optional upstream dependency.
+The audit's reported production credential match was not independently inspected;
+no production logs, sessions, credentials or backups were read, cleaned or rotated.
+See [credential containment](operations.md#diagnostic-payload-privacy-and-credential-containment).
+
 ## Single-service validation and rollout — 24 October 2026
 
 [Native Linux validation](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/40077577580)

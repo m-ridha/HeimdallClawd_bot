@@ -65,6 +65,31 @@ see [skill persistence](#operator-installed-skill-bundles).
 
 Subscription credentials live in `/data/zeroclaw`, together with configuration and SQLite sessions. This directory belongs to UID 1000 and is private. A native auth check runs before Telegram polling. Launcher/startup messages go to Railway stdout. The normal daemon terminal formatter is off; inspect structured runtime diagnostics in the paired dashboard. Local diagnostics rotate at 1 MiB with three archives and three-day archive retention; tool/prompt payload capture remains disabled. There is no automatic API-key fallback.
 
+### Diagnostic payload privacy and credential containment
+
+The tool-log-privacy patch removes legacy raw `input`, `arguments`, `result`, `output`,
+`error` and `error_reason` attributes from tool diagnostic events before terminal formatting,
+broadcast, export and persistence. Explicit `tool_input`/`tool_output` capture obeys
+`log_tool_io` and its denylist. Outcome and duration remain.
+Keep capture off in production. This changes
+logging only: tools still receive their inputs and the agent still receives
+results. Conversation history is a separate store and can retain tool content.
+
+The optional OTel observer also applies the shared `log_tool_io_denylist` before
+scrubbing or exporting tool arguments/results, even when `otel_tool_io` enables
+content. Each observer owns its policy; another observer or writer reload cannot
+replace it. OTel is tested as an optional feature, not enabled in the shipped
+runtime feature set.
+
+A fixed release prevents new diagnostic copies; it does not scrub existing
+active logs, rotated archives, sessions, backups or exports. If a credential was
+logged, coordinate replacement/revocation with its issuer and update the Railway
+secret privately. Inspect retained stores without printing the credential or
+matching content. Obtain explicit approval for cleanup, stop affected writers
+before editing stores, and avoid blind deletion of session databases. Keep any
+necessary incident evidence privately with restricted access. A private directory
+reduces exposure but does not make a retained live credential harmless.
+
 For an interactive device sign-in, use the bot's Railway dashboard terminal:
 
 ```sh

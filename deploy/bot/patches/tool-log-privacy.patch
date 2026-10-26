@@ -1,0 +1,179 @@
+--- a/crates/zeroclaw-log/src/writer.rs
++++ b/crates/zeroclaw-log/src/writer.rs
+@@ -545,6 +545,33 @@
+     })
+ }
+ 
++/// Apply the capture opt-out before terminal, export, broadcast or disk sinks.
++/// Unknown initialization state fails closed. Raw legacy arguments/results are
++/// never an alternative to the policy-controlled tool_input/tool_output path.
++pub(crate) fn filter_tool_payloads(attributes: &mut Value, is_tool: bool) {
++    let Some(fields) = attributes.as_object_mut() else {
++        return;
++    };
++    if !is_tool && !fields.contains_key("tool") {
++        return;
++    }
++    for key in ["input", "arguments", "result", "output", "error", "error_reason"] {
++        fields.remove(key);
++    }
++    let allowed = current_state().is_some_and(|state| {
++        state.policy.tool_io.captures_io()
++            && !fields
++                .get("tool")
++                .and_then(Value::as_str)
++                .is_some_and(|tool| state.policy.is_tool_denylisted(tool))
++    });
++    if !allowed {
++        for key in ["tool_input", "tool_output"] {
++            fields.remove(key);
++        }
++    }
++}
++
+ /// Emit one event. Always fans out to the broadcast hook + tracing event.
+ /// If persistence is enabled, hands the serialized value to the disk
+ /// worker via a bounded `try_send`. The hot path performs no file I/O.
+@@ -559,7 +586,8 @@
+ /// (the schema migration tool, tests) can invoke it too, but production
+ /// code should go through the macro so the `tracing::event!` carries the
+ /// correct `file:line` source info.
+-pub fn record_event(event: LogEvent) {
++pub fn record_event(mut event: LogEvent) {
++    filter_tool_payloads(&mut event.attributes, event.event.category == "tool");
+     // `serde(skip)` on `ephemeral_attributes` keeps this value — the one
+     // that reaches disk — free of broadcast-only secrets.
+     let value = match serde_json::to_value(&event) {
+--- a/crates/zeroclaw-log/src/event.rs
++++ b/crates/zeroclaw-log/src/event.rs
+@@ -572,7 +572,11 @@
+     #[must_use]
+     pub fn attrs_str(&self) -> String {
+         match &self.attrs {
+-            Some(v) => serde_json::to_string(v).unwrap_or_default(),
++            Some(v) => {
++                let mut attributes = v.clone();
++                crate::writer::filter_tool_payloads(&mut attributes, self.category_str() == "tool");
++                serde_json::to_string(&attributes).unwrap_or_default()
++            }
+             None => String::new(),
+         }
+     }
+--- a/crates/zeroclaw-runtime/src/observability/otel.rs
++++ b/crates/zeroclaw-runtime/src/observability/otel.rs
+@@ -28,6 +28,7 @@
+     /// export boundary (`record_event` + attribute builders) consults a stable
+     /// privacy policy that no other observer can overwrite.
+     content_config: OtelContentConfig,
++    tool_log_policy: zeroclaw_log::ResolvedPolicy,
+     tracer_provider: SdkTracerProvider,
+     meter_provider: SdkMeterProvider,
+
+@@ -57,6 +58,26 @@
+ }
+
+ impl OtelObserver {
++    /// Keep the shared denylist instance-owned, independent of writer setup.
++    pub(crate) fn with_tool_denylist(mut self, denylist: &[String]) -> Self {
++        self.tool_log_policy = zeroclaw_log::ResolvedPolicy::from_config(
++            &zeroclaw_log::LogConfig {
++                log_tool_io_denylist: denylist.to_vec(),
++                ..zeroclaw_log::LogConfig::default()
++            },
++            std::path::Path::new("."),
++        );
++        self
++    }
++
++    fn content_for_tool(&self, tool: &str) -> OtelContentConfig {
++        let mut config = self.content_config;
++        if self.tool_log_policy.is_tool_denylisted(tool) {
++            config.tool_io_policy = OtelContentPolicy::Off;
++        }
++        config
++    }
++
+     /// Create a new OTel observer exporting to the given OTLP endpoint.
+     /// Uses HTTP/protobuf transport (port 4318 by default).
+     /// Falls back to `http://localhost:4318` if no endpoint is provided.
+@@ -225,6 +246,10 @@
+
+         Ok(Self {
+             content_config,
++            tool_log_policy: zeroclaw_log::ResolvedPolicy::from_config(
++                &zeroclaw_log::LogConfig::default(),
++                std::path::Path::new("."),
++            ),
+             tracer_provider,
+             meter_provider: meter_provider_clone,
+             agent_starts,
+@@ -380,7 +405,7 @@
+                 // observer's instance-owned tool I/O policy.
+                 span_attrs.extend(tool_start_content_attrs(
+                     arguments.as_deref(),
+-                    self.content_config,
++                    self.content_for_tool(tool),
+                 ));
+
+                 let parent_cx = self.parent_cx_for(turn_id.as_deref());
+@@ -811,7 +836,7 @@
+                 span_attrs.extend(tool_result_content_attrs(
+                     arguments.as_deref(),
+                     result.as_deref(),
+-                    self.content_config,
++                    self.content_for_tool(tool),
+                 ));
+                 let parent_cx = self.parent_cx_for(turn_id.as_deref());
+                 let mut span = tracer.build_with_context(
+@@ -1366,6 +1391,39 @@
+         .expect("observer creation should not fail with valid endpoint format")
+     }
+
++    #[tokio::test]
++    async fn heimdall_otel_shared_denylist_precedes_content_processing() {
++        for policy in [OtelContentPolicy::Redacted, OtelContentPolicy::Full] {
++            let mut observer = test_observer().with_tool_denylist(&["shell".into()]);
++            observer.content_config = tool_io_full_config();
++            observer.content_config.tool_io_policy = policy;
++            let denied = observer.content_for_tool("shell");
++            assert!(tool_start_content_attrs(Some("synthetic-private-input"), denied).is_empty());
++            assert!(
++                tool_result_content_attrs(
++                    Some("synthetic-private-input"),
++                    Some("synthetic-private-output"),
++                    denied
++                )
++                .is_empty()
++            );
++            let allowed = observer.content_for_tool("file_read");
++            assert_eq!(allowed.tool_io_policy, policy);
++            assert_eq!(tool_start_content_attrs(Some("{}"), allowed).len(), 2);
++            assert_eq!(
++                tool_result_content_attrs(Some("{}"), Some("fixture"), allowed).len(),
++                4
++            );
++            // Another observer must not inherit the first observer's denylist.
++            let mut other = test_observer();
++            other.content_config = tool_io_full_config();
++            assert_eq!(
++                other.content_for_tool("shell").tool_io_policy,
++                OtelContentPolicy::Full
++            );
++        }
++    }
++
+     #[test]
+     fn otel_observer_name() {
+         let obs = test_observer();
+--- a/crates/zeroclaw-runtime/src/observability/mod.rs
++++ b/crates/zeroclaw-runtime/src/observability/mod.rs
+@@ -375,7 +375,9 @@
+                     config.otel_service_name.as_deref(),
+                     config.otel_headers.clone(),
+                     content_config,
+-                ) {
++                )
++                .map(|observer| observer.with_tool_denylist(&config.log_tool_io_denylist))
++                {
+                     Ok(obs) => {
+                         warn_otel_content_policy(content_config);

@@ -1,0 +1,173 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2363,9 +2363,9 @@
+ 
+ [[package]]
+ name = "ctutils"
+-version = "0.4.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
++version = "0.4.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "12218662ccac37d9714f2191252553d67585b97df8c839cbe49e0bde278dc865"
+ dependencies = [
+  "cmov",
+ ]
+@@ -4372,7 +4372,7 @@
+  "tokio",
+  "tokio-rustls",
+  "tower-service",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -5341,7 +5341,7 @@
+  "socket2 0.6.5",
+  "tokio",
+  "url",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -8462,7 +8462,7 @@
+  "wasm-bindgen-futures",
+  "wasm-streams 0.4.2",
+  "web-sys",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -8813,7 +8813,7 @@
+  "once_cell",
+  "ring",
+  "rustls-pki-types",
+- "rustls-webpki 0.103.15",
++ "rustls-webpki 0.103.16",
+  "subtle",
+  "zeroize",
+ ]
+@@ -8828,7 +8828,7 @@
+  "rustls",
+  "rustls-native-certs 0.7.3",
+  "rustls-pki-types",
+- "rustls-webpki 0.103.15",
++ "rustls-webpki 0.103.16",
+ ]
+ 
+ [[package]]
+@@ -8889,7 +8889,7 @@
+  "rustls",
+  "rustls-native-certs 0.8.4",
+  "rustls-platform-verifier-android",
+- "rustls-webpki 0.103.15",
++ "rustls-webpki 0.103.16",
+  "security-framework 3.7.0",
+  "security-framework-sys",
+  "webpki-root-certs",
+@@ -8915,9 +8915,9 @@
+ 
+ [[package]]
+ name = "rustls-webpki"
+-version = "0.103.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
++version = "0.103.16"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
+ dependencies = [
+  "aws-lc-rs",
+  "ring",
+@@ -11349,7 +11349,7 @@
+  "rustls-pki-types",
+  "ureq-proto",
+  "utf8-zero",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -12291,7 +12291,7 @@
+  "wasmtime",
+  "wasmtime-wasi",
+  "wasmtime-wasi-io",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -12419,14 +12419,14 @@
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+ dependencies = [
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+ name = "webpki-roots"
+-version = "1.0.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
++version = "1.0.10"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
+ dependencies = [
+  "rustls-pki-types",
+ ]
+@@ -12598,7 +12598,7 @@
+  "tokio-rustls",
+  "tokio-websockets",
+  "wacore",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+ ]
+ 
+ [[package]]
+@@ -13939,7 +13939,7 @@
+  "wacore",
+  "wacore-binary",
+  "waproto",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+  "whatsapp-rust",
+  "whatsapp-rust-tokio-transport",
+  "whatsapp-rust-ureq-http-client",
+@@ -14001,7 +14001,7 @@
+  "toml_edit 0.25.12+spec-1.1.0",
+  "url",
+  "uuid",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+  "windows",
+  "zeroclaw-api",
+  "zeroclaw-infra",
+@@ -14282,7 +14282,7 @@
+  "wasmtime",
+  "wasmtime-wasi",
+  "wasmtime-wasi-http",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+  "windows",
+  "winx",
+  "zeroclaw-api",
+@@ -14418,7 +14418,7 @@
+  "tower-http",
+  "urlencoding",
+  "uuid",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+  "which",
+  "windows",
+  "wiremock",
+@@ -14596,7 +14596,7 @@
+  "toml 1.1.2+spec-1.1.0",
+  "urlencoding",
+  "uuid",
+- "webpki-roots 1.0.9",
++ "webpki-roots 1.0.10",
+  "which",
+  "windows-sys 0.61.2",
+  "wiremock",
