@@ -1,7 +1,18 @@
 --- a/crates/zeroclaw-tools/src/text_browser.rs
 +++ b/crates/zeroclaw-tools/src/text_browser.rs
-@@ -8,0 +9,46 @@
-+
+@@ -7,15 +7,77 @@
+
+ use crate::helpers::domain_guard;
+
+-/// Text browser tool: renders web pages as plain text using text-based browsers
+-/// (lynx, links, w3m). Ideal for headless/SSH environments where graphical
+-/// browsers are unavailable.
+-///
+-/// The selected external browser owns its transport, resolves DNS again, and
+-/// follows redirects without ZeroClaw revalidating each destination. Unlike
+-/// `web_fetch`, this tool cannot pin the preflight answer. The resolved-address
+-/// checks are defense in depth, not a DNS-rebinding or redirect boundary.
+-/// Prefer `web_fetch` for attacker-controlled URLs.
 +/// Spawn the browser and collect bounded output while reading.
 +/// stdout and stderr are drained concurrently. The stdout future returns an
 +/// error as soon as it reads 500,001 bytes; tokio::try_join! cancels the
@@ -11,17 +22,36 @@
 +pub async fn heimdall_browser_dump(
 +    browser: &str,
 +    args: &[String],
++    input: &[u8],
 +) -> std::io::Result<std::process::Output> {
-+    use tokio::io::AsyncReadExt;
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 +    let mut child = tokio::process::Command::new(browser)
 +        .args(args)
 +        .kill_on_drop(true)
-+        .stdin(std::process::Stdio::null())
++        .stdin(std::process::Stdio::piped())
 +        .stdout(std::process::Stdio::piped())
 +        .stderr(std::process::Stdio::piped())
 +        .spawn()?;
-+    let stdout_pipe = child.stdout.take().ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
-+    let stderr_pipe = child.stderr.take().ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
++    let mut stdin_pipe = child
++        .stdin
++        .take()
++        .ok_or_else(|| std::io::Error::other("Browser stdin unavailable"))?;
++    let stdin_fut = async {
++        match stdin_pipe.write_all(input).await {
++            Err(error) if error.kind() != std::io::ErrorKind::BrokenPipe => return Err(error),
++            _ => {}
++        }
++        drop(stdin_pipe);
++        std::io::Result::Ok(())
++    };
++    let stdout_pipe = child
++        .stdout
++        .take()
++        .ok_or_else(|| std::io::Error::other("Browser stdout unavailable"))?;
++    let stderr_pipe = child
++        .stderr
++        .take()
++        .ok_or_else(|| std::io::Error::other("Browser stderr unavailable"))?;
 +    let stdout_fut = async {
 +        let mut out = Vec::new();
 +        stdout_pipe.take(500_001).read_to_end(&mut out).await?;
@@ -35,10 +65,14 @@
 +        stderr_pipe.take(32_769).read_to_end(&mut err).await?;
 +        std::io::Result::Ok(err)
 +    };
-+    match tokio::try_join!(stdout_fut, stderr_fut) {
-+        Ok((out, err)) => {
++    match tokio::try_join!(stdout_fut, stderr_fut, stdin_fut) {
++        Ok((out, err, ())) => {
 +            let status = child.wait().await?;
-+            Ok(std::process::Output { status, stdout: out, stderr: err })
++            Ok(std::process::Output {
++                status,
++                stdout: out,
++                stderr: err,
++            })
 +        }
 +        Err(e) => {
 +            child.kill().await?;
@@ -47,12 +81,299 @@
 +        }
 +    }
 +}
-@@ -364,7 +410 @@
++
++/// Fetch through a DNS-pinned, redirect-validated transport, then render offline
++/// with Lynx. The renderer never receives a network URL as its start document.
+ pub struct TextBrowserTool {
+     security: Arc<SecurityPolicy>,
+     preferred_browser: Option<String>,
+@@ -29,7 +91,7 @@
+ }
+
+ /// The text browsers we support, in order of auto-detection preference.
+-const SUPPORTED_BROWSERS: &[&str] = &["lynx", "links", "w3m"];
++const SUPPORTED_BROWSERS: &[&str] = &["lynx"];
+
+ impl TextBrowserTool {
+     /// Construct with no private-host opt-in (deny-by-default). Use
+@@ -95,18 +157,82 @@
+         validate_text_browser_url(url, &self.allowed_private_hosts, validate_dns)
+     }
+
+-    async fn validate_url_for_execute(&self, url: &str) -> anyhow::Result<String> {
+-        let url = url.to_string();
+-        let allowed_private_hosts = self.allowed_private_hosts.clone();
+-        let nat64_prefixes = self.nat64_prefixes.clone();
+-
+-        tokio::task::spawn_blocking(move || {
+-            validate_text_browser_url(&url, &allowed_private_hosts, |host, allow_private| {
+-                validate_resolved_host_is_public(host, allow_private, &nat64_prefixes)
++    async fn fetch_html(&self, raw_url: &str) -> anyhow::Result<String> {
++        let mut url = raw_url.to_string();
++        for hop in 0..=10 {
++            let allowed_private_hosts = self.allowed_private_hosts.clone();
++            let nat64_prefixes = self.nat64_prefixes.clone();
++            let (validated_url, host, addresses) = tokio::task::spawn_blocking(move || {
++                use std::net::ToSocketAddrs;
++                let mut destination = None;
++                let validated_url = validate_text_browser_url(
++                    &url,
++                    &allowed_private_hosts,
++                    |host, allow_private| {
++                        let addresses = (host, 0).to_socket_addrs()?.collect::<Vec<_>>();
++                        let ips = addresses
++                            .iter()
++                            .map(|address| address.ip())
++                            .collect::<Vec<_>>();
++                        if allow_private {
++                            domain_guard::validate_resolved_ips_exclude_metadata(
++                                host,
++                                &ips,
++                                &nat64_prefixes,
++                            )?;
++                        } else {
++                            domain_guard::validate_resolved_ips_are_public(
++                                host,
++                                &ips,
++                                &nat64_prefixes,
++                            )?;
++                        }
++                        destination = Some((host.to_string(), addresses));
++                        Ok(())
++                    },
++                )?;
++                let (host, addresses) =
++                    destination.ok_or_else(|| anyhow::anyhow!("URL must include a host"))?;
++                anyhow::Ok((validated_url, host, addresses))
+             })
+-        })
+-        .await
+-        .map_err(|e| anyhow::Error::msg(format!("text_browser DNS validation task failed: {e}")))?
++            .await??;
++
++            // A new direct client for each hop uses only this hop's checked DNS
++            // answers. Preserve the URL hostname for Host and TLS verification.
++            let client = heimdall_browser_client(&host, &addresses)?;
++            let response = client.get(&validated_url).send().await?;
++            if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
++                anyhow::ensure!(hop < 10, "Too many redirects (max 10)");
++                let location = response
++                    .headers()
++                    .get(reqwest::header::LOCATION)
++                    .ok_or_else(|| anyhow::anyhow!("Redirect has no Location header"))?
++                    .to_str()?;
++                url = response.url().join(location)?.to_string();
++                continue;
++            }
++            let response = response.error_for_status()?;
++            let is_html = response
++                .headers()
++                .get(reqwest::header::CONTENT_TYPE)
++                .and_then(|value| value.to_str().ok())
++                .is_none_or(|value| value.to_ascii_lowercase().contains("text/html"));
++            let (body, truncated) =
++                crate::http_decode::read_decoded_text(response, Some(self.max_response_size), None)
++                    .await?;
++            anyhow::ensure!(
++                !truncated && body.len() <= self.max_response_size,
++                "Text browser input limit exceeded"
++            );
++            let base = escape_html(&validated_url);
++            let body = if is_html {
++                body
++            } else {
++                format!("<pre>{}</pre>", escape_html(&body))
++            };
++            return Ok(format!("<base href=\"{base}\">{body}"));
++        }
++        anyhow::bail!("Too many redirects (max 10)")
+     }
+
+     fn truncate_response(&self, text: &str) -> String {
+@@ -200,10 +326,20 @@
+         })
+     }
+
+-    /// Build the command arguments for the selected browser with `-dump` flag.
+-    fn build_dump_args(_browser: &str, url: &str) -> Vec<String> {
+-        // All supported browsers (lynx, links, w3m) use the same `-dump` flag
+-        vec!["-dump".to_string(), url.to_string()]
++    /// Only Lynx has a verified restricted offline rendering path here.
++    fn build_dump_args() -> Vec<String> {
++        [
++            "-dump",
++            "-stdin",
++            "-force_html",
++            "-assume_local_charset=utf-8",
++            "-display_charset=utf-8",
++            "-restrictions=all",
++            "-noredir",
++        ]
++        .into_iter()
++        .map(String::from)
++        .collect()
+     }
+ }
+
+@@ -268,11 +404,8 @@
+     }
+
+     fn description(&self) -> &str {
+-        "Render a web page as plain text using a text-based browser (lynx, links, or w3m). \
+-         Ideal for headless/SSH environments without a graphical browser. \
+-         Auto-detects available browser or uses a configured preference. \
+-         For untrusted URLs, prefer web_fetch because external browsers can re-resolve DNS and \
+-         follow redirects to unvalidated hosts."
++        "Render an HTTP or HTTPS page as plain text using offline Lynx. \
++         Every redirect destination is validated and connections use pinned DNS answers."
+     }
+
+     fn parameters_schema(&self) -> serde_json::Value {
+@@ -285,8 +418,8 @@
+                 },
+                 "browser": {
+                     "type": "string",
+-                    "description": "Text browser to use: \"lynx\", \"links\", or \"w3m\". If omitted, auto-detects an available browser.",
+-                    "enum": ["lynx", "links", "w3m"]
++                    "description": "Offline renderer to use: \"lynx\". Lynx must be installed.",
++                    "enum": ["lynx"]
+                 }
+             },
+             "required": ["url"]
+@@ -334,21 +467,6 @@
+             }
+         };
+
+-        // Keep the unavoidable validation-to-use window as short as possible:
+-        // resolve the executable before performing the final DNS preflight.
+-        let url = match self.validate_url_for_execute(url).await {
+-            Ok(v) => v,
+-            Err(e) => {
+-                return Ok(ToolResult {
+-                    success: false,
+-                    output: ToolOutput::default(),
+-                    error: Some(e.to_string()),
+-                });
+-            }
+-        };
+-
+-        let dump_args = Self::build_dump_args(&browser, &url);
+-
+         let timeout = Duration::from_secs(if self.timeout_secs == 0 {
+             ::zeroclaw_log::record!(
+                 WARN,
+@@ -361,12 +479,13 @@
+             self.timeout_secs
+         });
+
 -        let result = tokio::time::timeout(
 -            timeout,
 -            tokio::process::Command::new(&browser)
 -                .args(&dump_args)
 -                .output(),
 -        )
--        .await;
-+        let result = tokio::time::timeout(timeout, heimdall_browser_dump(&browser, &dump_args)).await;
++        let result = tokio::time::timeout(timeout, async {
++            let html = self.fetch_html(url).await?;
++            let dump_args = Self::build_dump_args();
++            Ok::<_, anyhow::Error>(
++                heimdall_browser_dump(&browser, &dump_args, html.as_bytes()).await?,
++            )
++        })
+         .await;
+
+         match result {
+@@ -411,37 +530,29 @@
+
+ // ── Helper functions ────────────────────────────────────────────────────────
+
+-#[cfg(not(test))]
+-fn validate_resolved_host_is_public(
++fn escape_html(value: &str) -> String {
++    value
++        .replace('&', "&amp;")
++        .replace('"', "&quot;")
++        .replace('<', "&lt;")
++        .replace('>', "&gt;")
++}
++
++/// Build the same pinned direct transport used by each fetch hop.
++#[doc(hidden)]
++pub fn heimdall_browser_client(
+     host: &str,
+-    allow_private: bool,
+-    nat64_prefixes: &[domain_guard::Nat64Prefix],
+-) -> anyhow::Result<()> {
+-    use std::net::ToSocketAddrs;
+-
+-    let ips = (host, 0)
+-        .to_socket_addrs()
+-        .map_err(|e| {
+-            ::zeroclaw_log::record!(
+-                ERROR,
+-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
+-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+-                    .with_attrs(::serde_json::json!({
+-                        "host": host,
+-                        "error": format!("{}", e),
+-                    })),
+-                "text_browser: failed to resolve host"
+-            );
+-            anyhow::Error::msg(format!("Failed to resolve host '{host}': {e}"))
+-        })?
+-        .map(|addr| addr.ip())
+-        .collect::<Vec<_>>();
+-
+-    if allow_private {
+-        domain_guard::validate_resolved_ips_exclude_metadata(host, &ips, nat64_prefixes)
+-    } else {
+-        domain_guard::validate_resolved_ips_are_public(host, &ips, nat64_prefixes)
+-    }
++    addresses: &[std::net::SocketAddr],
++) -> reqwest::Result<reqwest::Client> {
++    reqwest::Client::builder()
++        .no_proxy()
++        .no_gzip()
++        .no_brotli()
++        .no_deflate()
++        .no_zstd()
++        .redirect(reqwest::redirect::Policy::none())
++        .resolve_to_addrs(host, addresses)
++        .build()
+ }
+
+ #[cfg(test)]
+@@ -737,21 +848,19 @@
+     }
+
+     #[test]
+-    fn build_dump_args_lynx() {
+-        let args = TextBrowserTool::build_dump_args("lynx", "https://example.com");
+-        assert_eq!(args, vec!["-dump", "https://example.com"]);
+-    }
+-
+-    #[test]
+-    fn build_dump_args_links() {
+-        let args = TextBrowserTool::build_dump_args("links", "https://example.com");
+-        assert_eq!(args, vec!["-dump", "https://example.com"]);
+-    }
+-
+-    #[test]
+-    fn build_dump_args_w3m() {
+-        let args = TextBrowserTool::build_dump_args("w3m", "https://example.com");
+-        assert_eq!(args, vec!["-dump", "https://example.com"]);
++    fn build_dump_args_are_offline() {
++        assert_eq!(
++            TextBrowserTool::build_dump_args(),
++            vec![
++                "-dump",
++                "-stdin",
++                "-force_html",
++                "-assume_local_charset=utf-8",
++                "-display_charset=utf-8",
++                "-restrictions=all",
++                "-noredir"
++            ]
++        );
+     }
+
+     #[tokio::test]
