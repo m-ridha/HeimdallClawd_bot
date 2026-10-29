@@ -76,6 +76,7 @@ patch_files = {
     'gateway_admin_auth_patch_sha256': 'gateway-admin-auth.patch',
     'http_diagnostics_patch_sha256': 'http-diagnostics.patch',
     'http_secret_origins_patch_sha256': 'http-secret-origins.patch',
+    'browser_navigation_patch_sha256': 'browser-navigation.patch',
     'browser_output_patch_sha256': 'browser-output.patch',
     'private_telegram_patch_sha256': 'private-telegram.patch',
     'telegram_startup_patch_sha256': 'telegram-startup.patch',

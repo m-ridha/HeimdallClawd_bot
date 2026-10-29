@@ -48,6 +48,7 @@ class PackageTests(unittest.TestCase):
                 'http_secret_origins_patch_sha256', 'browser_output_patch_sha256',
                 'private_telegram_patch_sha256', 'telegram_startup_patch_sha256',
                 'tool_log_privacy_patch_sha256', 'security_dependencies_patch_sha256',
+                'browser_navigation_patch_sha256',
             })
             self.assertEqual(lock['browser_output_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())
@@ -67,7 +68,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn('executor_sha256', lock)
             self.assertNotIn('native_child_patch_sha256', lock)
             self.assertNotIn('remote_skills_patch_sha256', lock)
-            for name in ['tool-log-privacy', 'security-dependencies']:
+            for name in ['tool-log-privacy', 'security-dependencies', 'browser-navigation']:
                 field = name.replace('-', '_') + '_patch_sha256'
                 self.assertEqual(lock[field], hashlib.sha256((ROOT / f'deploy/bot/patches/{name}.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['telegram_startup_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/telegram-startup.patch').read_bytes()).hexdigest())
