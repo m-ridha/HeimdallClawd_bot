@@ -409,7 +409,18 @@ servers still clear their environments and retain their own scoped child policy;
 these protect those call paths, not the agent from its authorized root commands.
 
 ChromeDriver is supervised locally, accepts loopback clients and receives no
-provider environment. Chromium automation uses upstream service-mode flags;
+provider environment. Chromium automation uses upstream service-mode flags and a per-tool guarded
+HTTP proxy. The maintained browser-navigation patch validates open URLs before
+backend dispatch. Native Chromium sends HTTP(S) and WebSocket requests, including
+redirects, through that proxy; implicit loopback bypass and non-proxied UDP are
+disabled. The proxy checks the browser domain/private-host lists, rejects cloud
+metadata and mixed public/private DNS answers, and dials only the checked IP
+addresses. It bounds connections and closes tunnels when the tool is dropped.
+The proxy runs beside the local WebDriver; remote browser backends do not acquire
+this native transport guard. Runtime overrides selecting another backend need
+their own egress controls.
+
+Chromium still runs with container-compatible service flags;
 this is not a secure browser sandbox. Keep pairing, Telegram authorization and
 signed admission intact. Never run untrusted repository scripts without review.
 

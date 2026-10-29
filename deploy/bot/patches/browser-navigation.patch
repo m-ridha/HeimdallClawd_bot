@@ -1,0 +1,569 @@
+--- a/crates/zeroclaw-tools/Cargo.toml
++++ b/crates/zeroclaw-tools/Cargo.toml
+@@ -28,6 +28,9 @@
+ fluent = "0.16"
+ glob = "0.3"
+ hex = "0.4"
++http-body-util = { version = "0.1", optional = true }
++hyper = { version = "1", features = ["http1", "server", "client"], optional = true }
++hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+ infer = { version = "0.19", default-features = false }
+ fantoccini = { version = "0.22.1", optional = true, default-features = false, features = ["rustls-tls"] }
+ nanohtml2text = "0.2"
+@@ -73,7 +76,7 @@
+
+ [features]
+ default = []
+-browser-native = ["tools-external", "dep:fantoccini"]
++browser-native = ["tools-external", "dep:fantoccini", "dep:http-body-util", "dep:hyper", "dep:hyper-util"]
+ tools-external = ["zeroclaw-config/tools-external"]
+ probe = ["dep:probe-rs"]
+ # SaaS and coding-CLI integrations. Each is opt-in; the root crate forwards
+--- a/crates/zeroclaw-tools/src/browser.rs
++++ b/crates/zeroclaw-tools/src/browser.rs
+@@ -1,4 +1,7 @@
+ //! Browser automation tool with pluggable backends.
++
++#[cfg(feature = "browser-native")]
++mod egress;
+
+ use crate::helpers::domain_guard;
+ use anyhow::Context;
+@@ -752,6 +755,9 @@
+         #[cfg(feature = "browser-native")]
+         {
+             let mut state = self.native_state.lock().await;
++            state
++                .ensure_proxy(&self.allowed_domains, &self.allowed_private_hosts)
++                .await?;
+
+             let first_attempt = state
+                 .execute_action(
+@@ -1536,6 +1542,16 @@
+         // Rate limiting is applied by the RateLimitedTool wrapper at
+         // registration time (see zeroclaw-runtime::tools::mod).
+
++        // Validate open before backend discovery or dispatch, including native
++        // and computer-use backends. Redirects need the native proxy as well.
++        if args.get("action").and_then(Value::as_str) == Some("open") {
++            let url = args
++                .get("url")
++                .and_then(Value::as_str)
++                .ok_or_else(|| anyhow::anyhow!("Missing 'url' for open action"))?;
++            self.validate_url(url)?;
++        }
++
+         let backend = match self.resolve_backend().await {
+             Ok(selected) => selected,
+             Err(error) => {
+@@ -1608,9 +1624,24 @@
+     #[derive(Default)]
+     pub struct NativeBrowserState {
+         client: Option<Client>,
++        proxy: Option<super::egress::BrowserProxy>,
+     }
+
+     impl NativeBrowserState {
++        pub async fn ensure_proxy(
++            &mut self,
++            domains: &[String],
++            private_hosts: &[String],
++        ) -> Result<()> {
++            if self.proxy.is_none() {
++                self.proxy = Some(
++                    super::egress::BrowserProxy::start(domains.to_vec(), private_hosts.to_vec())
++                        .await?,
++                );
++            }
++            Ok(())
++        }
++
+         pub fn is_available(
+             _headless: bool,
+             webdriver_url: &str,
+@@ -1976,7 +2007,19 @@
+
+             let mut capabilities: Map<String, Value> = Map::new();
+             let mut chrome_options: Map<String, Value> = Map::new();
+-            let mut args: Vec<Value> = Vec::new();
++            let proxy = self
++                .proxy
++                .as_ref()
++                .context("Browser egress proxy is required")?;
++            // A single manual proxy has no DIRECT fallback. Chromium's implicit
++            // loopback bypass must be subtracted, including for redirects.
++            let mut args: Vec<Value> = vec![
++                json!(format!("--proxy-server=http://{}", proxy.address())),
++                json!("--proxy-bypass-list=<-loopback>"),
++                json!("--disable-quic"),
++                json!("--force-webrtc-ip-handling-policy=disable_non_proxied_udp"),
++                json!("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"),
++            ];
+
+             if headless {
+                 args.push(Value::String("--headless=new".to_string()));
+@@ -2790,6 +2833,33 @@
+ mod tests {
+     use super::*;
+
++    #[tokio::test]
++    async fn heimdall_open_validates_before_discovering_any_backend() {
++        for backend in ["rust_native", "agent_browser", "computer_use", "auto"] {
++            let mut tool = BrowserTool::new(
++                Arc::new(SecurityPolicy::default()),
++                vec!["example.com".into()],
++                None,
++            )
++            .unwrap();
++            tool.backend = backend.into();
++            for url in [
++                "http://127.0.0.1/",
++                "http://[::1]/",
++                "file:///etc/passwd",
++                "https://other.example/",
++                "https://user:password@example.com/",
++            ] {
++                assert!(
++                    tool.execute(json!({"action": "open", "url": url}))
++                        .await
++                        .is_err(),
++                    "{backend}: {url}"
++                );
++            }
++        }
++    }
++
+     #[test]
+     fn validate_url_blocks_ipv6_ssrf() {
+         let security = Arc::new(SecurityPolicy::default());
+--- a/crates/zeroclaw-tools/src/browser/egress.rs
++++ b/crates/zeroclaw-tools/src/browser/egress.rs
+@@ -0,0 +1,416 @@
++//! Chromium HTTP egress: authorize every request/CONNECT and dial the checked DNS result.
++use crate::helpers::domain_guard;
++use anyhow::{Context, Result, bail};
++use http_body_util::{BodyExt, Empty, combinators::BoxBody};
++use hyper::body::{Bytes, Incoming};
++use hyper::service::service_fn;
++use hyper::{Method, Request, Response, StatusCode};
++use hyper_util::rt::{TokioIo, TokioTimer};
++use std::convert::Infallible;
++use std::net::SocketAddr;
++use std::sync::Arc;
++use std::time::Duration;
++use tokio::net::{TcpListener, TcpStream};
++use tokio::sync::{Semaphore, watch};
++use tokio::task::{JoinHandle, JoinSet};
++use zeroclaw_infra::net_guard::{PrivateNetworkAccess, ResolvedDestination};
++
++const CONNECTION_LIMIT: usize = 64;
++const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
++const CONNECTION_TIMEOUT: Duration = Duration::from_secs(300);
++type ProxyBody = BoxBody<Bytes, hyper::Error>;
++
++pub(super) struct BrowserProxy {
++    address: SocketAddr,
++    task: JoinHandle<()>,
++    // Dropping the sender cancels every upstream connection and upgraded tunnel.
++    _cancel: watch::Sender<()>,
++}
++
++impl Drop for BrowserProxy {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}
++
++impl BrowserProxy {
++    pub(super) async fn start(domains: Vec<String>, private_hosts: Vec<String>) -> Result<Self> {
++        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
++        let address = listener.local_addr()?;
++        let (cancel, receiver) = watch::channel(());
++        let policy = Arc::new(ProxyPolicy {
++            domains,
++            private_hosts,
++            connections: Arc::new(Semaphore::new(CONNECTION_LIMIT)),
++            cancel: receiver,
++        });
++        let task = tokio::spawn(async move {
++            let mut clients = JoinSet::new();
++            loop {
++                tokio::select! {
++                    accepted = listener.accept(), if clients.len() < CONNECTION_LIMIT => {
++                        let Ok((stream, _)) = accepted else { break };
++                        let policy = Arc::clone(&policy);
++                        clients.spawn(async move {
++                            let service = service_fn(move |request| {
++                                let policy = Arc::clone(&policy);
++                                async move {
++                                    let response = forward(request, &policy).await.unwrap_or_else(|_| {
++                                        // Never return raw URLs, headers, DNS answers or transport errors.
++                                        empty_response(StatusCode::FORBIDDEN)
++                                    });
++                                    Ok::<_, Infallible>(response)
++                                }
++                            });
++                            let _ = tokio::time::timeout(CONNECTION_TIMEOUT,
++                                hyper::server::conn::http1::Builder::new()
++                                    .timer(TokioTimer::new())
++                                    .header_read_timeout(SETUP_TIMEOUT)
++                                    .max_buf_size(16_384)
++                                    .serve_connection(TokioIo::new(stream), service)
++                                    .with_upgrades()
++                            ).await;
++                        });
++                    }
++                    _ = clients.join_next(), if !clients.is_empty() => {}
++                }
++            }
++        });
++        Ok(Self {
++            address,
++            task,
++            _cancel: cancel,
++        })
++    }
++
++    pub(super) fn address(&self) -> SocketAddr {
++        self.address
++    }
++}
++
++struct ProxyPolicy {
++    domains: Vec<String>,
++    private_hosts: Vec<String>,
++    connections: Arc<Semaphore>,
++    cancel: watch::Receiver<()>,
++}
++
++impl ProxyPolicy {
++    fn private_access(&self, host: &str) -> Result<PrivateNetworkAccess> {
++        let private_allowed = domain_guard::host_matches_allowlist(host, &self.private_hosts);
++        if domain_guard::is_private_or_local_host(host) {
++            if !private_allowed {
++                bail!("Browser destination denied");
++            }
++        } else if !domain_guard::host_matches_allowlist(host, &self.domains) {
++            bail!("Browser destination denied");
++        }
++        Ok(if private_allowed {
++            PrivateNetworkAccess::Allow
++        } else {
++            PrivateNetworkAccess::Deny
++        })
++    }
++
++    async fn connect(&self, url: &reqwest::Url) -> Result<TcpStream> {
++        let host = url.host_str().context("Missing proxy destination host")?;
++        let host = zeroclaw_infra::net_guard::normalize_host(host)?;
++        let port = url
++            .port_or_known_default()
++            .context("Missing destination port")?;
++        self.private_access(&host)?;
++        let addresses = tokio::net::lookup_host((host.as_str(), port)).await?;
++        let destination = self.checked_destination(&host, port, addresses)?;
++        // No hostname is passed to connect: a DNS rebind cannot replace the pin.
++        Ok(TcpStream::connect(destination.addresses()).await?)
++    }
++
++    fn checked_destination(
++        &self,
++        host: &str,
++        port: u16,
++        addresses: impl IntoIterator<Item = SocketAddr>,
++    ) -> Result<ResolvedDestination> {
++        let access = self.private_access(host)?;
++        Ok(ResolvedDestination::new(
++            host,
++            port,
++            addresses,
++            access,
++            &[],
++        )?)
++    }
++
++    async fn spawn(&self, future: impl Future<Output = ()> + Send + 'static) -> Result<()> {
++        let permit = Arc::clone(&self.connections).try_acquire_owned()?;
++        let mut cancel = self.cancel.clone();
++        tokio::spawn(async move {
++            let _permit = permit;
++            tokio::select! {
++                _ = cancel.changed() => {}
++                _ = tokio::time::timeout(CONNECTION_TIMEOUT, future) => {}
++            }
++        });
++        Ok(())
++    }
++}
++
++fn empty_response(status: StatusCode) -> Response<ProxyBody> {
++    let mut response = Response::new(
++        Empty::<Bytes>::new()
++            .map_err(|never| match never {})
++            .boxed(),
++    );
++    *response.status_mut() = status;
++    response
++}
++
++async fn forward(
++    mut request: Request<Incoming>,
++    policy: &ProxyPolicy,
++) -> Result<Response<ProxyBody>> {
++    let tunnel = request.method() == Method::CONNECT;
++    let url = if tunnel {
++        let authority = request
++            .uri()
++            .authority()
++            .context("Missing CONNECT authority")?;
++        if authority.port_u16().is_none() {
++            bail!("Missing CONNECT port");
++        }
++        reqwest::Url::parse(&format!("http://{authority}"))?
++    } else {
++        reqwest::Url::parse(&request.uri().to_string())?
++    };
++    if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
++        bail!("Invalid proxy destination");
++    }
++    let upstream = tokio::time::timeout(SETUP_TIMEOUT, policy.connect(&url)).await??;
++    let browser_upgrade = hyper::upgrade::on(&mut request);
++    if tunnel {
++        policy
++            .spawn(async move {
++                if let Ok(browser) = browser_upgrade.await {
++                    let mut browser = TokioIo::new(browser);
++                    let mut upstream = upstream;
++                    let _ = tokio::io::copy_bidirectional(&mut browser, &mut upstream).await;
++                }
++            })
++            .await?;
++        return Ok(empty_response(StatusCode::OK));
++    }
++
++    let (mut sender, connection) =
++        hyper::client::conn::http1::handshake(TokioIo::new(upstream)).await?;
++    policy
++        .spawn(async move {
++            let _ = connection.with_upgrades().await;
++        })
++        .await?;
++    // Always send origin-form to the validated server. Hyper frames request and
++    // response bodies, so keep-alive cannot reuse a socket for another authority.
++    let authority = request
++        .uri()
++        .authority()
++        .context("Missing request authority")?
++        .as_str()
++        .parse()?;
++    request.headers_mut().insert(hyper::header::HOST, authority);
++    *request.uri_mut() = request
++        .uri()
++        .path_and_query()
++        .context("Missing request path")?
++        .as_str()
++        .parse()?;
++    request.headers_mut().remove("proxy-authorization");
++    request.headers_mut().remove("proxy-connection");
++    let mut response = tokio::time::timeout(SETUP_TIMEOUT, sender.send_request(request)).await??;
++    if response.status() == StatusCode::SWITCHING_PROTOCOLS {
++        let upstream_upgrade = hyper::upgrade::on(&mut response);
++        policy
++            .spawn(async move {
++                if let (Ok(browser), Ok(upstream)) = tokio::join!(browser_upgrade, upstream_upgrade)
++                {
++                    let _ = tokio::io::copy_bidirectional(
++                        &mut TokioIo::new(browser),
++                        &mut TokioIo::new(upstream),
++                    )
++                    .await;
++                }
++            })
++            .await?;
++    }
++    Ok(response.map(BodyExt::boxed))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++    #[tokio::test]
++    async fn heimdall_proxy_blocks_private_http_and_connect_without_dialing() {
++        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = target.local_addr().unwrap().port();
++        let proxy = BrowserProxy::start(vec!["*".into()], vec![]).await.unwrap();
++        for host in ["127.0.0.1", "localhost", "[::1]", "[::ffff:127.0.0.1]"] {
++            for line in [
++                format!("GET http://{host}:{port}/ HTTP/1.1\r\nHost: {host}\r\n\r\n"),
++                format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}\r\n\r\n"),
++            ] {
++                let mut browser = TcpStream::connect(proxy.address()).await.unwrap();
++                browser.write_all(line.as_bytes()).await.unwrap();
++                let mut response = [0; 1024];
++                let count = browser.read(&mut response).await.unwrap();
++                assert!(response[..count].starts_with(b"HTTP/1.1 403"), "{line}");
++            }
++        }
++        assert!(
++            tokio::time::timeout(Duration::from_millis(100), target.accept())
++                .await
++                .is_err()
++        );
++    }
++
++    #[test]
++    fn heimdall_proxy_rejects_private_and_mixed_dns_answers() {
++        let (cancel, receiver) = watch::channel(());
++        let policy = ProxyPolicy {
++            domains: vec!["*".into()],
++            private_hosts: vec![],
++            connections: Arc::new(Semaphore::new(1)),
++            cancel: receiver,
++        };
++
++        for addresses in [
++            vec!["127.0.0.1:443"],
++            vec!["10.0.0.1:443"],
++            vec!["169.254.169.254:443"],
++            vec!["[::ffff:127.0.0.1]:443"],
++            vec!["93.184.216.34:443", "127.0.0.1:443"],
++        ] {
++            assert!(
++                policy
++                    .checked_destination(
++                        "public.example",
++                        443,
++                        addresses
++                            .into_iter()
++                            .map(|address| address.parse::<SocketAddr>().unwrap()),
++                    )
++                    .is_err()
++            );
++        }
++        let pin = policy
++            .checked_destination(
++                "public.example",
++                443,
++                ["93.184.216.34:443".parse::<SocketAddr>().unwrap()],
++            )
++            .unwrap();
++        assert_eq!(
++            pin.addresses(),
++            &["93.184.216.34:443".parse::<SocketAddr>().unwrap()]
++        );
++        let restricted = ProxyPolicy {
++            domains: vec!["allowed.example".into()],
++            private_hosts: vec!["*".into()],
++            connections: Arc::new(Semaphore::new(1)),
++            cancel: policy.cancel.clone(),
++        };
++        assert!(restricted.private_access("other.example").is_err());
++        assert_eq!(
++            restricted.private_access("127.0.0.1").unwrap(),
++            PrivateNetworkAccess::Allow
++        );
++        assert!(
++            restricted
++                .checked_destination(
++                    "169.254.169.254",
++                    80,
++                    ["169.254.169.254:80".parse::<SocketAddr>().unwrap()]
++                )
++                .is_err()
++        );
++        drop(cancel);
++    }
++
++    #[tokio::test]
++    async fn heimdall_proxy_routes_each_http_request_and_closes_tunnels_on_drop() {
++        let proxy = BrowserProxy::start(vec!["*".into()], vec!["127.0.0.1".into()])
++            .await
++            .unwrap();
++        let stream = TcpStream::connect(proxy.address()).await.unwrap();
++        let (mut sender, connection) =
++            hyper::client::conn::http1::handshake::<_, Empty<Bytes>>(TokioIo::new(stream))
++                .await
++                .unwrap();
++        let browser_task = tokio::spawn(connection);
++        for marker in ["first", "second"] {
++            let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
++            let address = target.local_addr().unwrap();
++            let target_task = tokio::spawn(async move {
++                let (mut socket, _) = target.accept().await.unwrap();
++                let mut request = [0; 1024];
++                let count = socket.read(&mut request).await.unwrap();
++                assert!(request[..count].starts_with(b"GET /fixture HTTP/1.1\r\n"));
++                socket
++                    .write_all(
++                        format!(
++                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{marker}",
++                            marker.len()
++                        )
++                        .as_bytes(),
++                    )
++                    .await
++                    .unwrap();
++            });
++            let response = sender
++                .send_request(
++                    Request::builder()
++                        .uri(format!("http://{address}/fixture"))
++                        .header("Host", address.to_string())
++                        .body(Empty::new())
++                        .unwrap(),
++                )
++                .await
++                .unwrap();
++            assert_eq!(response.status(), StatusCode::OK);
++            assert_eq!(
++                response.into_body().collect().await.unwrap().to_bytes(),
++                marker
++            );
++            target_task.await.unwrap();
++        }
++        browser_task.abort();
++
++        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let mut browser = TcpStream::connect(proxy.address()).await.unwrap();
++        browser
++            .write_all(
++                format!(
++                    "CONNECT {} HTTP/1.1\r\nHost: fixture\r\n\r\n",
++                    target.local_addr().unwrap()
++                )
++                .as_bytes(),
++            )
++            .await
++            .unwrap();
++        let (mut upstream, _) = target.accept().await.unwrap();
++        let mut response = [0; 1024];
++        let count = browser.read(&mut response).await.unwrap();
++        assert!(response[..count].starts_with(b"HTTP/1.1 200"));
++        browser.write_all(b"tunnel fixture").await.unwrap();
++        let mut bytes = [0; 14];
++        upstream.read_exact(&mut bytes).await.unwrap();
++        assert_eq!(&bytes, b"tunnel fixture");
++        drop(proxy);
++        assert_eq!(
++            tokio::time::timeout(Duration::from_secs(2), upstream.read(&mut bytes))
++                .await
++                .unwrap()
++                .unwrap(),
++            0
++        );
++    }
++}
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -14567,6 +14567,9 @@
+  "futures-util",
+  "glob",
+  "hex",
++ "http-body-util",
++ "hyper",
++ "hyper-util",
+  "infer",
+  "libc",
+  "mail-parser",

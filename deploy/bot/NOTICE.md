@@ -30,6 +30,7 @@ existing Landlock profile.
 | gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
 | sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
 | responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
+| browser-navigation.patch | Validate open URLs before backend dispatch. Force native Chromium HTTP(S)/WebSocket traffic through a local proxy that checks domains and resolved addresses before dialing the pinned socket; disable implicit loopback bypass and direct UDP. |
 | browser-output.patch | Validate each HTTP redirect and pin connections to the checked addresses without proxies. Render fetched content through restricted offline Lynx; reject links/w3m. Bound fetched input and rendered stdout to 500,000 bytes and kill the child on overflow, timeout or cancellation. Upstream hands network access to the external browser and only checks the initial URL. |
 
 AgentMail uses native /sop/* admission and the background SOP driver. Synchronous
@@ -41,3 +42,5 @@ Artifact provenance retains patch hashes; source and tests stay in the tagged
 repository rather than the runtime-only Railway upload.
 
 Browser-output regressions are compiled and executed from `deploy/tests/browser-output.rs` in the native Linux contract stage. They cover redirect destination checks, DNS pinning, relative redirects, offline rendering without subrequests, redirect/input limits, backend rejection, concurrent stdin/output, the exact stdout limit, overflow with stderr held open, timeout and cancellation cleanup. The skills bootstrap test uses a local Git fixture; no external registry or credentials are needed.
+
+Browser-navigation regressions run against real Chromium in `deploy/tests/browser-navigation.rs`, covering allowed navigation, denied loopback redirects, subresources and click navigation. Patch-local tests cover dispatch validation, HTTP/CONNECT rejection, DNS answer validation, per-request routing and proxy cancellation.
