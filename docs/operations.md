@@ -394,8 +394,14 @@ The native-child patch is removed. The narrow skills installer bootstraps the
 official Git registry in its pre-created cache before invoking native ZeroClaw
 installation. Both run inside the same cleared-environment, bounded process group.
 Only `data/skills-registry` is writable; private data-directory siblings remain
-unreadable. The separate browser-output patch bounds text-browser collection and terminates the child on output overflow;
-kill-on-drop remains enabled for timeout and cancellation.
+unreadable. The browser-output patch fetches HTTP(S) directly, validates every
+redirect destination with the existing private-host/metadata/NAT64 policy, and
+pins each connection to its checked DNS answers. Proxy environment variables are
+ignored on this path. Lynx renders the fetched content offline with restrictions;
+`links` and `w3m` requests are rejected. Relative links use the final fetched URL.
+The whole fetch/render operation shares one timeout, follows at most ten
+redirects, and rejects fetched input or rendered output over 500,000 bytes.
+Kill-on-drop remains enabled for timeout and cancellation.
 
 General root-capable shell access is intentionally trusted
 with the service's credentials and filesystem. Narrow registry/Codespaces MCP

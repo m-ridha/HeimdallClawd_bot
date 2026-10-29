@@ -50,6 +50,7 @@ ENV HEIMDALL_TEST_RUNTIME=/usr/local/bin/zeroclaw
 RUN cargo test --locked
 
 FROM runtime-source AS native-test-compile
+RUN apt-get update && apt-get install -y --no-install-recommends lynx && rm -rf /var/lib/apt/lists/*
 COPY deploy/tests/tool-log-privacy.rs crates/zeroclaw-log/tests/heimdall_tool_privacy.rs
 COPY deploy/tests/browser-output.rs crates/zeroclaw-tools/tests/heimdall_browser_output.rs
 COPY deploy/tests/telegram-transcription.rs crates/zeroclaw-channels/tests/heimdall_transcription.rs
