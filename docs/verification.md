@@ -305,3 +305,25 @@ ceilings and deleting the old service, with no volume deletion. It was not
 applied. Old workspace backup/import, native Linux validation, image-size checks,
 provider verification and production migration remain outstanding. See the
 [migration procedure](single-service-migration.md) before a release.
+
+## ACP pairing revocation patch validation — 2026-10-30
+
+The `acp-pairing-revocation` patch binds ACP sockets to the authenticated token
+hash, closes them on device or global revocation, and rechecks live membership
+when dispatching queued requests, publishing sessions and admitting turns. All
+twelve retained patches, in Dockerfile order, applied with `patch --fuzz=0 -p1`
+to a fresh checksum-verified `c4732213…` extraction without fuzz or rejects.
+
+Local macOS runs passed: fifteen `heimdall` tests in `zeroclaw-channels` with
+`channel-telegram,channel-acp-server` (six ACP revocation cases), four in
+`zeroclaw-gateway` including socket closure and denial of new work, and one in
+`zeroclaw-config` for the revocation watch identity. The tools suite passed 20
+tests with one Railway SDK skip, and `git diff --check` was clean.
+
+Native Linux execution passed in build-only
+[run 41014782145](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/41014782145)
+for source `f920c41` (the later verification-only commit changes no build
+input). The image applied the patch chain with zero fuzz, and the same fifteen
+channel, four gateway and one config tests passed, including socket closure with
+denial of new work. ACP revocation against a deployed runtime remains unverified
+here; no deployment was performed.

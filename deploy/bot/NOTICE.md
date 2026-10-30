@@ -27,6 +27,7 @@ existing Landlock profile.
 | private-telegram.patch | Reject non-private Telegram updates before callback/media processing, in addition to account allowlisting. |
 | http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |
 | http-diagnostics.patch | Provide bounded, sanitized actionable HTTP status/category diagnostics without enabling payload logging. |
+| acp-pairing-revocation.patch | Bind ACP sockets to the authenticated token hash, close them on device or global revocation, and recheck live membership when dispatching queued requests, publishing sessions and admitting turns. Cancel admitted turns through native transcript persistence. |
 | gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
 | sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
 | responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
@@ -44,3 +45,5 @@ repository rather than the runtime-only Railway upload.
 Browser-output regressions are compiled and executed from `deploy/tests/browser-output.rs` in the native Linux contract stage. They cover redirect destination checks, DNS pinning, relative redirects, offline rendering without subrequests, redirect/input limits, backend rejection, concurrent stdin/output, the exact stdout limit, overflow with stderr held open, timeout and cancellation cleanup. The skills bootstrap test uses a local Git fixture; no external registry or credentials are needed.
 
 Browser-navigation regressions run against real Chromium in `deploy/tests/browser-navigation.rs`, covering allowed navigation, denied loopback redirects, subresources and click navigation. Patch-local tests cover dispatch validation, HTTP/CONNECT rejection, DNS answer validation, per-request routing and proxy cancellation.
+
+ACP revocation regressions are patch-local native tests in pairing, ACP orchestration and gateway modules. They cover every token carrier, device/global revocation, unrelated device continuity, buffered and waiting requests, and durable cancellation of an active turn. The contract stage enables `channel-acp-server` when running the channels tests.
