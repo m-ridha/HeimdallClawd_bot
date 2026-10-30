@@ -91,11 +91,10 @@
 
              let first_attempt = state
                  .execute_action(
-@@ -1535,6 +1561,16 @@
-
+@@ -1536,6 +1562,16 @@
          // Rate limiting is applied by the RateLimitedTool wrapper at
          // registration time (see zeroclaw-runtime::tools::mod).
-+
+
 +        // Validate open before backend discovery or dispatch, including native
 +        // and computer-use backends. Redirects need the native proxy as well.
 +        if args.get("action").and_then(Value::as_str) == Some("open") {
@@ -105,9 +104,10 @@
 +                .ok_or_else(|| anyhow::anyhow!("Missing 'url' for open action"))?;
 +            self.validate_url(url)?;
 +        }
-
++
          let backend = match self.resolve_backend().await {
              Ok(selected) => selected,
+             Err(error) => {
 @@ -1596,6 +1632,7 @@
  #[cfg(feature = "browser-native")]
  mod native_backend {
@@ -167,7 +167,7 @@
 
              if headless {
                  args.push(Value::String("--headless=new".to_string()));
-@@ -2789,6 +2858,57 @@
+@@ -2789,6 +2858,82 @@
  #[cfg(test)]
  mod tests {
      use super::*;
@@ -194,6 +194,31 @@
 +            error.to_string().contains("security.nat64_prefixes"),
 +            "{error}"
 +        );
++    }
++
++    /// The constructor must hand the parsed operator prefixes to the native
++    /// proxy unchanged. `browser::egress` covers that the proxy then refuses a
++    /// translated private or metadata destination; this covers the wiring.
++    #[cfg(feature = "browser-native")]
++    #[test]
++    fn heimdall_browser_retains_configured_nat64_prefixes_for_the_native_proxy() {
++        const PREFIX: &str = "2001:67c:2b0:db32:0:1::/96";
++        let tool = BrowserTool::new_with_backend(
++            Arc::new(SecurityPolicy::default()),
++            vec!["*".into()],
++            None,
++            "rust_native".into(),
++            None,
++            true,
++            "http://127.0.0.1:9515".into(),
++            None,
++            ComputerUseConfig::default(),
++            Vec::new(),
++            vec![PREFIX.into()],
++        )
++        .unwrap();
++        let expected = [crate::helpers::domain_guard::Nat64Prefix::parse(PREFIX).unwrap()];
++        assert_eq!(&tool.nat64_prefixes[..], &expected);
 +    }
 +
 +    #[tokio::test]
@@ -225,7 +250,7 @@
 
      #[test]
      fn validate_url_blocks_ipv6_ssrf() {
-@@ -2868,6 +2988,7 @@
+@@ -2868,6 +3013,7 @@
              None,
              ComputerUseConfig::default(),
              Vec::new(),
@@ -233,7 +258,7 @@
          )
          .unwrap();
          let cmd = tool.agent_browser_command();
-@@ -2896,6 +3017,7 @@
+@@ -2896,6 +3042,7 @@
              None,
              ComputerUseConfig::default(),
              Vec::new(),
@@ -241,7 +266,7 @@
          )
          .unwrap();
          let cmd = tool.agent_browser_command();
-@@ -2924,6 +3046,7 @@
+@@ -2924,6 +3071,7 @@
              None,
              ComputerUseConfig::default(),
              Vec::new(),
@@ -249,7 +274,7 @@
          )
          .unwrap();
          assert_eq!(tool.configured_backend().unwrap(), BrowserBackendKind::Auto);
-@@ -2943,6 +3066,7 @@
+@@ -2943,6 +3091,7 @@
              None,
              ComputerUseConfig::default(),
              Vec::new(),
@@ -257,7 +282,7 @@
          )
          .unwrap();
          assert_eq!(
-@@ -2968,6 +3092,7 @@
+@@ -2968,6 +3117,7 @@
                  ..ComputerUseConfig::default()
              },
              Vec::new(),
@@ -265,7 +290,7 @@
          )
          .unwrap();
 
-@@ -2992,6 +3117,7 @@
+@@ -2992,6 +3142,7 @@
                  ..ComputerUseConfig::default()
              },
              Vec::new(),
@@ -273,15 +298,15 @@
          )
          .unwrap();
 
-@@ -3015,6 +3141,7 @@
-                 max_coordinate_y: Some(100),
+@@ -3016,6 +3167,7 @@
                  ..ComputerUseConfig::default()
              },
-+            Vec::new(),
              Vec::new(),
++            Vec::new(),
          )
          .unwrap();
-@@ -3223,6 +3350,7 @@
+
+@@ -3223,6 +3375,7 @@
                  .into_iter()
                  .map(String::from)
                  .collect(),
@@ -289,15 +314,15 @@
          )
          .unwrap()
      }
-@@ -3681,6 +3809,7 @@
-             "http://127.0.0.1:9515".into(),
+@@ -3682,6 +3835,7 @@
              None,
              test_computer_use_config(),
-+            Vec::new(),
              Vec::new(),
++            Vec::new(),
          )
          .unwrap();
-@@ -4152,6 +4281,7 @@
+
+@@ -4152,6 +4306,7 @@
              None,
              config,
              Vec::new(),
@@ -305,15 +330,7 @@
          )
          .unwrap()
      }
-@@ -4242,6 +4372,7 @@
-             "http://127.0.0.1:9515".into(),
-             None,
-             config,
-+            Vec::new(),
-             Vec::new(),
-         )
-         .unwrap();
-@@ -4311,6 +4442,7 @@
+@@ -4243,6 +4398,7 @@
              None,
              config,
              Vec::new(),
@@ -321,7 +338,15 @@
          )
          .unwrap();
 
-@@ -4382,6 +4514,7 @@
+@@ -4311,6 +4467,7 @@
+             None,
+             config,
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -4382,6 +4539,7 @@
              "http://127.0.0.1:9515".into(),
              None,
              config,
@@ -329,7 +354,7 @@
              Vec::new(),
          )
          .unwrap();
-@@ -4474,6 +4607,7 @@
+@@ -4474,6 +4632,7 @@
              "http://127.0.0.1:9515".into(),
              None,
              config,
@@ -337,7 +362,7 @@
              Vec::new(),
          )
          .unwrap();
-@@ -4629,6 +4763,7 @@
+@@ -4629,6 +4788,7 @@
                  None,
                  config,
                  Vec::new(),
