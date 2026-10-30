@@ -325,5 +325,5 @@ Native Linux execution passed in build-only
 for source `f920c41` (the later verification-only commit changes no build
 input). The image applied the patch chain with zero fuzz, and the same fifteen
 channel, four gateway and one config tests passed, including socket closure with
-denial of new work. Live ACP revocation and the deployed runtime remain
-unverified here; no deployment was performed.
+denial of new work. ACP revocation against a deployed runtime remains unverified
+here; no deployment was performed.
