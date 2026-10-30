@@ -318,7 +318,12 @@ Local macOS runs passed: fifteen `heimdall` tests in `zeroclaw-channels` with
 `channel-telegram,channel-acp-server` (seven ACP revocation cases), four in
 `zeroclaw-gateway` including socket closure and denial of new work, and one in
 `zeroclaw-config` for the revocation watch identity. The tools suite passed 20
-tests with one Railway SDK skip, and `git diff --check` was clean. Native Linux
-contract execution, live ACP revocation and the deployed runtime remain
-unverified here; the build-only workflow validates the patch chain and native
-contract tests.
+tests with one Railway SDK skip, and `git diff --check` was clean.
+
+Native Linux execution passed in build-only
+[run 41014782145](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/41014782145)
+for source `f920c41` (the later verification-only commit changes no build
+input). The image applied the patch chain with zero fuzz, and the same fifteen
+channel, four gateway and one config tests passed, including socket closure with
+denial of new work. Live ACP revocation and the deployed runtime remain
+unverified here; no deployment was performed.
