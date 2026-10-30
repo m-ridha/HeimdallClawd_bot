@@ -434,6 +434,8 @@ enabled = false
 automation_enabled = true
 # The browser-navigation runtime patch forces native requests through a guarded
 # local proxy, including redirects, with DNS addresses checked and pinned.
+# security.nat64_prefixes, when configured, is applied to every proxied
+# destination so NAT64-translated private or metadata addresses are refused.
 backend = "rust_native"
 native_headless = true
 native_webdriver_url = "http://127.0.0.1:9515"

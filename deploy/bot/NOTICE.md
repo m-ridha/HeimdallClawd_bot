@@ -31,7 +31,7 @@ existing Landlock profile.
 | gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
 | sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
 | responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
-| browser-navigation.patch | Validate open URLs before backend dispatch. Force native Chromium HTTP(S)/WebSocket traffic through a local proxy that checks domains and resolved addresses before dialing the pinned socket; disable implicit loopback bypass and direct UDP. |
+| browser-navigation.patch | Validate open URLs before backend dispatch. Force native Chromium HTTP(S)/WebSocket traffic through a local proxy that checks domains, the configured `security.nat64_prefixes` translations and resolved addresses before dialing the pinned socket; disable implicit loopback bypass and direct UDP. |
 | browser-output.patch | Validate each HTTP redirect and pin connections to the checked addresses without proxies. Render fetched content through restricted offline Lynx; reject links/w3m. Bound fetched input and rendered stdout to 500,000 bytes and kill the child on overflow, timeout or cancellation. Upstream hands network access to the external browser and only checks the initial URL. |
 
 AgentMail uses native /sop/* admission and the background SOP driver. Synchronous

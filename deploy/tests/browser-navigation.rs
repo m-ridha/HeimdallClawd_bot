@@ -93,6 +93,9 @@ async fn check_chromium() {
         Some(chrome_binary),
         ComputerUseConfig::default(),
         vec!["127.0.0.1".into()],
+        // Configured NAT64 translation is covered by the proxy's unit tests;
+        // this fixture only has loopback destinations.
+        Vec::new(),
     )
     .unwrap();
     let open = browser
