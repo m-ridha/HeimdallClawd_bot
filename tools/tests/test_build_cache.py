@@ -15,11 +15,13 @@ class NativeTestCacheTests(unittest.TestCase):
             self.assertIn(volatile, executed)
         compile_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in compiled.splitlines() if 'cargo test ' in line]
         run_commands = [line.strip().removeprefix('RUN ').removeprefix('&& ').removesuffix(' \\') for line in executed.splitlines() if 'cargo test ' in line]
-        self.assertEqual(len(compile_commands), 10)
+        self.assertEqual(len(compile_commands), 11)
         self.assertIn('cargo test --locked -p zeroclaw-log --test heimdall_tool_privacy --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-runtime --no-default-features --features observability-otel --lib heimdall_otel --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-providers --lib heimdall --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-gateway --no-default-features --lib heimdall --no-run', compile_commands)
+        self.assertIn('cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram,channel-acp-server --lib heimdall --no-run', compile_commands)
+        self.assertIn('cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --lib heimdall --no-run', compile_commands)
         self.assertIn('cargo test --locked -p zeroclaw-channels --no-default-features --features channel-telegram --test heimdall_logging --test heimdall_transcription --no-run', compile_commands)
         self.assertIn('COPY deploy/tests/browser-output.rs crates/zeroclaw-tools/tests/heimdall_browser_output.rs', compiled)
         self.assertIn('COPY deploy/tests/browser-navigation.rs crates/zeroclaw-tools/tests/heimdall_browser_navigation.rs', compiled)

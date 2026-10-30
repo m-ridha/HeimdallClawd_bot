@@ -69,6 +69,7 @@ provenance = {
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
 }
 patch_files = {
+    'acp_pairing_revocation_patch_sha256': 'acp-pairing-revocation.patch',
     'tool_log_privacy_patch_sha256': 'tool-log-privacy.patch',
     'security_dependencies_patch_sha256': 'security-dependencies.patch',
     'responses_tool_history_patch_sha256': 'responses-tool-history.patch',

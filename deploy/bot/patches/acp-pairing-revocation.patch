@@ -1,0 +1,1211 @@
+--- a/crates/zeroclaw-config/src/pairing.rs
++++ b/crates/zeroclaw-config/src/pairing.rs
+@@ -364,6 +364,8 @@
+     /// (see [`PairingGuard::hold_paired_tokens`]) delays only pairing and
+     /// revocation, not other liveness checks.
+     paired_tokens: Arc<RwLock<HashSet<String>>>,
++    /// Wakes established transports when live pairing membership is revoked.
++    revocations: tokio::sync::watch::Sender<()>,
+     /// Brute-force protection: per-client failed attempt state + last sweep timestamp.
+     failed_attempts: Arc<Mutex<(HashMap<String, FailedAttemptState>, Instant)>>,
+     /// The admin token this gateway run accepts on the pairing-code admin
+@@ -448,6 +450,7 @@
+             require_pairing,
+             pairing_code: Arc::new(Mutex::new(code)),
+             paired_tokens: Arc::new(RwLock::new(tokens)),
++            revocations: tokio::sync::watch::channel(()).0,
+             failed_attempts: Arc::new(Mutex::new((HashMap::new(), Instant::now()))),
+             admin_token: Arc::new(Mutex::new(None)),
+         }
+@@ -719,22 +722,38 @@
+         tokens.iter().cloned().collect()
+     }
+
++    /// Wait for this identity to leave the live paired-token set. Subscribe
++    /// before checking membership so revocation cannot be lost during upgrade.
++    pub async fn wait_token_revoked(&self, token_hash: &str) {
++        let mut changes = self.revocations.subscribe();
++        while self.token_hash_is_paired(token_hash) {
++            if changes.changed().await.is_err() {
++                return;
++            }
++        }
++    }
++
+     pub fn revoke_token(&self, token: &str) -> bool {
+-        let hashed = hash_token(token);
+-        let mut tokens = self.paired_tokens.write();
+-        tokens.remove(&hashed)
++        self.revoke_token_hash(&hash_token(token))
+     }
+
+     /// Revoke a paired token by its SHA-256 hash. Returns true if removed.
+     pub fn revoke_token_hash(&self, token_hash: &str) -> bool {
+         let mut tokens = self.paired_tokens.write();
+-        tokens.remove(token_hash)
++        let removed = tokens.remove(token_hash);
++        if removed {
++            self.revocations.send_replace(());
++        }
++        removed
+     }
+
+     pub fn revoke_all_tokens(&self) -> usize {
+         let mut tokens = self.paired_tokens.write();
+         let count = tokens.len();
+         tokens.clear();
++        if count > 0 {
++            self.revocations.send_replace(());
++        }
+         count
+     }
+
+@@ -916,6 +935,44 @@
+ mod tests {
+     use super::*;
+     use tokio::test;
++
++    #[test]
++    async fn heimdall_acp_revocation_watch_tracks_only_its_identity() {
++        for revoke_method in 0..3 {
++            let guard = new_guard(true, &["fixture-target".into(), "fixture-other".into()]);
++            let target = PairingGuard::token_hash("fixture-target");
++            let mut revoked = Box::pin(guard.wait_token_revoked(&target));
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_pending());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            assert!(guard.revoke_token("fixture-other"));
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_pending());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            match revoke_method {
++                0 => assert!(guard.revoke_token("fixture-target")),
++                1 => assert!(guard.revoke_token_hash(&target)),
++                _ => assert_eq!(guard.revoke_all_tokens(), 1),
++            }
++            // Both an existing subscription and a late subscription must see
++            // revocation, including between upgrade auth and the socket task.
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_ready());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            let mut late = Box::pin(guard.wait_token_revoked(&target));
++            std::future::poll_fn(|cx| {
++                assert!(late.as_mut().poll(cx).is_ready());
++                std::task::Poll::Ready(())
++            })
++            .await;
++        }
++    }
+
+     /// Serializes the tests that either emit or assert-the-absence-of the
+     /// clamp WARN. The log broadcast is process-global, so two overlapping
+--- a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
++++ b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
+@@ -125,7 +125,70 @@
+     Live(zeroclaw_config::live::LiveConfigHandle),
+ }
+
++/// Non-secret identity retained by a paired gateway connection. Stdio and
++/// explicitly unpaired transports retain their existing trusted behavior.
++#[derive(Clone)]
++struct ConnectionPairing {
++    pairing: Arc<zeroclaw_config::pairing::PairingGuard>,
++    token_hash: String,
++}
++
++impl ConnectionPairing {
++    fn hold(&self) -> Result<zeroclaw_config::pairing::HeldPairedTokens<'_>, RpcError> {
++        let held = self.pairing.hold_paired_tokens();
++        if !held.contains_hash(&self.token_hash) {
++            return Err(RpcError {
++                code: AUTH_REQUIRED,
++                message: "ACP pairing was revoked".to_string(),
++                data: None,
++            });
++        }
++        Ok(held)
++    }
++
++    async fn revoked(&self) {
++        self.pairing.wait_token_revoked(&self.token_hash).await;
++    }
++
++    /// Order the first poll of a turn before revocation, without holding a
++    /// synchronous pairing lock across an await. Once admitted, use native
++    /// cancellation so terminal transcript persistence still runs.
++    async fn run_turn<F: std::future::Future>(
++        &self,
++        turn: F,
++        cancel: tokio_util::sync::CancellationToken,
++    ) -> Result<F::Output, RpcError> {
++        let mut turn = std::pin::pin!(turn);
++        let first_poll = std::future::poll_fn(|cx| {
++            let _held = match self.hold() {
++                Ok(held) => held,
++                Err(error) => return std::task::Poll::Ready(Err(error)),
++            };
++            std::task::Poll::Ready(Ok(turn.as_mut().poll(cx)))
++        })
++        .await?;
++        if let std::task::Poll::Ready(result) = first_poll {
++            return Ok(result);
++        }
++        tokio::select! {
++            biased;
++            _ = self.revoked() => {
++                cancel.cancel();
++                Ok(turn.await)
++            }
++            result = &mut turn => Ok(result),
++        }
++    }
++}
++
++fn hold_connection_pairing(
++    pairing: Option<&ConnectionPairing>,
++) -> Result<Option<zeroclaw_config::pairing::HeldPairedTokens<'_>>, RpcError> {
++    pairing.map(ConnectionPairing::hold).transpose()
++}
++
+ pub struct AcpServer {
++    connection_pairing: Option<ConnectionPairing>,
+     /// The sole authority for `Config`-backed settings. Managed stdio and
+     /// gateway ACP resolve their shared authority's config.
+     config_source: ConfigSource,
+@@ -297,6 +360,7 @@
+         store: Option<Arc<AcpSessionStore>>,
+     ) -> Self {
+         Self {
++            connection_pairing: None,
+             config_source,
+             agent_lifecycle,
+             acp_config,
+@@ -313,6 +377,19 @@
+             connection_default_agent: None,
+             client_elicitation_caps: std::sync::RwLock::new(ElicitationCapabilities::default()),
+         }
++    }
++
++    /// Bind only the authenticated digest; never retain the bearer token.
++    pub fn with_connection_pairing(
++        mut self,
++        pairing: Arc<zeroclaw_config::pairing::PairingGuard>,
++        token_hash: Option<String>,
++    ) -> Self {
++        self.connection_pairing = token_hash.map(|token_hash| ConnectionPairing {
++            pairing,
++            token_hash,
++        });
++        self
+     }
+
+     fn config_snapshot(&self) -> Config {
+@@ -583,6 +660,9 @@
+             "ACP server starting (WebSocket/framed mode)"
+         );
+         while let Some(line) = input_rx.recv().await {
++            if hold_connection_pairing(self.connection_pairing.as_ref()).is_err() {
++                break;
++            }
+             let trimmed = line.trim();
+             if trimmed.is_empty() {
+                 continue;
+@@ -594,6 +674,9 @@
+     }
+
+     async fn process_line(self: &Arc<Self>, trimmed: &str) {
++        if hold_connection_pairing(self.connection_pairing.as_ref()).is_err() {
++            return;
++        }
+         // First, peek at whether this is a response (has `result` or
+         // `error`) to a request *we* sent. Inbound requests/notifications
+         // fall through to the JsonRpcRequest path.
+@@ -646,6 +729,13 @@
+     async fn handle_request(&self, request: JsonRpcRequest) {
+         let id = request.id.clone().unwrap_or(Value::Null);
+         let is_notification = request.id.is_none();
++        let denied = hold_connection_pairing(self.connection_pairing.as_ref()).err();
++        if let Some(error) = denied {
++            if !is_notification {
++                self.write_error(id, error.code, &error.message).await;
++            }
++            return;
++        }
+
+         let result = match request.method.as_str() {
+             "initialize" => self.handle_initialize(&request.params),
+@@ -971,6 +1061,7 @@
+                     data: None,
+                 });
+             }
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             loading.insert(session_id.clone());
+         }
+
+@@ -1065,9 +1156,13 @@
+             // authenticated gateway principal, so these sessions are stamped
+             // with a NULL owner -- visible only to unscoped connections, never
+             // to a scoped gateway principal (RFC 7141 F2).
+-            let created =
+-                tokio::task::spawn_blocking(move || store.create_session(&sid, &alias, &wsd, None))
+-                    .await;
++            let pairing = self.connection_pairing.clone();
++            let created = tokio::task::spawn_blocking(move || {
++                let _held = hold_connection_pairing(pairing.as_ref())
++                    .map_err(|error| anyhow::anyhow!(error.message))?;
++                store.create_session(&sid, &alias, &wsd, None)
++            })
++            .await;
+             let error = match created {
+                 Ok(Ok(_)) => None,
+                 Ok(Err(e)) => Some(e.to_string()),
+@@ -1101,6 +1196,7 @@
+             let mut sessions = self.sessions.lock().await;
+             let mut loading = self.loading_sessions.lock().await;
+             loading.remove(&session_id);
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             sessions.insert(
+                 session_id.clone(),
+                 Arc::new(Mutex::new(Session {
+@@ -1178,6 +1274,7 @@
+         let mut restore_gate = self.restore_gate(&session_id);
+         let finalize_gate = self.session_gate(&session_id);
+         let _finalize_guard = finalize_gate.lock().await;
++        drop(hold_connection_pairing(self.connection_pairing.as_ref())?);
+
+         // Atomically check and reserve the session slot
+         {
+@@ -1223,6 +1320,7 @@
+                     data: None,
+                 });
+             }
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             loading.insert(session_id.clone());
+         }
+
+@@ -1408,14 +1506,12 @@
+             }
+         };
+         let now = Instant::now();
+-        // The session is about to become live, so `session/close` owns the gate
+-        // from here on.
+-        restore_gate.disarm();
+         // Atomically insert and release reservation
+         {
+             let mut sessions = self.sessions.lock().await;
+             let mut loading = self.loading_sessions.lock().await;
+             loading.remove(&session_id);
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             sessions.insert(
+                 session_id.clone(),
+                 Arc::new(Mutex::new(Session {
+@@ -1435,6 +1531,9 @@
+                 })),
+             );
+         }
++
++        // Successful publication transfers gate cleanup to `session/close`.
++        restore_gate.disarm();
+
+         if let Some(event) = restore_trim_event
+             && let Some(notification) = notification_for_turn_event(&session_id, &event)
+@@ -1515,6 +1614,7 @@
+         let mut restore_gate = self.restore_gate(&session_id);
+         let finalize_gate = self.session_gate(&session_id);
+         let _finalize_guard = finalize_gate.lock().await;
++        drop(hold_connection_pairing(self.connection_pairing.as_ref())?);
+
+         // Atomically check and reserve the session slot
+         {
+@@ -1560,6 +1660,7 @@
+                     data: None,
+                 });
+             }
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             loading.insert(session_id.clone());
+         }
+
+@@ -1701,14 +1802,12 @@
+             }
+         };
+         let now = Instant::now();
+-        // The session is about to become live, so `session/close` owns the gate
+-        // from here on.
+-        restore_gate.disarm();
+         // Atomically insert and release reservation
+         {
+             let mut sessions = self.sessions.lock().await;
+             let mut loading = self.loading_sessions.lock().await;
+             loading.remove(&session_id);
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
+             sessions.insert(
+                 session_id.clone(),
+                 Arc::new(Mutex::new(Session {
+@@ -1728,6 +1827,9 @@
+                 })),
+             );
+         }
++
++        // Successful publication transfers gate cleanup to `session/close`.
++        restore_gate.disarm();
+
+         if let Some(event) = restore_trim_event
+             && let Some(notification) = notification_for_turn_event(&session_id, &event)
+@@ -1963,14 +2065,18 @@
+             }
+         }
+
+-        let prompt = match Self::materialize_prompt(
+-            params,
+-            if workspace_dir.is_empty() {
+-                None
+-            } else {
+-                Some(Path::new(&workspace_dir))
+-            },
+-        ) {
++        let prompt_result = (|| {
++            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
++            Self::materialize_prompt(
++                params,
++                if workspace_dir.is_empty() {
++                    None
++                } else {
++                    Some(Path::new(&workspace_dir))
++                },
++            )
++        })();
++        let prompt = match prompt_result {
+             Ok(prompt) => prompt,
+             Err(e) => {
+                 // Release the reservation we just took so a bad attachment doesn't
+@@ -2023,6 +2129,7 @@
+         let session_id_for_task = session_id.clone();
+         let persist_store = self.store.clone();
+         let persist_session_id = session_id.clone();
++        let pairing = self.connection_pairing.clone();
+         let turn_handle = zeroclaw_spawn::spawn!(async move {
+             let mut session = session_arc.lock().await;
+             let (turn_alias, turn_provider, turn_model) = session.agent.attribution_fields();
+@@ -2048,7 +2155,7 @@
+                     model = %turn_model,
+                     channel = "acp",
+                 );
+-                zeroclaw_runtime::agent::loop_::scope_session_key(
++                let turn = zeroclaw_runtime::agent::loop_::scope_session_key(
+                     Some(session_id_for_task),
+                     zeroclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+                         cost_context,
+@@ -2057,13 +2164,26 @@
+                             .turn_streamed_with_steering_state(
+                                 &prompt,
+                                 event_tx,
+-                                Some(cancel_token),
++                                Some(cancel_token.clone()),
+                                 None,
+                             )
+                             .instrument(span),
+                     ),
+-                )
+-                .await
++                );
++                if let Some(pairing) = &pairing {
++                    match pairing.run_turn(turn, cancel_token).await {
++                        Ok(result) => result,
++                        Err(error) => {
++                            return TerminalOutcome::Failed {
++                                error: error.message.clone(),
++                                rpc_error: error,
++                                persist_error: None,
++                            };
++                        }
++                    }
++                } else {
++                    turn.await
++                }
+             };
+             session.last_active = Instant::now();
+
+@@ -3846,6 +3966,322 @@
+     use super::*;
+     use async_trait::async_trait;
+
++    fn heimdall_paired_server(
++        cwd: &std::path::Path,
++    ) -> (
++        AcpServer,
++        Arc<zeroclaw_config::pairing::PairingGuard>,
++        Arc<AcpSessionStore>,
++    ) {
++        let token = "fixture-acp-client";
++        let pairing = Arc::new(zeroclaw_config::pairing::PairingGuard::new(
++            true,
++            &[token.to_string()],
++            Default::default(),
++        ));
++        let store = Arc::new(AcpSessionStore::new(cwd).unwrap());
++        let server = AcpServer::new_with_store(
++            make_test_config(cwd),
++            AcpServerConfig::default(),
++            store.clone(),
++        )
++        .with_connection_pairing(
++            pairing.clone(),
++            Some(zeroclaw_config::pairing::PairingGuard::token_hash(token)),
++        );
++        (server, pairing, store)
++    }
++
++    async fn heimdall_poll_pending<F: std::future::Future>(mut future: std::pin::Pin<&mut F>) {
++        std::future::poll_fn(|cx| {
++            assert!(future.as_mut().poll(cx).is_pending());
++            std::task::Poll::Ready(())
++        })
++        .await;
++    }
++
++    #[tokio::test]
++    async fn heimdall_acp_revocation_discards_buffered_and_spawned_requests() {
++        let cwd = tempfile::tempdir().unwrap();
++        let (server, pairing, store) = heimdall_paired_server(cwd.path());
++        let server = Arc::new(server);
++        let request = serde_json::json!({
++            "jsonrpc": "2.0", "id": 1, "method": "session/new",
++            "params": {"agentAlias": "test-agent", "cwd": cwd.path()}
++        })
++        .to_string();
++        // process_line spawns the handler, but this current-thread test has not
++        // yielded to it. The handler must recheck after it is scheduled.
++        let (writer, mut output) = mpsc::channel(8);
++        let (spawned, spawned_pairing, spawned_store) = heimdall_paired_server(cwd.path());
++        let mut spawned = spawned;
++        spawned.rpc = Arc::new(RpcOutbound::new(writer));
++        let spawned = Arc::new(spawned);
++        spawned.process_line(&request).await;
++        spawned_pairing.revoke_all_tokens();
++        let reply = tokio::time::timeout(Duration::from_secs(5), output.recv())
++            .await
++            .unwrap()
++            .unwrap();
++        let reply: Value = serde_json::from_str(&reply).unwrap();
++        assert_eq!(reply["error"]["code"], AUTH_REQUIRED);
++        assert!(spawned.sessions.lock().await.is_empty());
++        assert!(spawned_store.list_sessions().unwrap().is_empty());
++
++        let (input, receiver) = mpsc::channel(8);
++        input.send(request).await.unwrap();
++        pairing.revoke_all_tokens();
++        drop(input);
++        server.clone().run_messages(receiver).await.unwrap();
++        assert!(server.sessions.lock().await.is_empty());
++        assert!(store.list_sessions().unwrap().is_empty());
++    }
++
++    #[tokio::test]
++    async fn heimdall_acp_revocation_while_new_waits_prevents_persistence() {
++        let cwd = tempfile::tempdir().unwrap();
++        let (server, pairing, store) = heimdall_paired_server(cwd.path());
++        let slots = server.sessions.lock().await;
++        let params = serde_json::json!({"agentAlias":"test-agent", "cwd":cwd.path()});
++        let mut creation = Box::pin(server.handle_session_new(&params));
++        heimdall_poll_pending(creation.as_mut()).await;
++        pairing.revoke_all_tokens();
++        drop(slots);
++        assert_eq!(creation.await.unwrap_err().code, AUTH_REQUIRED);
++        assert!(store.list_sessions().unwrap().is_empty());
++        assert!(server.loading_sessions.lock().await.is_empty());
++    }
++
++    #[tokio::test]
++    async fn heimdall_acp_revocation_while_prompt_waits_does_not_start_turn() {
++        for wait_on_turn_mutex in [false, true] {
++            let cwd = tempfile::tempdir().unwrap();
++            let (server, pairing, store) = heimdall_paired_server(cwd.path());
++            let created = server
++                .handle_session_new(&serde_json::json!({
++                    "agentAlias":"test-agent", "cwd":cwd.path()
++                }))
++                .await
++                .unwrap();
++            let sid = created["sessionId"].as_str().unwrap();
++            let session = server.sessions.lock().await.get(sid).unwrap().clone();
++            let requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
++            session
++                .lock()
++                .await
++                .agent
++                .set_model_provider(Box::new(RecordingNativeProvider {
++                    requests: requests.clone(),
++                }));
++            let gate = server.session_gate(sid);
++            let gate_hold = if wait_on_turn_mutex {
++                None
++            } else {
++                Some(gate.lock().await)
++            };
++            let session_hold = if wait_on_turn_mutex {
++                Some(session.lock().await)
++            } else {
++                None
++            };
++            let params = if wait_on_turn_mutex {
++                serde_json::json!({"sessionId":sid,"prompt":"fixture prompt"})
++            } else {
++                serde_json::json!({"sessionId":sid,"prompt":[{
++                    "type":"resource", "resource":{"uri":"file:///fixture.bin","blob":"aGVsbG8="}
++                }]})
++            };
++            let request_id = serde_json::json!(1);
++            let mut prompt = Box::pin(server.handle_session_prompt(&params, &request_id));
++            heimdall_poll_pending(prompt.as_mut()).await;
++            pairing.revoke_all_tokens();
++            drop(gate_hold);
++            drop(session_hold);
++            let error = tokio::time::timeout(Duration::from_secs(5), prompt)
++                .await
++                .unwrap()
++                .unwrap_err();
++            assert_eq!(error.code, AUTH_REQUIRED);
++            assert!(
++                requests.lock().is_empty(),
++                "revoked queued prompt reached provider"
++            );
++            assert!(
++                store
++                    .load_session(sid)
++                    .unwrap()
++                    .unwrap()
++                    .messages
++                    .is_empty()
++            );
++            assert!(session.lock().await.agent.history().is_empty());
++            assert!(server.cancel_tokens.lock().unwrap().is_empty());
++            assert!(!cwd.path().join("uploads").exists());
++        }
++    }
++
++    #[tokio::test]
++    async fn heimdall_acp_revocation_cancels_active_turn_and_persists_it() {
++        struct PausedProvider(Arc<tokio::sync::Notify>);
++        impl zeroclaw_api::attribution::Attributable for PausedProvider {
++            fn role(&self) -> zeroclaw_api::attribution::Role {
++                zeroclaw_api::attribution::Role::Provider(
++                    zeroclaw_api::attribution::ProviderKind::Model(
++                        zeroclaw_api::attribution::ModelProviderKind::Custom,
++                    ),
++                )
++            }
++            fn alias(&self) -> &str {
++                "PausedProvider"
++            }
++        }
++        #[async_trait]
++        impl ModelProvider for PausedProvider {
++            async fn chat_with_system(
++                &self,
++                _: Option<&str>,
++                _: &str,
++                _: &str,
++                _: Option<f64>,
++            ) -> anyhow::Result<String> {
++                unreachable!("native chat is used")
++            }
++            async fn chat(
++                &self,
++                _: zeroclaw_api::model_provider::ChatRequest<'_>,
++                _: &str,
++                _: Option<f64>,
++            ) -> anyhow::Result<zeroclaw_api::model_provider::ChatResponse> {
++                self.0.notify_one();
++                std::future::pending().await
++            }
++        }
++        let cwd = tempfile::tempdir().unwrap();
++        let (server, pairing, store) = heimdall_paired_server(cwd.path());
++        let server = Arc::new(server);
++        let created = server
++            .handle_session_new(&serde_json::json!({
++                "agentAlias":"test-agent", "cwd":cwd.path()
++            }))
++            .await
++            .unwrap();
++        let sid = created["sessionId"].as_str().unwrap().to_string();
++        let entered = Arc::new(tokio::sync::Notify::new());
++        server
++            .sessions
++            .lock()
++            .await
++            .get(&sid)
++            .unwrap()
++            .lock()
++            .await
++            .agent
++            .set_model_provider(Box::new(PausedProvider(entered.clone())));
++        let prompt_server = server.clone();
++        let prompt_sid = sid.clone();
++        let prompt = tokio::spawn(async move {
++            prompt_server
++                .handle_session_prompt(
++                    &serde_json::json!({"sessionId":prompt_sid,"prompt":"fixture active turn"}),
++                    &serde_json::json!(2),
++                )
++                .await
++        });
++        tokio::time::timeout(Duration::from_secs(5), entered.notified())
++            .await
++            .unwrap();
++        pairing.revoke_all_tokens();
++        let result = tokio::time::timeout(Duration::from_secs(5), prompt)
++            .await
++            .unwrap()
++            .unwrap()
++            .unwrap();
++        assert_eq!(result["stopReason"], "cancelled");
++        let transcript = store.load_session(&sid).unwrap().unwrap();
++        assert!(
++            !transcript.messages.is_empty(),
++            "cancelled turn must be durable before handler completes"
++        );
++        assert!(server.cancel_tokens.lock().unwrap().is_empty());
++        assert!(server.session_gate(&sid).try_lock().is_ok());
++    }
++
++    #[tokio::test]
++    async fn heimdall_acp_revocation_while_restore_waits_reclaims_gate() {
++        for resume in [false, true] {
++            let cwd = tempfile::tempdir().unwrap();
++            let (server, pairing, store) = heimdall_paired_server(cwd.path());
++            let sid = "fixture-restored-session";
++            store
++                .create_session(sid, "test-agent", cwd.path().to_str().unwrap(), None)
++                .unwrap();
++            let gate = server.session_gate(sid);
++            let held = gate.lock().await;
++            let params = serde_json::json!({"sessionId":sid});
++            let mut restore = Box::pin(async {
++                if resume {
++                    server.handle_session_resume(&params).await
++                } else {
++                    server.handle_session_load(&params).await
++                }
++            });
++            heimdall_poll_pending(restore.as_mut()).await;
++            pairing.revoke_all_tokens();
++            drop(held);
++            drop(gate);
++            assert_eq!(restore.await.unwrap_err().code, AUTH_REQUIRED);
++            assert!(server.sessions.lock().await.is_empty());
++            assert!(server.loading_sessions.lock().await.is_empty());
++            assert!(server.session_gates.lock().unwrap().is_empty());
++            assert!(
++                store
++                    .load_session(sid)
++                    .unwrap()
++                    .unwrap()
++                    .messages
++                    .is_empty()
++            );
++        }
++    }
++
++    #[test]
++    fn heimdall_acp_revocation_before_blocking_persistence_does_not_create_session() {
++        // Keep the blocking pool occupied so asynchronous agent preparation or
++        // its persistence job is queued until after the credential is revoked.
++        let runtime = tokio::runtime::Builder::new_current_thread()
++            .enable_all()
++            .max_blocking_threads(1)
++            .build()
++            .unwrap();
++        runtime.block_on(async {
++            let cwd = tempfile::tempdir().unwrap();
++            let (server, pairing, store) = heimdall_paired_server(cwd.path());
++            let (release, blocked) = std::sync::mpsc::channel();
++            let (entered, started) = tokio::sync::oneshot::channel();
++            let blocker = tokio::task::spawn_blocking(move || {
++                entered.send(()).unwrap();
++                blocked.recv().unwrap();
++            });
++            started.await.unwrap();
++            let params = serde_json::json!({"agentAlias":"test-agent", "cwd":cwd.path()});
++            let mut creation = Box::pin(server.handle_session_new(&params));
++            heimdall_poll_pending(creation.as_mut()).await;
++            assert_eq!(server.loading_sessions.lock().await.len(), 1);
++            pairing.revoke_all_tokens();
++            release.send(()).unwrap();
++            blocker.await.unwrap();
++            assert!(
++                tokio::time::timeout(Duration::from_secs(5), creation)
++                    .await
++                    .unwrap()
++                    .is_err()
++            );
++            assert!(store.list_sessions().unwrap().is_empty());
++            assert!(server.sessions.lock().await.is_empty());
++            assert!(server.loading_sessions.lock().await.is_empty());
++        });
++    }
++
+     fn valid_1x1_png() -> Vec<u8> {
+         let mut bytes = std::io::Cursor::new(Vec::new());
+         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+--- a/crates/zeroclaw-gateway/src/acp.rs
++++ b/crates/zeroclaw-gateway/src/acp.rs
+@@ -34,16 +34,21 @@
+     headers: HeaderMap,
+     ws: WebSocketUpgrade,
+ ) -> impl IntoResponse {
+-    if state.pairing.require_pairing() {
++    let token_hash = if state.pairing.require_pairing() {
+         let token = extract_ws_token(&headers, params.token.as_deref()).unwrap_or("");
+-        if !state.pairing.is_authenticated(token) {
+-            return (
+-                axum::http::StatusCode::UNAUTHORIZED,
+-                "Unauthorized - provide Authorization header, Sec-WebSocket-Protocol bearer, or ?token= query param",
+-            )
+-                .into_response();
+-        }
+-    }
++        match state.pairing.authenticate_and_hash(token) {
++            Some(hash) => Some(hash),
++            None => {
++                return (
++                    axum::http::StatusCode::UNAUTHORIZED,
++                    "Unauthorized - provide Authorization header, Sec-WebSocket-Protocol bearer, or ?token= query param",
++                )
++                    .into_response();
++            }
++        }
++    } else {
++        None
++    };
+
+     let ws = if headers
+         .get("sec-websocket-protocol")
+@@ -55,11 +60,16 @@
+         ws
+     };
+
+-    ws.on_upgrade(move |socket| handle_socket(socket, state, params.agent))
++    ws.on_upgrade(move |socket| handle_socket(socket, state, params.agent, token_hash))
+         .into_response()
+ }
+
+-async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option<String>) {
++async fn handle_socket(
++    socket: WebSocket,
++    state: AppState,
++    default_agent: Option<String>,
++    token_hash: Option<String>,
++) {
+     let (mut sender, mut receiver) = socket.split();
+     let (input_tx, input_rx) = mpsc::channel::<String>(256);
+     let (output_tx, mut output_rx) = mpsc::channel::<String>(256);
+@@ -93,7 +103,8 @@
+             )
+             .with_canvas_store(canvas_store)
+             .with_sop_engine(state.sop_engine.clone(), state.sop_audit.clone())
+-            .with_connection_default_agent(default_agent),
++            .with_connection_default_agent(default_agent)
++            .with_connection_pairing(state.pairing.clone(), token_hash.clone()),
+         )
+     } else {
+         Arc::new(
+@@ -105,67 +116,108 @@
+             )
+             .with_canvas_store(canvas_store)
+             .with_sop_engine(state.sop_engine.clone(), state.sop_audit.clone())
+-            .with_connection_default_agent(default_agent),
++            .with_connection_default_agent(default_agent)
++            .with_connection_pairing(state.pairing.clone(), token_hash.clone()),
+         )
+     };
+
+     let server_task = zeroclaw_spawn::spawn!(Arc::clone(&server).run_messages(input_rx));
+
+-    let output_task = zeroclaw_spawn::spawn!(async move {
+-        while let Some(line) = output_rx.recv().await {
+-            if sender.send(Message::Text(line.into())).await.is_err() {
+-                break;
+-            }
+-        }
+-    });
+-
+-    while let Some(message) = receiver.next().await {
+-        match message {
+-            Ok(Message::Text(text)) => {
+-                if input_tx.send(text.to_string()).await.is_err() {
++    let revoked = {
++        let output = async {
++            while let Some(line) = output_rx.recv().await {
++                if sender.send(Message::Text(line.into())).await.is_err() {
+                     break;
+                 }
+             }
+-            Ok(Message::Binary(bytes)) => match String::from_utf8(bytes.to_vec()) {
+-                Ok(text) => {
+-                    if input_tx.send(text).await.is_err() {
++        };
++
++        let input = async {
++            while let Some(message) = receiver.next().await {
++                match message {
++                    Ok(Message::Text(text)) => {
++                        if input_tx.send(text.to_string()).await.is_err() {
++                            break;
++                        }
++                    }
++                    Ok(Message::Binary(bytes)) => match String::from_utf8(bytes.to_vec()) {
++                        Ok(text) => {
++                            if input_tx.send(text).await.is_err() {
++                                break;
++                            }
++                        }
++                        Err(e) => ::zeroclaw_log::record!(
++                            WARN,
++                            ::zeroclaw_log::Event::new(
++                                module_path!(),
++                                ::zeroclaw_log::Action::Note
++                            )
++                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
++                            .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
++                            "ACP WebSocket received non-UTF-8 binary frame"
++                        ),
++                    },
++                    Ok(Message::Close(_)) => break,
++                    Ok(Message::Ping(_) | Message::Pong(_)) => {}
++                    Err(e) => {
++                        let msg = e.to_string();
++                        if msg.contains("Connection reset without closing handshake")
++                            || msg.contains("Connection closed normally")
++                        {
++                            ::zeroclaw_log::record!(
++                                DEBUG,
++                                ::zeroclaw_log::Event::new(
++                                    module_path!(),
++                                    ::zeroclaw_log::Action::Note
++                                ),
++                                "ACP WebSocket closed without handshake"
++                            );
++                        } else {
++                            ::zeroclaw_log::record!(
++                                WARN,
++                                ::zeroclaw_log::Event::new(
++                                    module_path!(),
++                                    ::zeroclaw_log::Action::Note
++                                )
++                                .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
++                                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
++                                "ACP WebSocket receive error"
++                            );
++                        }
+                         break;
+                     }
+                 }
+-                Err(e) => ::zeroclaw_log::record!(
+-                    WARN,
+-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+-                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+-                    "ACP WebSocket received non-UTF-8 binary frame"
+-                ),
+-            },
+-            Ok(Message::Close(_)) => break,
+-            Ok(Message::Ping(_) | Message::Pong(_)) => {}
+-            Err(e) => {
+-                let msg = e.to_string();
+-                if msg.contains("Connection reset without closing handshake")
+-                    || msg.contains("Connection closed normally")
+-                {
+-                    ::zeroclaw_log::record!(
+-                        DEBUG,
+-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+-                        "ACP WebSocket closed without handshake"
+-                    );
+-                } else {
+-                    ::zeroclaw_log::record!(
+-                        WARN,
+-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+-                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+-                            .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+-                        "ACP WebSocket receive error"
+-                    );
+-                }
+-                break;
+-            }
+-        }
++            }
++        };
++        let revocation = async {
++            if let Some(hash) = token_hash.as_deref() {
++                state.pairing.wait_token_revoked(hash).await;
++            } else {
++                std::future::pending::<()>().await;
++            }
++        };
++        tokio::select! {
++            biased;
++            _ = revocation => true,
++            _ = input => false,
++            _ = output => false,
++        }
++    };
++    if revoked {
++        // The peer may have stopped reading. Bound the close handshake; dropping
++        // both halves below still disconnects it if the close frame cannot drain.
++        let _ = tokio::time::timeout(
++            std::time::Duration::from_secs(1),
++            sender.send(Message::Close(Some(axum::extract::ws::CloseFrame {
++                code: axum::extract::ws::close_code::POLICY,
++                reason: "ACP pairing was revoked".into(),
++            }))),
++        )
++        .await;
+     }
+-
++    drop(sender);
++    drop(receiver);
++    drop(output_rx);
+     drop(input_tx);
+
+     if let Err(e) = server_task.await {
+@@ -177,7 +229,6 @@
+             "ACP WebSocket server task panicked"
+         );
+     }
+-    output_task.abort();
+     ::zeroclaw_log::record!(
+         DEBUG,
+         ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+@@ -377,4 +428,226 @@
+              return the per-agent workspace, not the daemon CWD"
+         );
+     }
++    #[tokio::test]
++    async fn heimdall_acp_revocation_closes_existing_sockets_and_denies_new_work() {
++        use crate::api_pairing::{DeviceInfo, DeviceRegistry};
++        use tokio::io::{AsyncReadExt, AsyncWriteExt};
++        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
++        use zeroclaw_config::pairing::PairingGuard;
++        use zeroclaw_infra::acp_session_store::AcpSessionStore;
++
++        type Client = tokio_tungstenite::WebSocketStream<
++            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
++        >;
++        async fn closed(ws: &mut Client) {
++            let message = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
++                .await
++                .expect("revocation must close an idle socket")
++                .unwrap()
++                .unwrap();
++            match message {
++                Message::Close(Some(frame)) => assert_eq!(
++                    frame.code,
++                    tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode::Policy,
++                ),
++                other => panic!("expected policy close, got {other:?}"),
++            }
++        }
++        async fn http(port: u16, method: &str, path: &str, auth: &str) -> String {
++            let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
++                .await
++                .unwrap();
++            stream.write_all(format!(
++                "{method} {path} HTTP/1.1\r\nHost: localhost\r\n{auth}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
++            ).as_bytes()).await.unwrap();
++            let mut response = String::new();
++            tokio::time::timeout(
++                std::time::Duration::from_secs(5),
++                stream.read_to_string(&mut response),
++            )
++            .await
++            .unwrap()
++            .unwrap();
++            response
++        }
++        async fn create_session(ws: &mut Client, id: u64) {
++            ws.send(Message::Text(
++                serde_json::json!({
++                    "jsonrpc":"2.0", "id":id, "method":"session/new",
++                    "params":{"agentAlias":"test-agent"}
++                })
++                .to_string()
++                .into(),
++            ))
++            .await
++            .unwrap();
++            tokio::time::timeout(std::time::Duration::from_secs(10), async {
++                loop {
++                    let message = ws.next().await.unwrap().unwrap();
++                    if let Message::Text(text) = message {
++                        let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
++                        if reply["id"] == id {
++                            assert!(reply["result"]["sessionId"].is_string(), "{reply}");
++                            break;
++                        }
++                    }
++                }
++            })
++            .await
++            .unwrap();
++        }
++
++        let _pricing_binding = crate::PRICING_BINDING_TEST_LOCK.lock().await;
++        let tmp = tempfile::tempdir().unwrap();
++        let mut cfg = front_door_config(tmp.path());
++        cfg.gateway.require_pairing = true;
++        cfg.gateway.paired_tokens = vec!["fixture-revoked".into(), "fixture-kept".into()];
++        std::fs::create_dir_all(&cfg.data_dir).unwrap();
++        cfg.save().await.unwrap();
++        let data_dir = cfg.data_dir.clone();
++        let registry = DeviceRegistry::new(&data_dir);
++        registry
++            .register(
++                PairingGuard::token_hash("fixture-revoked"),
++                DeviceInfo {
++                    id: "fixture-device".into(),
++                    name: None,
++                    device_type: None,
++                    paired_at: chrono::Utc::now(),
++                    last_seen: chrono::Utc::now(),
++                    ip_address: None,
++                    capabilities: None,
++                },
++            )
++            .unwrap();
++        drop(registry);
++        let probe = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
++        let port = probe.local_addr().unwrap().port();
++        drop(probe);
++        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
++        let (reload_tx, _reload_rx) = tokio::sync::watch::channel(false);
++        let controls =
++            zeroclaw_runtime::daemon::GatewayReloadControls::standalone(shutdown_tx, reload_tx);
++        let server = zeroclaw_spawn::spawn!(crate::run_gateway(
++            "127.0.0.1",
++            port,
++            cfg,
++            None,
++            Some(controls),
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++            None,
++        ));
++        tokio::time::timeout(std::time::Duration::from_secs(5), async {
++            loop {
++                if tokio::net::TcpStream::connect(("127.0.0.1", port))
++                    .await
++                    .is_ok()
++                {
++                    break;
++                }
++                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
++            }
++        })
++        .await
++        .unwrap();
++        let url = format!("ws://127.0.0.1:{port}/acp");
++        let mut sockets = Vec::new();
++        // Exercise every existing authentication carrier. Only token hashes
++        // should survive the upgrade, regardless of how the token arrived.
++        for carrier in 0..3 {
++            let mut request = if carrier == 2 {
++                format!("{url}?token=fixture-revoked")
++                    .into_client_request()
++                    .unwrap()
++            } else {
++                url.clone().into_client_request().unwrap()
++            };
++            if carrier == 0 {
++                request
++                    .headers_mut()
++                    .insert("authorization", "Bearer fixture-revoked".parse().unwrap());
++            } else if carrier == 1 {
++                request.headers_mut().insert(
++                    "sec-websocket-protocol",
++                    "zeroclaw.acp.v1, bearer.fixture-revoked".parse().unwrap(),
++                );
++            }
++            sockets.push(tokio_tungstenite::connect_async(request).await.unwrap().0);
++        }
++        let mut kept_request = url.clone().into_client_request().unwrap();
++        kept_request
++            .headers_mut()
++            .insert("authorization", "Bearer fixture-kept".parse().unwrap());
++        let (mut kept, _) = tokio_tungstenite::connect_async(kept_request.clone())
++            .await
++            .unwrap();
++        create_session(&mut sockets[0], 1).await;
++        let response = http(
++            port,
++            "DELETE",
++            "/api/devices/fixture-device",
++            "Authorization: Bearer fixture-kept",
++        )
++        .await;
++        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
++        // A formerly paired client can try to enqueue new work while closure
++        // propagates. Neither its transport nor the ACP queue may admit it.
++        let _ = sockets[0]
++            .send(Message::Text(
++                serde_json::json!({
++                    "jsonrpc":"2.0", "id":2, "method":"session/new",
++                    "params":{"agentAlias":"test-agent"}
++                })
++                .to_string()
++                .into(),
++            ))
++            .await;
++        for ws in &mut sockets {
++            closed(ws).await;
++        }
++        let denied = tokio_tungstenite::connect_async(format!("{url}?token=fixture-revoked"))
++            .await
++            .unwrap_err();
++        match denied {
++            tokio_tungstenite::tungstenite::Error::Http(response) => {
++                assert_eq!(response.status(), 401)
++            }
++            other => panic!("expected unauthorized upgrade, got {other}"),
++        }
++        create_session(&mut kept, 3).await;
++        let store = AcpSessionStore::new(&data_dir).unwrap();
++        assert_eq!(
++            store.list_sessions().unwrap().len(),
++            2,
++            "revoked work must not create a session"
++        );
++
++        let admin_token = zeroclaw_config::pairing::read_gateway_admin_token(&data_dir).unwrap();
++        let response = http(
++            port,
++            "POST",
++            "/admin/paircode/new?rotate=all",
++            &format!("x-zeroclaw-admin-token: {admin_token}"),
++        )
++        .await;
++        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
++        closed(&mut kept).await;
++        let denied = tokio_tungstenite::connect_async(kept_request)
++            .await
++            .unwrap_err();
++        match denied {
++            tokio_tungstenite::tungstenite::Error::Http(response) => {
++                assert_eq!(response.status(), 401)
++            }
++            other => panic!("expected unauthorized upgrade, got {other}"),
++        }
++        assert_eq!(store.list_sessions().unwrap().len(), 2);
++        server.abort();
++        assert!(server.await.unwrap_err().is_cancelled());
++    }
+ }
