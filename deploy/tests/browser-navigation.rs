@@ -128,3 +128,83 @@ async fn check_chromium() {
         "a denied browser request reached loopback"
     );
 }
+
+#[tokio::test]
+async fn heimdall_browser_nat64_rejects_translated_private_destination() {
+    tokio::time::timeout(Duration::from_secs(60), check_nat64_rejection())
+        .await
+        .unwrap();
+}
+
+async fn check_nat64_rejection() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let driver_port = reservation.local_addr().unwrap().port();
+    drop(reservation);
+
+    let driver_binary = std::env::var("HEIMDALL_TEST_CHROMEDRIVER")
+        .unwrap_or_else(|_| "/usr/bin/chromedriver".into());
+    let chrome_binary =
+        std::env::var("HEIMDALL_TEST_CHROMIUM").unwrap_or_else(|_| "/usr/bin/chromium".into());
+    let mut driver = tokio::process::Command::new(driver_binary)
+        .arg(format!("--port={driver_port}"))
+        .arg("--allowed-ips=127.0.0.1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, driver_port))
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            assert!(
+                driver.try_wait().unwrap().is_none(),
+                "ChromeDriver exited before readiness"
+            );
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    // A configured NAT64 prefix is passed through BrowserTool construction to
+    // the native proxy. A destination inside the prefix that embeds a private
+    // address (10.0.0.1) must be rejected before Chromium dials it.
+    let browser = BrowserTool::new_with_backend(
+        Arc::new(SecurityPolicy::default()),
+        vec!["*".into()],
+        None,
+        "rust_native".into(),
+        None,
+        true,
+        format!("http://127.0.0.1:{driver_port}"),
+        Some(chrome_binary),
+        ComputerUseConfig::default(),
+        Vec::new(),
+        vec!["2001:67c:2b0:db32:0:1::/96".into()],
+    )
+    .unwrap();
+
+    let result = browser
+        .execute(json!({
+            "action": "open",
+            "url": "http://[2001:67c:2b0:db32:0:1:a00:1]/image"
+        }))
+        .await
+        .unwrap();
+
+    assert!(
+        !result.success,
+        "translated private destination should be rejected: {result:?}"
+    );
+
+    driver.kill().await.unwrap();
+}
