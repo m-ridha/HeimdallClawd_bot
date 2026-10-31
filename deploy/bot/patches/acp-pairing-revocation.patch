@@ -1209,3 +1209,170 @@
 +        assert!(server.await.unwrap_err().is_cancelled());
 +    }
  }
+--- a/crates/zeroclaw-gateway/src/ws.rs
++++ b/crates/zeroclaw-gateway/src/ws.rs
+@@ -499,6 +499,22 @@ async fn handle_socket(
+
+     loop {
+         let first = tokio::select! {
++            biased;
++            _ = async {
++                if let Some(ref hash) = auth_subject {
++                    state.pairing.wait_token_revoked(hash).await;
++                } else {
++                    std::future::pending::<()>().await;
++                }
++            } => {
++                let err = serde_json::json!({
++                    "type": "error",
++                    "message": "Session pairing was revoked",
++                    "code": "AUTH_REQUIRED"
++                });
++                let _ = sender.send(Message::Text(err.to_string().into())).await;
++                return;
++            }
+             first = receiver.next() => first,
+             _ = tick_websocket_ping(&mut ping_interval) => {
+                 if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+@@ -799,6 +815,23 @@ async fn handle_socket(
+
+     loop {
+         tokio::select! {
++            biased;
++            _ = async {
++                if let Some(ref hash) = auth_subject {
++                    state.pairing.wait_token_revoked(hash).await;
++                } else {
++                    std::future::pending::<()>().await;
++                }
++            } => {
++                let err = serde_json::json!({
++                    "type": "error",
++                    "message": "Session pairing was revoked",
++                    "code": "AUTH_REQUIRED"
++                });
++                let _ = sender.send(Message::Text(err.to_string().into())).await;
++                break;
++            }
++
+             // ── Keepalive ─────────────────────────────────────────────
+             _ = tick_websocket_ping(&mut ping_interval) => {
+                 if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
+@@ -834,6 +867,18 @@ async fn handle_socket(
+                     }
+                 };
+
++                if let Some(ref hash) = auth_subject {
++                    if !state.pairing.token_hash_is_paired(hash) {
++                        let err = serde_json::json!({
++                            "type": "error",
++                            "message": "Session pairing was revoked",
++                            "code": "AUTH_REQUIRED"
++                        });
++                        let _ = sender.send(Message::Text(err.to_string().into())).await;
++                        break;
++                    }
++                }
++
+                 let msg_type = parsed["type"].as_str().unwrap_or("");
+
+                 // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
+@@ -1876,6 +1921,23 @@ async fn process_chat_message(
+         loop {
+             tokio::select! {
+                             biased;
++                            _ = async {
++                                if let Some(hash) = auth_subject {
++                                    state.pairing.wait_token_revoked(hash).await;
++                                } else {
++                                    std::future::pending::<()>().await;
++                                }
++                            }, if !client_gone => {
++                                let err = serde_json::json!({
++                                    "type": "error",
++                                    "message": "Session pairing was revoked",
++                                    "code": "AUTH_REQUIRED"
++                                });
++                                let _ = sender.send(Message::Text(err.to_string().into())).await;
++                                cancel_token.cancel();
++                                detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                client_gone = true;
++                            }
+                             _ = cancel_token.cancelled(), if !cancel_drained => {
+                                 let drained: Vec<_> = pending_approvals.lock().drain().collect();
+                                 drop(drained);
+@@ -1911,6 +1973,20 @@ async fn process_chat_message(
+                                     let _ = sender.send(Message::Text(err.to_string().into())).await;
+                                     continue;
+                                 };
++                                if let Some(hash) = auth_subject {
++                                    if !state.pairing.token_hash_is_paired(hash) {
++                                        let err = serde_json::json!({
++                                            "type": "error",
++                                            "message": "Session pairing was revoked",
++                                            "code": "AUTH_REQUIRED"
++                                        });
++                                        let _ = sender.send(Message::Text(err.to_string().into())).await;
++                                        cancel_token.cancel();
++                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                        client_gone = true;
++                                        continue;
++                                    }
++                                }
+                                 match parsed["type"].as_str() {
+                                     Some("approval_response") => {
+                                         // A SOP-kind frame is a gate resolution (keyed by run_id),
+@@ -4802,6 +4878,53 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+         );
+     }
+
++    #[tokio::test]
++    async fn ws_chat_pairing_revocation_closes_connection_and_rejects_subsequent_turns() {
++        use futures_util::StreamExt as _;
++        use zeroclaw_config::pairing::{PairingCodePolicy, PairingGuard};
++        let mut config = zeroclaw_config::schema::Config::default();
++        config.gateway.require_pairing = true;
++        let agent = zeroclaw_config::schema::AliasedAgentConfig::default();
++        config.agents.insert("default".into(), agent);
++        let mut state = crate::api::test_state(config);
++        let token = "ws-chat-token";
++        let token_hash = PairingGuard::token_hash(token);
++        state.pairing = Arc::new(PairingGuard::new(
++            true,
++            &[token.to_string()],
++            PairingCodePolicy::default(),
++        ));
++        let app = Router::new()
++            .route("/ws/chat", get(handle_ws_chat))
++            .with_state(state.clone());
++        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++        let port = listener.local_addr().unwrap().port();
++        let server = zeroclaw_spawn::spawn!(async move {
++            axum::serve(listener, app).await.unwrap();
++        });
++        let url = format!("ws://127.0.0.1:{port}/ws/chat?agent=default&token={token}");
++        let (mut ws, _) = connect_async(url).await.unwrap();
++        let frame = ws.next().await.unwrap().unwrap();
++        assert!(frame.to_text().unwrap().contains("session_start"));
++
++        // Revoke the token
++        assert!(state.pairing.revoke_token_hash(&token_hash));
++
++        // The socket should observe the revocation, send AUTH_REQUIRED error and close
++        let mut got_auth_required = false;
++        while let Some(Ok(msg)) = ws.next().await {
++            if let Ok(text) = msg.to_text() {
++                if text.contains("AUTH_REQUIRED") {
++                    got_auth_required = true;
++                    break;
++                }
++            }
++        }
++        assert!(got_auth_required, "expected AUTH_REQUIRED on revocation");
++
++        server.abort();
++    }
++
+     /// done-frame model_context_window: present when the provider has an
+     /// explicit `context_window`, absent when it does not.
+     #[test]

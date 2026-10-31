@@ -1,6 +1,28 @@
+diff --git a/crates/zeroclaw-channels/src/telegram.rs b/crates/zeroclaw-channels/src/telegram.rs
+index 7c2ae3a..2a3a988 100644
 --- a/crates/zeroclaw-channels/src/telegram.rs
 +++ b/crates/zeroclaw-channels/src/telegram.rs
-@@ -6917,6 +6917,18 @@
+@@ -3197,6 +3197,9 @@ impl TelegramChannel {
+
+     fn extract_media_group_key(update: &serde_json::Value) -> Option<MediaGroupKey> {
+         let message = update.get("message")?;
++        if message.pointer("/chat/type").and_then(serde_json::Value::as_str) != Some("private") {
++            return None;
++        }
+         let chat_id = message
+             .get("chat")
+             .and_then(|chat| chat.get("id"))
+@@ -5085,6 +5088,9 @@ Allowlist Telegram username (without '@') or numeric user ID.",
+         let Some(anchor_message) = anchor_update.get("message") else {
+             return UpdateDisposition::SkipPermanent;
+         };
++        if anchor_message.pointer("/chat/type").and_then(serde_json::Value::as_str) != Some("private") {
++            return UpdateDisposition::SkipPermanent;
++        }
+         let anchor_scope = Self::media_group_scope(anchor_message);
+         let supported_share_scope = ordered.iter().all(|update| {
+             update.get("message").is_some_and(|message| {
+@@ -6917,6 +6923,18 @@ Allowlist Telegram username (without '@') or numeric user ID.",
      ) -> UpdateOutcome {
          let uid = update.get("update_id").and_then(serde_json::Value::as_i64);
 
@@ -19,7 +41,7 @@
          // ── Handle callback_query (inline keyboard taps) ──
          if let Some(cb) = update.get("callback_query") {
              let cb_data = cb
-@@ -24248,3 +24260,53 @@
+@@ -24248,3 +24266,82 @@ mod tests {
          assert!(cb_data.strip_prefix("approval:").is_none());
      }
  }
@@ -44,6 +66,35 @@
 +    }
 +
 +    use super::*;
++    #[tokio::test]
++    async fn heimdall_group_media_groups_are_not_grouped_or_admitted() {
++        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(|| vec!["1001".into()]), false)
++            .with_ack_reactions(false).with_api_base("http://127.0.0.1:9".into());
++        for kind in ["group", "supergroup", "channel", ""] {
++            let update = serde_json::json!({
++                "update_id": 12,
++                "message": {
++                    "message_id": 100,
++                    "media_group_id": "album-1",
++                    "chat": {"id": -1001, "type": kind},
++                    "from": {"id": 1001, "first_name": "Owner"},
++                    "caption": "@fixture_assistant_bot look at this",
++                    "photo": [{"file_id": "photo-1", "width": 100, "height": 100}]
++                }
++            });
++            assert!(TelegramChannel::extract_media_group_key(&update).is_none());
++            let (tx, mut rx) = tokio::sync::mpsc::channel(1);
++            let mut retry = None;
++            let outcome = channel.process_update(&update, &tx, &mut retry).await;
++            assert!(matches!(outcome, UpdateOutcome::Advanced));
++            assert!(rx.try_recv().is_err());
++            assert!(matches!(
++                channel.try_parse_media_group_with_unsupported(&[update], &[]).await,
++                UpdateDisposition::SkipPermanent
++            ));
++        }
++    }
++
 +    #[tokio::test]
 +    async fn heimdall_reject_non_private_updates() {
 +        let channel = TelegramChannel::new("test-token".into(), "home", Arc::new(|| vec!["1001".into()]), false)

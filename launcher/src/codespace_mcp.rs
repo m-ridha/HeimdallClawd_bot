@@ -314,6 +314,17 @@ struct Codespaces {
     token: String,
     repos: Vec<String>,
 }
+fn validate_command(command: &str) -> Result<&str, String> {
+    if command.is_empty()
+        || command.len() > MAX_COMMAND
+        || command.contains('\0')
+        || command.trim_start().starts_with('-')
+    {
+        return Err("Command must contain 1-8192 bytes and cannot start with '-'".into());
+    }
+    Ok(command)
+}
+
 impl Codespaces {
     fn from_env() -> Result<Self, String> {
         let token =
@@ -489,15 +500,19 @@ impl Codespaces {
                         deadline,
                     ),
                     _ => {
-                        let command = args["command"].as_str().unwrap_or("");
-                        if command.is_empty()
-                            || command.len() > MAX_COMMAND
-                            || command.contains('\0')
-                        {
-                            return Err("Command must contain 1-8192 bytes".into());
-                        }
+                        let command = validate_command(args["command"].as_str().unwrap_or(""))?;
                         self.gh(
-                            &["codespace", "ssh", "--codespace", name, "--", command],
+                            &[
+                                "codespace",
+                                "ssh",
+                                "--codespace",
+                                name,
+                                "--",
+                                "sh",
+                                "-c",
+                                "--",
+                                command,
+                            ],
                             deadline,
                         )
                     }
@@ -617,6 +632,24 @@ mod tests {
         }
         assert!(!called);
     }
+    #[test]
+    fn exec_command_validation_rejects_empty_oversized_and_option_prefixed_commands() {
+        assert!(validate_command("").is_err());
+        assert!(validate_command("-oProxyCommand=touch /tmp/marker").is_err());
+        assert!(validate_command("  -oProxyCommand=id").is_err());
+        assert!(validate_command("-v").is_err());
+        assert!(validate_command("--version").is_err());
+        assert!(validate_command("   --flag").is_err());
+        assert!(validate_command(&"a".repeat(MAX_COMMAND + 1)).is_err());
+        assert!(validate_command("echo hello\0world").is_err());
+        assert_eq!(validate_command("ls -la").unwrap(), "ls -la");
+        assert_eq!(validate_command("git status").unwrap(), "git status");
+        assert_eq!(
+            validate_command("cargo test --locked").unwrap(),
+            "cargo test --locked"
+        );
+    }
+
     #[test]
     fn notifications_never_execute_and_valid_calls_reach_the_runner() {
         assert!(
