@@ -139,6 +139,15 @@ async fn heimdall_browser_nat64_rejects_translated_private_destination() {
 async fn check_nat64_rejection() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
+    let source = MockServer::start().await;
+    Mock::given(path("/reachable"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"<!doctype html><title>reachable fixture</title><p>ok</p>"#,
+            "text/html",
+        ))
+        .mount(&source)
+        .await;
+
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let driver_port = reservation.local_addr().unwrap().port();
     drop(reservation);
@@ -178,6 +187,8 @@ async fn check_nat64_rejection() {
     // A configured NAT64 prefix is passed through BrowserTool construction to
     // the native proxy. A destination inside the prefix that embeds a private
     // address (10.0.0.1) must be rejected before Chromium dials it.
+    // The reachable loopback fixture address is explicitly allowed so liveliness
+    // can be verified before and after the rejection.
     let browser = BrowserTool::new_with_backend(
         Arc::new(SecurityPolicy::default()),
         vec!["*".into()],
@@ -188,11 +199,25 @@ async fn check_nat64_rejection() {
         format!("http://127.0.0.1:{driver_port}"),
         Some(chrome_binary),
         ComputerUseConfig::default(),
-        Vec::new(),
+        vec!["127.0.0.1".into()],
         vec!["2001:67c:2b0:db32:0:1::/96".into()],
     )
     .unwrap();
 
+    // 1. Verify proxy liveliness: a permitted destination loads successfully.
+    let reachable_before = browser
+        .execute(json!({
+            "action": "open",
+            "url": format!("{}/reachable", source.uri())
+        }))
+        .await
+        .unwrap();
+    assert!(
+        reachable_before.success,
+        "reachable destination should load through the proxy: {reachable_before:?}"
+    );
+
+    // 2. Translated private destination inside the configured NAT64 prefix must be rejected.
     let result = browser
         .execute(json!({
             "action": "open",
@@ -206,5 +231,22 @@ async fn check_nat64_rejection() {
         "translated private destination should be rejected: {result:?}"
     );
 
+    // 3. Verify proxy remains operational after rejection: permitted destination loads again.
+    let reachable_after = browser
+        .execute(json!({
+            "action": "open",
+            "url": format!("{}/reachable", source.uri())
+        }))
+        .await
+        .unwrap();
+    assert!(
+        reachable_after.success,
+        "proxy should remain operational after rejecting destination: {reachable_after:?}"
+    );
+
+    let closed = browser.execute(json!({"action":"close"})).await.unwrap();
+    assert!(closed.success);
+    drop(browser);
+    source.verify().await;
     driver.kill().await.unwrap();
 }
