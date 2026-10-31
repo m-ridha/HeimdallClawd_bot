@@ -415,7 +415,11 @@ backend dispatch. Native Chromium sends HTTP(S) and WebSocket requests, includin
 redirects, through that proxy; implicit loopback bypass and non-proxied UDP are
 disabled. The proxy checks the browser domain/private-host lists, rejects cloud
 metadata and mixed public/private DNS answers, and dials only the checked IP
-addresses. It bounds connections and closes tunnels when the tool is dropped.
+addresses. The browser constructor also parses `security.nat64_prefixes` and
+passes them to destination validation, so an apparently global IPv6 answer that
+the deployment's translator maps to a private or metadata IPv4 address is
+refused rather than dialed. It bounds connections and closes tunnels when the
+tool is dropped.
 The proxy runs beside the local WebDriver; remote browser backends do not acquire
 this native transport guard. Runtime overrides selecting another backend need
 their own egress controls.

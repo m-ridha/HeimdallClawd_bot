@@ -327,3 +327,28 @@ input). The image applied the patch chain with zero fuzz, and the same fifteen
 channel, four gateway and one config tests passed, including socket closure with
 denial of new work. ACP revocation against a deployed runtime remains unverified
 here; no deployment was performed.
+
+## Browser proxy NAT64 destination boundary — 2026-10-30
+
+A review of the browser-navigation patch found the native Chromium proxy called
+`ResolvedDestination::new` with an empty NAT64 prefix list, so a hostname that
+resolved inside the deployment's network-specific NAT64 prefix could reach a
+private or metadata IPv4 destination despite the private-network policy. The
+browser constructor now parses `security.nat64_prefixes` and fails construction
+on a malformed entry, and the parsed list reaches every proxied GET, CONNECT,
+redirect and subresource destination.
+
+New `heimdall` unit tests cover the translated private and metadata addresses,
+a still-reachable global translation, and that a valid configured prefix is
+parsed and retained for the native proxy by the tool constructor. Against the
+previous empty-prefix sink the classification test fails; with the fix it
+passes. The patch was regenerated and applies with zero fuzz to a fresh
+checksum-verified extraction, after which `cargo check` for `zeroclaw-tools`
+with and without `browser-native`, `cargo check` for `zeroclaw-runtime` with the
+production tool features, and the nine `heimdall` tool unit tests passed on
+macOS. A Chromium end-to-end fixture cannot establish the refusal on its own:
+without a routed NAT64 prefix, an attempted dial fails and the proxy returns the
+same 403 as a policy denial. The classification test is therefore the
+deterministic regression. The Linux Chromium contract test compiles against the
+new constructor but was not executed here; live browser behavior and the NAT64
+network path remain unverified locally.

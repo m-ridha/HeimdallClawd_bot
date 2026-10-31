@@ -21,25 +21,77 @@
  # SaaS and coding-CLI integrations. Each is opt-in; the root crate forwards
 --- a/crates/zeroclaw-tools/src/browser.rs
 +++ b/crates/zeroclaw-tools/src/browser.rs
-@@ -1,4 +1,7 @@
+@@ -1,5 +1,8 @@
  //! Browser automation tool with pluggable backends.
-+
+
 +#[cfg(feature = "browser-native")]
 +mod egress;
-
++
  use crate::helpers::domain_guard;
  use anyhow::Context;
-@@ -752,6 +755,9 @@
+ use async_trait::async_trait;
+@@ -72,6 +75,10 @@
+     native_webdriver_url: String,
+     #[cfg(feature = "browser-native")]
+     native_chrome_path: Option<String>,
++    /// Parsed `security.nat64_prefixes`; the native proxy classifies every
++    /// destination under these prefixes before dialing it.
++    #[cfg(feature = "browser-native")]
++    nat64_prefixes: Arc<[domain_guard::Nat64Prefix]>,
+     computer_use: ComputerUseConfig,
+     #[cfg(feature = "browser-native")]
+     native_state: tokio::sync::Mutex<native_backend::NativeBrowserState>,
+@@ -219,6 +226,7 @@
+             None,
+             ComputerUseConfig::default(),
+             Vec::new(),
++            Vec::new(),
+         )
+     }
+
+@@ -234,9 +242,18 @@
+         native_chrome_path: Option<String>,
+         computer_use: ComputerUseConfig,
+         allowed_private_hosts: Vec<String>,
++        nat64_prefixes: Vec<String>,
+     ) -> anyhow::Result<Self> {
+         #[cfg(not(feature = "browser-native"))]
+         let _ = (native_headless, &native_webdriver_url, &native_chrome_path);
++        // Malformed operator prefixes must fail construction rather than
++        // silently widen the destination boundary to "no NAT64 configured".
++        let nat64_prefixes =
++            domain_guard::parse_nat64_prefixes(&nat64_prefixes, "security.nat64_prefixes")?;
++        #[cfg(feature = "browser-native")]
++        let nat64_prefixes = Arc::<[domain_guard::Nat64Prefix]>::from(nat64_prefixes);
++        #[cfg(not(feature = "browser-native"))]
++        let _ = nat64_prefixes;
+         Ok(Self {
+             security,
+             allowed_domains: domain_guard::normalize_allowed_domains(
+@@ -258,6 +275,8 @@
+             #[cfg(feature = "browser-native")]
+             native_chrome_path,
+             computer_use,
++            #[cfg(feature = "browser-native")]
++            nat64_prefixes,
+             #[cfg(feature = "browser-native")]
+             native_state: tokio::sync::Mutex::new(native_backend::NativeBrowserState::default()),
+         })
+@@ -752,6 +771,13 @@
          #[cfg(feature = "browser-native")]
          {
              let mut state = self.native_state.lock().await;
 +            state
-+                .ensure_proxy(&self.allowed_domains, &self.allowed_private_hosts)
++                .ensure_proxy(
++                    &self.allowed_domains,
++                    &self.allowed_private_hosts,
++                    &self.nat64_prefixes,
++                )
 +                .await?;
 
              let first_attempt = state
                  .execute_action(
-@@ -1536,6 +1542,16 @@
+@@ -1536,6 +1562,16 @@
          // Rate limiting is applied by the RateLimitedTool wrapper at
          // registration time (see zeroclaw-runtime::tools::mod).
 
@@ -56,7 +108,15 @@
          let backend = match self.resolve_backend().await {
              Ok(selected) => selected,
              Err(error) => {
-@@ -1608,9 +1624,24 @@
+@@ -1596,6 +1632,7 @@
+ #[cfg(feature = "browser-native")]
+ mod native_backend {
+     use super::BrowserAction;
++    use crate::helpers::domain_guard::Nat64Prefix;
+     use anyhow::{Context, Result};
+     use base64::Engine;
+     use fantoccini::actions::{InputSource, MouseActions, PointerAction};
+@@ -1608,9 +1645,29 @@
      #[derive(Default)]
      pub struct NativeBrowserState {
          client: Option<Client>,
@@ -68,11 +128,16 @@
 +            &mut self,
 +            domains: &[String],
 +            private_hosts: &[String],
++            nat64_prefixes: &[Nat64Prefix],
 +        ) -> Result<()> {
 +            if self.proxy.is_none() {
 +                self.proxy = Some(
-+                    super::egress::BrowserProxy::start(domains.to_vec(), private_hosts.to_vec())
-+                        .await?,
++                    super::egress::BrowserProxy::start(
++                        domains.to_vec(),
++                        private_hosts.to_vec(),
++                        nat64_prefixes.to_vec(),
++                    )
++                    .await?,
 +                );
 +            }
 +            Ok(())
@@ -81,7 +146,7 @@
          pub fn is_available(
              _headless: bool,
              webdriver_url: &str,
-@@ -1976,7 +2007,19 @@
+@@ -1976,7 +2033,19 @@
 
              let mut capabilities: Map<String, Value> = Map::new();
              let mut chrome_options: Map<String, Value> = Map::new();
@@ -102,10 +167,60 @@
 
              if headless {
                  args.push(Value::String("--headless=new".to_string()));
-@@ -2790,6 +2833,33 @@
+@@ -2789,6 +2858,82 @@
+ #[cfg(test)]
  mod tests {
      use super::*;
-
++
++    #[test]
++    fn heimdall_browser_rejects_malformed_nat64_prefixes_at_construction() {
++        let result = BrowserTool::new_with_backend(
++            Arc::new(SecurityPolicy::default()),
++            vec!["*".into()],
++            None,
++            "rust_native".into(),
++            None,
++            true,
++            "http://127.0.0.1:9515".into(),
++            None,
++            ComputerUseConfig::default(),
++            Vec::new(),
++            vec!["2001:db8::/97".into()],
++        );
++        let Err(error) = result else {
++            panic!("a malformed security.nat64_prefixes entry must fail construction");
++        };
++        assert!(
++            error.to_string().contains("security.nat64_prefixes"),
++            "{error}"
++        );
++    }
++
++    /// The constructor must hand the parsed operator prefixes to the native
++    /// proxy unchanged. `browser::egress` covers that the proxy then refuses a
++    /// translated private or metadata destination; this covers the wiring.
++    #[cfg(feature = "browser-native")]
++    #[test]
++    fn heimdall_browser_retains_configured_nat64_prefixes_for_the_native_proxy() {
++        const PREFIX: &str = "2001:67c:2b0:db32:0:1::/96";
++        let tool = BrowserTool::new_with_backend(
++            Arc::new(SecurityPolicy::default()),
++            vec!["*".into()],
++            None,
++            "rust_native".into(),
++            None,
++            true,
++            "http://127.0.0.1:9515".into(),
++            None,
++            ComputerUseConfig::default(),
++            Vec::new(),
++            vec![PREFIX.into()],
++        )
++        .unwrap();
++        let expected = [crate::helpers::domain_guard::Nat64Prefix::parse(PREFIX).unwrap()];
++        assert_eq!(&tool.nat64_prefixes[..], &expected);
++    }
++
 +    #[tokio::test]
 +    async fn heimdall_open_validates_before_discovering_any_backend() {
 +        for backend in ["rust_native", "agent_browser", "computer_use", "auto"] {
@@ -132,13 +247,132 @@
 +            }
 +        }
 +    }
-+
+
      #[test]
      fn validate_url_blocks_ipv6_ssrf() {
-         let security = Arc::new(SecurityPolicy::default());
+@@ -2868,6 +3013,7 @@
+             None,
+             ComputerUseConfig::default(),
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+         let cmd = tool.agent_browser_command();
+@@ -2896,6 +3042,7 @@
+             None,
+             ComputerUseConfig::default(),
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+         let cmd = tool.agent_browser_command();
+@@ -2924,6 +3071,7 @@
+             None,
+             ComputerUseConfig::default(),
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+         assert_eq!(tool.configured_backend().unwrap(), BrowserBackendKind::Auto);
+@@ -2943,6 +3091,7 @@
+             None,
+             ComputerUseConfig::default(),
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+         assert_eq!(
+@@ -2968,6 +3117,7 @@
+                 ..ComputerUseConfig::default()
+             },
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -2992,6 +3142,7 @@
+                 ..ComputerUseConfig::default()
+             },
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -3016,6 +3167,7 @@
+                 ..ComputerUseConfig::default()
+             },
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -3223,6 +3375,7 @@
+                 .into_iter()
+                 .map(String::from)
+                 .collect(),
++            Vec::new(),
+         )
+         .unwrap()
+     }
+@@ -3682,6 +3835,7 @@
+             None,
+             test_computer_use_config(),
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -4152,6 +4306,7 @@
+             None,
+             config,
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap()
+     }
+@@ -4243,6 +4398,7 @@
+             None,
+             config,
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -4311,6 +4467,7 @@
+             None,
+             config,
+             Vec::new(),
++            Vec::new(),
+         )
+         .unwrap();
+
+@@ -4382,6 +4539,7 @@
+             "http://127.0.0.1:9515".into(),
+             None,
+             config,
++            Vec::new(),
+             Vec::new(),
+         )
+         .unwrap();
+@@ -4474,6 +4632,7 @@
+             "http://127.0.0.1:9515".into(),
+             None,
+             config,
++            Vec::new(),
+             Vec::new(),
+         )
+         .unwrap();
+@@ -4629,6 +4788,7 @@
+                 None,
+                 config,
+                 Vec::new(),
++                Vec::new(),
+             )
+             .unwrap();
+
 --- a/crates/zeroclaw-tools/src/browser/egress.rs
 +++ b/crates/zeroclaw-tools/src/browser/egress.rs
-@@ -0,0 +1,416 @@
+@@ -0,0 +1,497 @@
 +//! Chromium HTTP egress: authorize every request/CONNECT and dial the checked DNS result.
 +use crate::helpers::domain_guard;
 +use anyhow::{Context, Result, bail};
@@ -154,7 +388,7 @@
 +use tokio::net::{TcpListener, TcpStream};
 +use tokio::sync::{Semaphore, watch};
 +use tokio::task::{JoinHandle, JoinSet};
-+use zeroclaw_infra::net_guard::{PrivateNetworkAccess, ResolvedDestination};
++use zeroclaw_infra::net_guard::{Nat64Prefix, PrivateNetworkAccess, ResolvedDestination};
 +
 +const CONNECTION_LIMIT: usize = 64;
 +const SETUP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -175,13 +409,18 @@
 +}
 +
 +impl BrowserProxy {
-+    pub(super) async fn start(domains: Vec<String>, private_hosts: Vec<String>) -> Result<Self> {
++    pub(super) async fn start(
++        domains: Vec<String>,
++        private_hosts: Vec<String>,
++        nat64_prefixes: Vec<Nat64Prefix>,
++    ) -> Result<Self> {
 +        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
 +        let address = listener.local_addr()?;
 +        let (cancel, receiver) = watch::channel(());
 +        let policy = Arc::new(ProxyPolicy {
 +            domains,
 +            private_hosts,
++            nat64_prefixes,
 +            connections: Arc::new(Semaphore::new(CONNECTION_LIMIT)),
 +            cancel: receiver,
 +        });
@@ -232,6 +471,9 @@
 +struct ProxyPolicy {
 +    domains: Vec<String>,
 +    private_hosts: Vec<String>,
++    /// `security.nat64_prefixes`, parsed once by the browser constructor. Every
++    /// destination is classified under these prefixes before it is dialed.
++    nat64_prefixes: Vec<Nat64Prefix>,
 +    connections: Arc<Semaphore>,
 +    cancel: watch::Receiver<()>,
 +}
@@ -278,7 +520,7 @@
 +            port,
 +            addresses,
 +            access,
-+            &[],
++            &self.nat64_prefixes,
 +        )?)
 +    }
 +
@@ -393,7 +635,9 @@
 +    async fn heimdall_proxy_blocks_private_http_and_connect_without_dialing() {
 +        let target = TcpListener::bind("127.0.0.1:0").await.unwrap();
 +        let port = target.local_addr().unwrap().port();
-+        let proxy = BrowserProxy::start(vec!["*".into()], vec![]).await.unwrap();
++        let proxy = BrowserProxy::start(vec!["*".into()], vec![], Vec::new())
++            .await
++            .unwrap();
 +        for host in ["127.0.0.1", "localhost", "[::1]", "[::ffff:127.0.0.1]"] {
 +            for line in [
 +                format!("GET http://{host}:{port}/ HTTP/1.1\r\nHost: {host}\r\n\r\n"),
@@ -419,6 +663,7 @@
 +        let policy = ProxyPolicy {
 +            domains: vec!["*".into()],
 +            private_hosts: vec![],
++            nat64_prefixes: Vec::new(),
 +            connections: Arc::new(Semaphore::new(1)),
 +            cancel: receiver,
 +        };
@@ -456,6 +701,7 @@
 +        let restricted = ProxyPolicy {
 +            domains: vec!["allowed.example".into()],
 +            private_hosts: vec!["*".into()],
++            nat64_prefixes: Vec::new(),
 +            connections: Arc::new(Semaphore::new(1)),
 +            cancel: policy.cancel.clone(),
 +        };
@@ -478,7 +724,7 @@
 +
 +    #[tokio::test]
 +    async fn heimdall_proxy_routes_each_http_request_and_closes_tunnels_on_drop() {
-+        let proxy = BrowserProxy::start(vec!["*".into()], vec!["127.0.0.1".into()])
++        let proxy = BrowserProxy::start(vec!["*".into()], vec!["127.0.0.1".into()], Vec::new())
 +            .await
 +            .unwrap();
 +        let stream = TcpStream::connect(proxy.address()).await.unwrap();
@@ -554,7 +800,86 @@
 +            0
 +        );
 +    }
++
++    /// Both proxied request shapes must refuse a translated private or metadata
++    /// destination. `heimdall_proxy_nat64_prefixes_keep_global_translations_reachable`
++    /// is the deterministic classification check; this one also drives the
++    /// request path that carries redirects, subresources and click targets.
++    #[tokio::test]
++    async fn heimdall_proxy_denies_requests_behind_configured_nat64_prefixes() {
++        const PREFIX: &str = "2001:67c:2b0:db32:0:1::/96";
++        let proxy = BrowserProxy::start(
++            vec!["*".into()],
++            vec![],
++            vec![Nat64Prefix::parse(PREFIX).unwrap()],
++        )
++        .await
++        .unwrap();
++        // A redirect Location, a subresource or a click target arrives through
++        // these same two request shapes, so both must be refused before dialing.
++        for host in [
++            "[2001:67c:2b0:db32:0:1:a00:1]",     // 10.0.0.1
++            "[2001:67c:2b0:db32:0:1:a9fe:a9fe]", // 169.254.169.254
++        ] {
++            for line in [
++                format!("GET http://{host}:80/image HTTP/1.1\r\nHost: {host}\r\n\r\n"),
++                format!("CONNECT {host}:443 HTTP/1.1\r\nHost: {host}\r\n\r\n"),
++            ] {
++                let mut browser = TcpStream::connect(proxy.address()).await.unwrap();
++                browser.write_all(line.as_bytes()).await.unwrap();
++                let mut response = [0; 1024];
++                let count = browser.read(&mut response).await.unwrap();
++                assert!(response[..count].starts_with(b"HTTP/1.1 403"), "{line}");
++            }
++        }
++    }
++
++    #[test]
++    fn heimdall_proxy_nat64_prefixes_keep_global_translations_reachable() {
++        let prefixes = vec![Nat64Prefix::parse("2001:67c:2b0:db32:0:1::/96").unwrap()];
++        let policy = ProxyPolicy {
++            domains: vec!["*".into()],
++            private_hosts: vec![],
++            nat64_prefixes: prefixes,
++            connections: Arc::new(Semaphore::new(1)),
++            cancel: watch::channel(()).1,
++        };
++        // 2001:67c:2b0:db32:0:1:5db8:d822 embeds 93.184.216.34.
++        let global = "2001:67c:2b0:db32:0:1:5db8:d822";
++        let pin = policy
++            .checked_destination(global, 443, [format!("[{global}]:443").parse().unwrap()])
++            .unwrap();
++        assert_eq!(
++            pin.addresses(),
++            &[format!("[{global}]:443").parse::<SocketAddr>().unwrap()]
++        );
++        for embedded in [
++            "2001:67c:2b0:db32:0:1:c0a8:101",
++            "2001:67c:2b0:db32:0:1:a9fe:a9fe",
++        ] {
++            assert!(
++                policy
++                    .checked_destination(
++                        embedded,
++                        443,
++                        [format!("[{embedded}]:443").parse().unwrap()]
++                    )
++                    .is_err(),
++                "{embedded} embeds a private or metadata address"
++            );
++        }
++    }
 +}
+--- a/crates/zeroclaw-runtime/src/tools/mod.rs
++++ b/crates/zeroclaw-runtime/src/tools/mod.rs
+@@ -1960,6 +1960,7 @@
+                 max_coordinate_y: browser_config.computer_use.max_coordinate_y,
+             },
+             browser_config.allowed_private_hosts.clone(),
++            root_config.security.nat64_prefixes.clone(),
+         ) {
+             Ok(tool) => {
+                 tool_arcs.push(Arc::new(RateLimitedTool::new(tool, security.clone())));
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -14567,6 +14567,9 @@
