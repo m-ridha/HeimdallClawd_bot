@@ -47,7 +47,7 @@ transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
 mcp_bundles = ["skills", "transfer", "codespace", "mail"]
-skill_bundles = ["managed", "ponytail", "superpowers"]
+skill_bundles = ["managed", "ponytail", "superpowers", "ecc"]
 cron_jobs = []
 acp_enable_mcp = true
 
@@ -325,6 +325,9 @@ directory = "shared/skills/ponytail"
 
 [skill_bundles.superpowers]
 directory = "shared/skills/superpowers"
+
+[skill_bundles.ecc]
+directory = "shared/skills/ecc"
 
 [heartbeat]
 enabled = true

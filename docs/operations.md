@@ -203,7 +203,7 @@ then assigns all registered bundles to primary: managed first, extras sorted.
 A redeploy therefore needs no `--refresh-skills` command while this volume and
 its saved config remain intact. An unregistered directory is not auto-discovered.
 
-The template already declares managed, ponytail and superpowers. These declarations
+The template already declares managed, ponytail, superpowers and ecc. These declarations
 do not download skills. Template-defined bundles return at startup even if their
 saved definitions were removed; removing a default requires a template change.
 Other native bundle removals are respected. Saved non-managed directory mappings

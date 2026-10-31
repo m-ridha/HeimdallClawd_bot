@@ -91,7 +91,7 @@ normal restart/redeploy. To attach a newly registered bundle without restarting,
 run heimdall-launcher --refresh-skills, then authenticated dashboard reload.
 Installing into an attached bundle needs no assignment refresh; reload if the
 running agent does not see the new skill. Verify with skills list --agent primary
-and an actual task. The managed, ponytail and superpowers template entries are
+and an actual task. The managed, ponytail, superpowers and ecc template entries are
 bundle registrations, not downloaded skill contents. Bulk Open Skills sync is
 disabled while its upstream repository is unavailable; registry installation and
 persistent bundles remain available. A registered MCP server or plugin still

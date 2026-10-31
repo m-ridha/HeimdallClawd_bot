@@ -25,6 +25,10 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
         .as_table_mut()
         .unwrap()
         .insert("ponytail".into(), toml::Value::Table(Default::default()));
+    installed["skill_bundles"]
+        .as_table_mut()
+        .unwrap()
+        .insert("ecc".into(), toml::Value::Table(Default::default()));
     installed["gateway"]["require_pairing"] = false.into();
     installed["web_search"]
         .as_table_mut()
@@ -41,6 +45,7 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
         &[
             toml::Value::from("managed"),
             toml::Value::from("custom-workflow"),
+            toml::Value::from("ecc"),
             toml::Value::from("ponytail"),
             toml::Value::from("superpowers")
         ]
@@ -74,7 +79,19 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
 #[test]
 fn first_boot_and_managed_policy_stay_template_owned() {
     let original = base();
-    assert_eq!(attach(&original, None).unwrap(), original);
+    let attached = attach(&original, None).unwrap();
+    let cfg: toml::Value = toml::from_str(&attached).unwrap();
+    assert_eq!(
+        cfg["agents"]["primary"]["skill_bundles"]
+            .as_array()
+            .unwrap(),
+        &[
+            toml::Value::from("managed"),
+            toml::Value::from("ecc"),
+            toml::Value::from("ponytail"),
+            toml::Value::from("superpowers")
+        ]
+    );
     let saved = "[skill_bundles.managed]\ndirectory = 'shared/elsewhere'\n";
     let cfg: toml::Value = toml::from_str(&attach(&original, Some(saved)).unwrap()).unwrap();
     assert_eq!(
@@ -86,7 +103,7 @@ fn first_boot_and_managed_policy_stay_template_owned() {
             .as_array()
             .unwrap()
             .len(),
-        3
+        4
     );
 }
 
