@@ -73,17 +73,22 @@ fn bootstrap_does_not_follow_state_symlinks_and_keeps_secrets_out_of_config() {
     // Root bootstrap restores UID 1000 ownership and mode 0600 on pre-existing state files.
     fs::remove_dir_all("/data/zeroclaw").unwrap();
     fs::create_dir_all("/data/zeroclaw").unwrap();
-    fs::write("/data/zeroclaw/config.toml", "schema_version = 3\n").unwrap();
+    fs::write("/data/zeroclaw/config.toml", "invalid = [\n").unwrap();
     unsafe {
         assert_eq!(libc::chown(c"/data/zeroclaw/config.toml".as_ptr(), 0, 0), 0);
         assert_eq!(
-            libc::chmod(c"/data/zeroclaw/config.toml".as_ptr(), 0o600),
+            libc::chmod(c"/data/zeroclaw/config.toml".as_ptr(), 0o644),
             0
         );
     }
     let restored = launch();
     assert!(!restored.status.success());
-    assert!(String::from_utf8_lossy(&restored.stderr).contains("ChatGPT sign-in required"));
+    assert!(
+        String::from_utf8_lossy(&restored.stderr)
+            .contains("Invalid saved skill bundle configuration"),
+        "launcher failed with unexpected error: {}",
+        String::from_utf8_lossy(&restored.stderr)
+    );
     assert_eq!(
         fs::metadata("/data/zeroclaw/config.toml").unwrap().uid(),
         1000
