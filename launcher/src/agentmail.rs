@@ -53,7 +53,7 @@ pub struct Filter {
     sop: Option<String>,
 }
 impl Filter {
-    fn sender_matches(&self, message: &Value) -> bool {
+    fn mailbox_matches(&self, message: &Value) -> bool {
         // Match the entire mailbox, never a display-name substring.
         let Some(from) = message["from"].as_str() else {
             return false;
@@ -86,6 +86,9 @@ impl Filter {
             from
         };
         !mailbox.contains([',', ';']) && mailbox.trim().eq_ignore_ascii_case(&self.sender)
+    }
+    fn sender_matches(&self, message: &Value) -> bool {
+        self.mailbox_matches(message) && is_authenticated_sender(&self.sender, message)
     }
     fn matches(&self, message: &Value) -> bool {
         self.sender_matches(message)
@@ -451,13 +454,82 @@ async fn async_state<T: Send + 'static>(
         .map_err(|_| failure())?
 }
 
+fn is_authenticated_sender(sender: &str, message: &Value) -> bool {
+    let Some(sender_domain) = sender
+        .split('@')
+        .nth(1)
+        .map(|d| d.trim().to_ascii_lowercase())
+    else {
+        return false;
+    };
+    if sender_domain.is_empty() {
+        return false;
+    }
+    let Some(auth) = message
+        .get("authentication_results")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    let domain_matches = |domain: &str| -> bool {
+        let domain = domain.trim().to_ascii_lowercase();
+        domain == sender_domain || domain.ends_with(&format!(".{sender_domain}"))
+    };
+    if auth
+        .get("dmarc")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.eq_ignore_ascii_case("pass"))
+    {
+        if let Some(domain) = auth
+            .get("dmarc_domain")
+            .or_else(|| auth.get("domain"))
+            .and_then(Value::as_str)
+        {
+            return domain_matches(domain);
+        }
+        return true;
+    }
+    if auth
+        .get("dkim")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.eq_ignore_ascii_case("pass"))
+        && auth
+            .get("dkim_domain")
+            .and_then(Value::as_str)
+            .is_some_and(domain_matches)
+    {
+        return true;
+    }
+    if auth
+        .get("spf")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.eq_ignore_ascii_case("pass"))
+        && auth
+            .get("spf_domain")
+            .and_then(Value::as_str)
+            .is_some_and(domain_matches)
+    {
+        return true;
+    }
+    false
+}
+
 fn needs_body(filters: &[Filter], message: &Value) -> bool {
     message["body_url"].is_string()
         && !message["extracted_text"].is_string()
         && !message["text"].is_string()
         && filters
             .iter()
-            .any(|f| f.sender_matches(message) && !f.matches(message))
+            .any(|f| f.mailbox_matches(message) && !f.matches(message))
+}
+
+fn needs_fetch(filters: &[Filter], message: &Value) -> bool {
+    let candidate = filters.iter().any(|f| f.mailbox_matches(message));
+    if !candidate {
+        return false;
+    }
+    let missing_auth = message.get("authentication_results").is_none();
+    missing_auth || needs_body(filters, message)
 }
 
 fn response(status: StatusCode, text: &'static str) -> Response<Body> {
@@ -536,10 +608,10 @@ async fn receive(
     let Ok(permit) = jobs.try_acquire_owned() else {
         return response(StatusCode::SERVICE_UNAVAILABLE, "Busy; retry later");
     };
-    if needs_body(&active, &message) {
+    if needs_fetch(&active, &message) {
         match fetch_message(&settings, &message).await {
             Ok(fetched) => message = fetched,
-            Err(_) => return response(StatusCode::SERVICE_UNAVAILABLE, "Message body unavailable"),
+            Err(_) => return response(StatusCode::SERVICE_UNAVAILABLE, "Message unavailable"),
         }
     }
     let matched: Vec<_> = active

@@ -10,7 +10,7 @@ fn omitted_body_is_fetched_for_each_unresolved_sender_rule() {
     ]"#,
     )
     .unwrap();
-    let mut message = json!({"from":"notifications@github.com","subject":"subject match","body_url":"https://unused.example/body"});
+    let mut message = json!({"from":"notifications@github.com","subject":"subject match","body_url":"https://unused.example/body","authentication_results":{"dmarc":"pass"}});
     assert!(filters[0].matches(&message));
     assert!(!filters[1].matches(&message));
     assert!(needs_body(&filters, &message));
@@ -131,7 +131,7 @@ fn sender_and_content_are_both_required() {
         "\"GitHub \\\"Reviews\\\", Team\" <notifications@github.com>",
     ] {
         assert!(
-            filters[0].matches(&json!({"from":from,"text":"Alice REQUESTED YOUR REVIEW ON: test"}))
+            filters[0].matches(&json!({"from":from,"text":"Alice REQUESTED YOUR REVIEW ON: test","authentication_results":{"dmarc":"pass"}}))
         );
     }
     for from in [
@@ -157,6 +157,91 @@ fn sender_and_content_are_both_required() {
     assert!(!filters[0].matches(&Value::Null));
     assert!(parse_filters("[]").is_err());
     assert!(parse_filters(r#"[{"name":"x","sender":"x@example.com","contains":""}]"#).is_err());
+}
+
+#[test]
+fn sender_authentication_alignment_is_enforced() {
+    let filters = parse_filters(FILTERS).unwrap();
+    let base_from = "notifications@github.com";
+    let body = "requested your review on:";
+
+    // DMARC pass is valid
+    assert!(filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dmarc": "pass"}
+    })));
+
+    // DMARC pass with matching domain is valid
+    assert!(filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dmarc": "pass", "dmarc_domain": "github.com"}
+    })));
+
+    // DKIM pass aligned with sender domain is valid
+    assert!(filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dkim": "pass", "dkim_domain": "github.com"}
+    })));
+    assert!(filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dkim": "pass", "dkim_domain": "sub.github.com"}
+    })));
+
+    // SPF pass aligned with sender domain is valid
+    assert!(filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"spf": "pass", "spf_domain": "github.com"}
+    })));
+
+    // Forged/unaligned cases must all be rejected:
+    // 1. Missing authentication_results
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body
+    })));
+
+    // 2. Empty authentication_results
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {}
+    })));
+
+    // 3. Unaligned DKIM (e.g. attacker domain)
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dkim": "pass", "dkim_domain": "attacker.com"}
+    })));
+
+    // 4. Unaligned SPF (e.g. attacker envelope)
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"spf": "pass", "spf_domain": "attacker.com"}
+    })));
+
+    // 5. Failing verdicts
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dmarc": "fail"}
+    })));
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"dkim": "fail", "dkim_domain": "github.com"}
+    })));
+    assert!(!filters[0].matches(&json!({
+        "from": base_from,
+        "text": body,
+        "authentication_results": {"spf": "fail", "spf_domain": "github.com"}
+    })));
 }
 #[test]
 fn svix_authenticates_raw_body_timestamp_and_rotation_signatures() {
@@ -308,7 +393,7 @@ async fn ingress_rejects_forgery_and_ignores_disabled_unmatched_duplicate_events
         gateway_secret: String::new(),
     })
     .await;
-    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_fixture","message":{"from":"notifications@github.com","text":"requested your review on:"}})).unwrap();
+    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_fixture","message":{"from":"notifications@github.com","text":"requested your review on:","authentication_results":{"dmarc":"pass"}}})).unwrap();
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     assert_eq!(
         client
@@ -579,7 +664,7 @@ async fn event_dispatch_case(
         gateway_secret: String::new(),
     })
     .await;
-    let body=serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_new","message":{"from":"notifications@github.com","text":"Alice requested your review on: PRIVATE_BODY","subject":"Fixture subject"}})).unwrap();
+    let body=serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_new","message":{"from":"notifications@github.com","text":"Alice requested your review on: PRIVATE_BODY","subject":"Fixture subject","authentication_results":{"dmarc":"pass"}}})).unwrap();
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     assert_eq!(
         client
@@ -1132,7 +1217,7 @@ async fn multi_sop_event_case(fail_second: bool) {
         gateway_secret: String::new(),
     })
     .await;
-    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_multi","message":{"from":"notifications@github.com","text":"PRIVATE_BODY review"}})).unwrap();
+    let body = serde_json::to_vec(&json!({"event_type":"message.received","event_id":"evt_multi","message":{"from":"notifications@github.com","text":"PRIVATE_BODY review","authentication_results":{"dmarc":"pass"}}})).unwrap();
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     assert_eq!(
         client
