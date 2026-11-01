@@ -1277,7 +1277,11 @@
                  let msg_type = parsed["type"].as_str().unwrap_or("");
 
                  // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-@@ -1876,6 +1921,26 @@ async fn process_chat_message(
+@@ -1873,9 +1918,33 @@ async fn process_chat_message(
+     let forward_fut = async {
+         let mut cancel_drained = false;
+         let mut client_gone = false;
++        let mut revocation_handled = false;
          loop {
              tokio::select! {
                              biased;
@@ -1287,36 +1291,75 @@
 +                                } else {
 +                                    std::future::pending::<()>().await;
 +                                }
-+                            }, if !client_gone => {
-+                                let err = serde_json::json!({
-+                                    "type": "error",
-+                                    "message": "Session pairing was revoked",
-+                                    "code": "AUTH_REQUIRED"
-+                                });
++                            }, if !revocation_handled => {
++                                revocation_handled = true;
 +                                cancel_token.cancel();
 +                                detach_mid_turn(session_key, &turn_id, pending_approvals);
-+                                let _ = tokio::time::timeout(
-+                                    std::time::Duration::from_secs(1),
-+                                    sender.send(Message::Text(err.to_string().into())),
-+                                ).await;
-+                                client_gone = true;
++                                if !client_gone {
++                                    let err = serde_json::json!({
++                                        "type": "error",
++                                        "message": "Session pairing was revoked",
++                                        "code": "AUTH_REQUIRED"
++                                    });
++                                    let _ = tokio::time::timeout(
++                                        std::time::Duration::from_secs(1),
++                                        sender.send(Message::Text(err.to_string().into())),
++                                    ).await;
++                                    client_gone = true;
++                                }
 +                            }
                              _ = cancel_token.cancelled(), if !cancel_drained => {
                                  let drained: Vec<_> = pending_approvals.lock().drain().collect();
                                  drop(drained);
-@@ -1911,6 +1976,23 @@ async fn process_chat_message(
+@@ -1911,6 +1980,26 @@ async fn process_chat_message(
                                      let _ = sender.send(Message::Text(err.to_string().into())).await;
                                      continue;
                                  };
 +                                if let Some(hash) = auth_subject {
 +                                    if !state.pairing.token_hash_is_paired(hash) {
++                                        revocation_handled = true;
++                                        cancel_token.cancel();
++                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                        if !client_gone {
++                                            let err = serde_json::json!({
++                                                "type": "error",
++                                                "message": "Session pairing was revoked",
++                                                "code": "AUTH_REQUIRED"
++                                            });
++                                            let _ = tokio::time::timeout(
++                                                std::time::Duration::from_secs(1),
++                                                sender.send(Message::Text(err.to_string().into())),
++                                            ).await;
++                                            client_gone = true;
++                                        }
++                                        continue;
++                                    }
++                                }
+                                 match parsed["type"].as_str() {
+                                     Some("approval_response") => {
+                                         // A SOP-kind frame is a gate resolution (keyed by run_id),
+@@ -2090,7 +2179,33 @@ async fn process_chat_message(
+                                 if client_gone {
+                                     continue;
+                                 }
+-                                if sender.send(Message::Text(ws_msg.to_string().into())).await.is_err() {
++                                let send_res = tokio::select! {
++                                    biased;
++                                    _ = async {
++                                        if let Some(hash) = auth_subject {
++                                            state.pairing.wait_token_revoked(hash).await;
++                                        } else {
++                                            std::future::pending::<()>().await;
++                                        }
++                                    }, if !revocation_handled => {
++                                        revocation_handled = true;
++                                        cancel_token.cancel();
++                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
 +                                        let err = serde_json::json!({
 +                                            "type": "error",
 +                                            "message": "Session pairing was revoked",
 +                                            "code": "AUTH_REQUIRED"
 +                                        });
-+                                        cancel_token.cancel();
-+                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
 +                                        let _ = tokio::time::timeout(
 +                                            std::time::Duration::from_secs(1),
 +                                            sender.send(Message::Text(err.to_string().into())),
@@ -1324,11 +1367,13 @@
 +                                        client_gone = true;
 +                                        continue;
 +                                    }
-+                                }
-                                 match parsed["type"].as_str() {
-                                     Some("approval_response") => {
-                                         // A SOP-kind frame is a gate resolution (keyed by run_id),
-@@ -3043,6 +3125,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
++                                    res = sender.send(Message::Text(ws_msg.to_string().into())) => res,
++                                };
++                                if send_res.is_err() {
+                                     detach_mid_turn(session_key, &turn_id, pending_approvals);
+                                     client_gone = true;
+                                 }
+@@ -3043,6 +3158,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
      impl ParkedTurnFixture {
          async fn spawn() -> Self {
@@ -1339,7 +1384,7 @@
              let (request_seen_tx, request_seen) =
                  tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
              let (released, released_rx) = tokio::sync::watch::channel(0usize);
-@@ -3132,10 +3218,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3132,10 +3251,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
              let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
                  .expect("sqlite session backend");
@@ -1363,7 +1408,7 @@
              let gateway_app = Router::new()
                  .route("/ws/chat", get(handle_ws_chat))
                  .with_state(state.clone());
-@@ -3149,15 +3247,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3149,15 +3280,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                      .expect("local WebSocket gateway serves");
              });
 
@@ -1391,7 +1436,7 @@
          }
 
          /// Open a chat socket on `session_id` and return it with the
-@@ -4802,6 +4903,106 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -4802,6 +4936,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
          );
      }
 
@@ -1440,6 +1485,63 @@
 +        assert!(got_auth_required, "expected AUTH_REQUIRED on revocation");
 +
 +        server.abort();
++    }
++
++    #[test]
++    fn ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect() {
++        run_ws_regression(
++            "ws-revocation-cancels-detached",
++            ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect_inner,
++        );
++    }
++
++    async fn ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect_inner() {
++        let token = "ws-chat-detached-token";
++        let (mut fixture, token_hash) = ParkedTurnFixture::spawn_paired(Some(token)).await;
++        let token_hash = token_hash.expect("paired token hash");
++        let session_id = "revocation-cancels-detached";
++        let session_key = format!("{GW_SESSION_PREFIX}{session_id}");
++        let url = format!(
++            "ws://{}/ws/chat?agent=web&session_id={session_id}&token={token}",
++            fixture.gateway_addr
++        );
++        let (mut client, _) = connect_async(url).await.expect("WebSocket upgrade");
++        let session_start = next_text_frame(&mut client).await;
++        assert_eq!(session_start["type"], "session_start");
++
++        let prompt = "keep working after disconnect until revoked";
++        fixture.start_parked_turn(&mut client, prompt).await;
++        assert!(fixture.has_live_turn(&session_key));
++
++        // Disconnect the client mid-turn: under ordinary disconnect the turn survives
++        disconnect_viewer(client).await;
++        assert!(fixture.has_live_turn(&session_key));
++
++        // Now revoke the pairing token while turn is running detached
++        assert!(fixture.state.pairing.revoke_token_hash(&token_hash));
++
++        // The detached turn must be cancelled and settle
++        fixture.wait_for_turn_to_settle(&session_key).await;
++        assert!(!fixture.has_live_turn(&session_key));
++
++        let transcript = fixture.backend.load(&session_key);
++        let interrupted =
++            zeroclaw_runtime::i18n::get_required_cli_string("turn-interrupted-by-user");
++        assert!(
++            transcript.iter().any(
++                |message| message.role == "assistant" && message.content.contains(&interrupted)
++            ),
++            "revoking a detached turn persists the interruption marker: {transcript:?}"
++        );
++        assert!(
++            !transcript
++                .iter()
++                .any(|message| message.content.contains(PARKED_TURN_RESPONSE)),
++            "the revoked turn never received the provider's response"
++        );
++
++        fixture.release_next();
++        fixture.shutdown();
 +    }
 +
 +    #[test]
