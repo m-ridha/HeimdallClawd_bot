@@ -108,6 +108,23 @@ fn first_boot_and_managed_policy_stay_template_owned() {
 }
 
 #[test]
+fn saved_bundle_without_directory_preserves_template_directory() {
+    let original = base();
+    let saved = "[skill_bundles.ecc]\n";
+    let cfg: toml::Value = toml::from_str(&attach(&original, Some(saved)).unwrap()).unwrap();
+    assert_eq!(
+        cfg["skill_bundles"]["ecc"]["directory"].as_str(),
+        Some("shared/skills/ecc")
+    );
+    assert!(
+        cfg["agents"]["primary"]["skill_bundles"]
+            .as_array()
+            .unwrap()
+            .contains(&toml::Value::from("ecc"))
+    );
+}
+
+#[test]
 fn malformed_state_fails_without_echoing_contents() {
     for saved in [
         "fixture_secret = [",

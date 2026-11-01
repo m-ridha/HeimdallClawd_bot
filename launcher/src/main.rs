@@ -64,6 +64,45 @@ fn prepare_identity() -> io::Result<()> {
     {
         return Err(io::Error::last_os_error());
     }
+    for name in [
+        c"config.toml",
+        c"auth-profiles.json",
+        c"agentmail-state.json",
+    ] {
+        // SAFETY: state is a live directory descriptor; static name; flags reject symlinks.
+        let raw = unsafe {
+            libc::openat(
+                state.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDWR | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if raw >= 0 {
+            // SAFETY: successful openat returned a new owned descriptor.
+            let file = unsafe { OwnedFd::from_raw_fd(raw) };
+            let mut st = std::mem::MaybeUninit::<libc::stat>::uninit();
+            // SAFETY: valid descriptor and pointer to stat structure.
+            if unsafe { libc::fstat(file.as_raw_fd(), st.as_mut_ptr()) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: fstat succeeded, so stat buffer is initialized.
+            let st = unsafe { st.assume_init() };
+            if (st.st_mode & libc::S_IFMT) != libc::S_IFREG {
+                return Err(fail("State file must be a regular file"));
+            }
+            // SAFETY: file owns a live regular file descriptor; fixed runtime owner and private mode.
+            if unsafe { libc::fchown(file.as_raw_fd(), 1000, 1000) } != 0
+                || unsafe { libc::fchmod(file.as_raw_fd(), 0o600) } != 0
+            {
+                return Err(io::Error::last_os_error());
+            }
+        } else {
+            let err = io::Error::last_os_error();
+            if err.raw_os_error() != Some(libc::ENOENT) {
+                return Err(err);
+            }
+        }
+    }
     drop_runtime_identity()
 }
 #[cfg(target_os = "linux")]

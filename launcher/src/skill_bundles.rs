@@ -76,7 +76,15 @@ pub fn attach(base: &str, previous: Option<&str>) -> Result<String, &'static str
                         return Err("Invalid saved skill bundle field");
                     }
                 }
-                bundles.insert(alias.clone(), toml::Value::Table(entry.clone()));
+                if let Some(existing) = bundles.get_mut(alias) {
+                    if let Some(table) = existing.as_table_mut() {
+                        for (k, v) in entry {
+                            table.insert(k.clone(), v.clone());
+                        }
+                    }
+                } else {
+                    bundles.insert(alias.clone(), toml::Value::Table(entry.clone()));
+                }
             }
         }
     }
