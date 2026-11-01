@@ -1277,7 +1277,7 @@
                  let msg_type = parsed["type"].as_str().unwrap_or("");
 
                  // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-@@ -1876,6 +1921,23 @@ async fn process_chat_message(
+@@ -1876,6 +1921,26 @@ async fn process_chat_message(
          loop {
              tokio::select! {
                              biased;
@@ -1293,15 +1293,18 @@
 +                                    "message": "Session pairing was revoked",
 +                                    "code": "AUTH_REQUIRED"
 +                                });
-+                                let _ = sender.send(Message::Text(err.to_string().into())).await;
 +                                cancel_token.cancel();
 +                                detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                let _ = tokio::time::timeout(
++                                    std::time::Duration::from_secs(1),
++                                    sender.send(Message::Text(err.to_string().into())),
++                                ).await;
 +                                client_gone = true;
 +                            }
                              _ = cancel_token.cancelled(), if !cancel_drained => {
                                  let drained: Vec<_> = pending_approvals.lock().drain().collect();
                                  drop(drained);
-@@ -1911,6 +1973,20 @@ async fn process_chat_message(
+@@ -1911,6 +1976,23 @@ async fn process_chat_message(
                                      let _ = sender.send(Message::Text(err.to_string().into())).await;
                                      continue;
                                  };
@@ -1312,9 +1315,12 @@
 +                                            "message": "Session pairing was revoked",
 +                                            "code": "AUTH_REQUIRED"
 +                                        });
-+                                        let _ = sender.send(Message::Text(err.to_string().into())).await;
 +                                        cancel_token.cancel();
 +                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                        let _ = tokio::time::timeout(
++                                            std::time::Duration::from_secs(1),
++                                            sender.send(Message::Text(err.to_string().into())),
++                                        ).await;
 +                                        client_gone = true;
 +                                        continue;
 +                                    }
@@ -1322,7 +1328,70 @@
                                  match parsed["type"].as_str() {
                                      Some("approval_response") => {
                                          // A SOP-kind frame is a gate resolution (keyed by run_id),
-@@ -4802,6 +4878,53 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3043,6 +3125,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+
+     impl ParkedTurnFixture {
+         async fn spawn() -> Self {
++            Self::spawn_paired(None).await.0
++        }
++
++        async fn spawn_paired(paired_token: Option<&str>) -> (Self, Option<String>) {
+             let (request_seen_tx, request_seen) =
+                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+             let (released, released_rx) = tokio::sync::watch::channel(0usize);
+@@ -3132,10 +3218,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+
+             let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
+                 .expect("sqlite session backend");
+-            let state = AppState {
++            if paired_token.is_some() {
++                config.gateway.require_pairing = true;
++            }
++            let mut state = AppState {
+                 session_backend: Some(backend.clone()),
+                 ..crate::api::tests::test_state(config)
+             };
++            let token_hash = paired_token.map(|token| {
++                let hash = zeroclaw_config::pairing::PairingGuard::token_hash(token);
++                state.pairing = Arc::new(zeroclaw_config::pairing::PairingGuard::new(
++                    true,
++                    &[token.to_string()],
++                    zeroclaw_config::pairing::PairingCodePolicy::default(),
++                ));
++                hash
++            });
+             let gateway_app = Router::new()
+                 .route("/ws/chat", get(handle_ws_chat))
+                 .with_state(state.clone());
+@@ -3149,15 +3247,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+                     .expect("local WebSocket gateway serves");
+             });
+
+-            Self {
+-                state,
+-                backend,
+-                gateway_addr,
+-                request_seen,
+-                released,
+-                servers: vec![mock_server, gateway_server],
+-                _tmp: tmp,
+-            }
++            (
++                Self {
++                    state,
++                    backend,
++                    gateway_addr,
++                    request_seen,
++                    released,
++                    servers: vec![mock_server, gateway_server],
++                    _tmp: tmp,
++                },
++                token_hash,
++            )
+         }
+
+         /// Open a chat socket on `session_id` and return it with the
+@@ -4802,6 +4903,106 @@ data: {{\"type\":\"message_stop\"}}\n\n"
          );
      }
 
@@ -1371,6 +1440,59 @@
 +        assert!(got_auth_required, "expected AUTH_REQUIRED on revocation");
 +
 +        server.abort();
++    }
++
++    #[test]
++    fn ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals() {
++        run_ws_regression(
++            "ws-revocation-cancels-turn",
++            ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals_inner,
++        );
++    }
++
++    async fn ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals_inner() {
++        let token = "ws-chat-active-token";
++        let (mut fixture, token_hash) = ParkedTurnFixture::spawn_paired(Some(token)).await;
++        let token_hash = token_hash.expect("paired token hash");
++        let session_id = "revocation-cancels-turn";
++        let session_key = format!("{GW_SESSION_PREFIX}{session_id}");
++        let url = format!(
++            "ws://{}/ws/chat?agent=web&session_id={session_id}&token={token}",
++            fixture.gateway_addr
++        );
++        let (mut client, _) = connect_async(url).await.expect("WebSocket upgrade");
++        let session_start = next_text_frame(&mut client).await;
++        assert_eq!(session_start["type"], "session_start");
++
++        let prompt = "keep working until revoked";
++        fixture.start_parked_turn(&mut client, prompt).await;
++        assert!(fixture.has_live_turn(&session_key));
++
++        // Revoke the pairing token mid-turn while client does not read further
++        assert!(fixture.state.pairing.revoke_token_hash(&token_hash));
++
++        // The turn should be cancelled and settle even though the client stopped reading
++        fixture.wait_for_turn_to_settle(&session_key).await;
++        assert!(!fixture.has_live_turn(&session_key));
++
++        let transcript = fixture.backend.load(&session_key);
++        let interrupted =
++            zeroclaw_runtime::i18n::get_required_cli_string("turn-interrupted-by-user");
++        assert!(
++            transcript.iter().any(
++                |message| message.role == "assistant" && message.content.contains(&interrupted)
++            ),
++            "revocation mid-turn persists the interruption marker: {transcript:?}"
++        );
++        assert!(
++            !transcript
++                .iter()
++                .any(|message| message.content.contains(PARKED_TURN_RESPONSE)),
++            "the revoked turn never received the provider's response"
++        );
++
++        fixture.release_next();
++        fixture.shutdown();
 +    }
 +
      /// done-frame model_context_window: present when the provider has an

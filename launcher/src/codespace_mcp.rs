@@ -325,6 +325,24 @@ fn validate_command(command: &str) -> Result<&str, String> {
     Ok(command)
 }
 
+fn quote_remote_command(command: &str) -> String {
+    format!("'{}'", command.replace('\'', "'\\''"))
+}
+
+fn exec_ssh_arguments<'a>(name: &'a str, quoted_command: &'a str) -> [&'a str; 9] {
+    [
+        "codespace",
+        "ssh",
+        "--codespace",
+        name,
+        "--",
+        "sh",
+        "-c",
+        "--",
+        quoted_command,
+    ]
+}
+
 impl Codespaces {
     fn from_env() -> Result<Self, String> {
         let token =
@@ -501,20 +519,8 @@ impl Codespaces {
                     ),
                     _ => {
                         let command = validate_command(args["command"].as_str().unwrap_or(""))?;
-                        self.gh(
-                            &[
-                                "codespace",
-                                "ssh",
-                                "--codespace",
-                                name,
-                                "--",
-                                "sh",
-                                "-c",
-                                "--",
-                                command,
-                            ],
-                            deadline,
-                        )
+                        let quoted = quote_remote_command(command);
+                        self.gh(&exec_ssh_arguments(name, &quoted), deadline)
                     }
                 }
             }
@@ -647,6 +653,34 @@ mod tests {
         assert_eq!(
             validate_command("cargo test --locked").unwrap(),
             "cargo test --locked"
+        );
+    }
+
+    #[test]
+    fn exec_remote_command_quoting_preserves_arguments_and_quotes() {
+        assert_eq!(quote_remote_command("git status"), "'git status'");
+        assert_eq!(
+            quote_remote_command("cargo test --locked"),
+            "'cargo test --locked'"
+        );
+        assert_eq!(
+            quote_remote_command("echo 'hello world'"),
+            "'echo '\\''hello world'\\'''"
+        );
+        let quoted = quote_remote_command("git status");
+        assert_eq!(
+            exec_ssh_arguments("octo-box", &quoted),
+            [
+                "codespace",
+                "ssh",
+                "--codespace",
+                "octo-box",
+                "--",
+                "sh",
+                "-c",
+                "--",
+                "'git status'"
+            ]
         );
     }
 
