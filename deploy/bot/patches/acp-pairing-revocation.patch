@@ -1,5 +1,5 @@
 diff --git a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
-index 3d62fd9..dffb4ba 100644
+index 3d62fd9..7b72e51 100644
 --- a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 +++ b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 @@ -125,7 +125,70 @@ enum ConfigSource {
@@ -160,7 +160,24 @@ index 3d62fd9..dffb4ba 100644
              let error = match created {
                  Ok(Ok(_)) => None,
                  Ok(Err(e)) => Some(e.to_string()),
-@@ -1101,6 +1196,7 @@ impl AcpServer {
+@@ -1097,10 +1192,24 @@ impl AcpServer {
+         };
+         let now = Instant::now();
+         // Atomically insert and release the reservation.
++        let pairing_error = match hold_connection_pairing(self.connection_pairing.as_ref()) {
++            Ok(_) => None,
++            Err(error) => Some(error),
++        };
++        if let Some(error) = pairing_error {
++            self.loading_sessions.lock().await.remove(&session_id);
++            if let Some(store) = &self.store {
++                let store = Arc::clone(store);
++                let sid = session_id.clone();
++                let _ = tokio::task::spawn_blocking(move || store.delete_session(&sid)).await;
++            }
++            return Err(error);
++        }
+         {
              let mut sessions = self.sessions.lock().await;
              let mut loading = self.loading_sessions.lock().await;
              loading.remove(&session_id);
@@ -168,7 +185,7 @@ index 3d62fd9..dffb4ba 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1178,6 +1274,7 @@ impl AcpServer {
+@@ -1178,6 +1287,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -176,7 +193,7 @@ index 3d62fd9..dffb4ba 100644
 
          // Atomically check and reserve the session slot
          {
-@@ -1223,6 +1320,7 @@ impl AcpServer {
+@@ -1223,6 +1333,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -184,7 +201,7 @@ index 3d62fd9..dffb4ba 100644
              loading.insert(session_id.clone());
          }
 
-@@ -1408,14 +1506,12 @@ impl AcpServer {
+@@ -1408,14 +1519,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -200,7 +217,7 @@ index 3d62fd9..dffb4ba 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1436,6 +1532,9 @@ impl AcpServer {
+@@ -1436,6 +1545,9 @@ impl AcpServer {
              );
          }
 
@@ -210,7 +227,7 @@ index 3d62fd9..dffb4ba 100644
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1515,6 +1614,7 @@ impl AcpServer {
+@@ -1515,6 +1627,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -218,7 +235,7 @@ index 3d62fd9..dffb4ba 100644
 
          // Atomically check and reserve the session slot
          {
-@@ -1560,6 +1660,7 @@ impl AcpServer {
+@@ -1560,6 +1673,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -226,7 +243,7 @@ index 3d62fd9..dffb4ba 100644
              loading.insert(session_id.clone());
          }
 
-@@ -1701,14 +1802,12 @@ impl AcpServer {
+@@ -1701,14 +1815,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -242,7 +259,7 @@ index 3d62fd9..dffb4ba 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1729,6 +1828,9 @@ impl AcpServer {
+@@ -1729,6 +1841,9 @@ impl AcpServer {
              );
          }
 
@@ -252,7 +269,7 @@ index 3d62fd9..dffb4ba 100644
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1963,14 +2065,18 @@ impl AcpServer {
+@@ -1963,14 +2078,18 @@ impl AcpServer {
              }
          }
 
@@ -279,7 +296,7 @@ index 3d62fd9..dffb4ba 100644
              Ok(prompt) => prompt,
              Err(e) => {
                  // Release the reservation we just took so a bad attachment doesn't
-@@ -2023,6 +2129,7 @@ impl AcpServer {
+@@ -2023,6 +2142,7 @@ impl AcpServer {
          let session_id_for_task = session_id.clone();
          let persist_store = self.store.clone();
          let persist_session_id = session_id.clone();
@@ -287,7 +304,7 @@ index 3d62fd9..dffb4ba 100644
          let turn_handle = zeroclaw_spawn::spawn!(async move {
              let mut session = session_arc.lock().await;
              let (turn_alias, turn_provider, turn_model) = session.agent.attribution_fields();
-@@ -2048,7 +2155,7 @@ impl AcpServer {
+@@ -2048,7 +2168,7 @@ impl AcpServer {
                      model = %turn_model,
                      channel = "acp",
                  );
@@ -296,7 +313,7 @@ index 3d62fd9..dffb4ba 100644
                      Some(session_id_for_task),
                      zeroclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                          cost_context,
-@@ -2057,13 +2164,26 @@ impl AcpServer {
+@@ -2057,13 +2177,26 @@ impl AcpServer {
                              .turn_streamed_with_steering_state(
                                  &prompt,
                                  event_tx,
@@ -326,7 +343,7 @@ index 3d62fd9..dffb4ba 100644
              };
              session.last_active = Instant::now();
 
-@@ -3846,6 +3966,322 @@ mod tests {
+@@ -3846,6 +3979,322 @@ mod tests {
      use super::*;
      use async_trait::async_trait;
 
