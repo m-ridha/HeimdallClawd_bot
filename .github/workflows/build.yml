@@ -157,6 +157,7 @@ jobs:
             gosu heimdall sudo -n cargo --version
             gosu heimdall sudo -n rustc --version
             gosu heimdall sudo -n cargo clippy --version
+            gosu heimdall sudo -n go version
             gosu heimdall chromium --version
             chromedriver --version
           '

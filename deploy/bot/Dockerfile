@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /runtime
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=2 \
     CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1
-RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/c473221313341a853e04122f93bb9bd26b5e6c47 -o /tmp/runtime.tar.gz \
-    && echo 'ae1916dd79364f936a6600e8eb143aa1f405750d501f6c5ef7f1a83f717d574c  /tmp/runtime.tar.gz' | sha256sum -c - \
+RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/99bd353c756f4e64f381cfe9c3002ebff32f3055 -o /tmp/runtime.tar.gz \
+    && echo 'b483927ccd2252c9d487aab3c69a80a4f4452ed3ed150b4205bc75cf6d825c6c  /tmp/runtime.tar.gz' | sha256sum -c - \
     && tar -xzf /tmp/runtime.tar.gz --strip-components=1 -C /runtime && rm /tmp/runtime.tar.gz
 COPY deploy/bot/patches/private-telegram.patch /tmp/private-telegram.patch
 COPY deploy/bot/patches/telegram-startup.patch /tmp/telegram-startup.patch
@@ -28,10 +28,9 @@ COPY deploy/bot/patches/sop-workshop-guidance.patch /tmp/sop-workshop-guidance.p
 COPY deploy/bot/patches/responses-tool-history.patch /tmp/responses-tool-history.patch
 COPY deploy/bot/patches/browser-output.patch /tmp/browser-output.patch
 COPY deploy/bot/patches/tool-log-privacy.patch /tmp/tool-log-privacy.patch
-COPY deploy/bot/patches/security-dependencies.patch /tmp/security-dependencies.patch
 COPY deploy/bot/patches/browser-navigation.patch /tmp/browser-navigation.patch
 COPY deploy/bot/patches/acp-pairing-revocation.patch /tmp/acp-pairing-revocation.patch
-RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/telegram-startup.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch && patch --fuzz=0 -p1 < /tmp/tool-log-privacy.patch && patch --fuzz=0 -p1 < /tmp/security-dependencies.patch && patch --fuzz=0 -p1 < /tmp/browser-navigation.patch && patch --fuzz=0 -p1 < /tmp/acp-pairing-revocation.patch
+RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/telegram-startup.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch && patch --fuzz=0 -p1 < /tmp/tool-log-privacy.patch && patch --fuzz=0 -p1 < /tmp/browser-navigation.patch && patch --fuzz=0 -p1 < /tmp/acp-pairing-revocation.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web

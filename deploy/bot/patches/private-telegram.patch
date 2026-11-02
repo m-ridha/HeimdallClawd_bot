@@ -1,8 +1,8 @@
 diff --git a/crates/zeroclaw-channels/src/telegram.rs b/crates/zeroclaw-channels/src/telegram.rs
-index 7c2ae3a..2a3a988 100644
+index 9890ba2..dbf9bf7 100644
 --- a/crates/zeroclaw-channels/src/telegram.rs
 +++ b/crates/zeroclaw-channels/src/telegram.rs
-@@ -3197,6 +3197,9 @@ impl TelegramChannel {
+@@ -3270,6 +3270,9 @@ impl TelegramChannel {
 
      fn extract_media_group_key(update: &serde_json::Value) -> Option<MediaGroupKey> {
          let message = update.get("message")?;
@@ -12,7 +12,7 @@ index 7c2ae3a..2a3a988 100644
          let chat_id = message
              .get("chat")
              .and_then(|chat| chat.get("id"))
-@@ -5085,6 +5088,9 @@ Allowlist Telegram username (without '@') or numeric user ID.",
+@@ -5158,6 +5161,9 @@ Allowlist Telegram username (without '@') or numeric user ID.",
          let Some(anchor_message) = anchor_update.get("message") else {
              return UpdateDisposition::SkipPermanent;
          };
@@ -22,7 +22,7 @@ index 7c2ae3a..2a3a988 100644
          let anchor_scope = Self::media_group_scope(anchor_message);
          let supported_share_scope = ordered.iter().all(|update| {
              update.get("message").is_some_and(|message| {
-@@ -6917,6 +6923,18 @@ Allowlist Telegram username (without '@') or numeric user ID.",
+@@ -7081,6 +7087,18 @@ Allowlist Telegram username (without '@') or numeric user ID.",
      ) -> UpdateOutcome {
          let uid = update.get("update_id").and_then(serde_json::Value::as_i64);
 
@@ -41,8 +41,8 @@ index 7c2ae3a..2a3a988 100644
          // ── Handle callback_query (inline keyboard taps) ──
          if let Some(cb) = update.get("callback_query") {
              let cb_data = cb
-@@ -24248,3 +24266,82 @@ mod tests {
-         assert!(cb_data.strip_prefix("approval:").is_none());
+@@ -24734,3 +24752,82 @@ mod tests {
+         assert_finalize_stops_on_narration_flood_limit(1).await;
      }
  }
 +

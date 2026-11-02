@@ -1,8 +1,8 @@
 {
-  "version": "0.8.6",
-  "revision": "c473221313341a853e04122f93bb9bd26b5e6c47",
-  "source_url": "https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/c473221313341a853e04122f93bb9bd26b5e6c47",
-  "source_sha256": "ae1916dd79364f936a6600e8eb143aa1f405750d501f6c5ef7f1a83f717d574c",
+  "version": "0.8.7",
+  "revision": "99bd353c756f4e64f381cfe9c3002ebff32f3055",
+  "source_url": "https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/99bd353c756f4e64f381cfe9c3002ebff32f3055",
+  "source_sha256": "b483927ccd2252c9d487aab3c69a80a4f4452ed3ed150b4205bc75cf6d825c6c",
   "features": [
     "agent-runtime",
     "tools-external",
