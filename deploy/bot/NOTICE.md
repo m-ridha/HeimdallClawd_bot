@@ -1,6 +1,6 @@
 # Notice
 
-The build uses ZeroClaw v0.8.6, revision c473221313341a853e04122f93bb9bd26b5e6c47,
+The build uses ZeroClaw v0.8.7, revision 99bd353c756f4e64f381cfe9c3002ebff32f3055,
 from <https://github.com/zeroclaw-labs/zeroclaw>, distributed under MIT OR
 Apache-2.0. Both upstream license files accompany the deployment recipe and
 release package. The immutable archive checksum and build features live in
@@ -10,8 +10,11 @@ fuzz before compilation.
 ## Native behavior and retained patches
 
 Subscription authentication, provider integration, channel routing, SQLite
-sessions, typed transcription, WIT interface paths, MCP, local skill execution
-and browser automation use upstream features. The single-service model does not
+sessions, typed transcription, WIT interface paths, MCP, local skill execution,
+Wasmtime/TLS advisory updates and browser automation use upstream features.
+Upstream v0.8.7 resolves the Wasmtime and TLS/crypto advisories (RUSTSEC-2026-0375
+through 0379, 0381 through 0383, 0385 and 0386), so the former `security-dependencies`
+patch is retired. The single-service model does not
 need the former remote-skills or native-child patches. General commands have
 explicitly approved root access; narrow integration profiles do not confine them.
 The browser-output patch adds DNS-pinned HTTP fetching with validation on every
@@ -22,7 +25,6 @@ existing Landlock profile.
 | Patch | Contract not replaced by native configuration |
 | --- | --- |
 | tool-log-privacy.patch | Remove raw legacy tool arguments/results at the logging boundary and enforce the tool-I/O opt-out before terminal, broadcast, export and persistence. The optional OTel observer applies the same tool denylist before content processing. Tool execution and conversation history remain unchanged. |
-| security-dependencies.patch | Update the pinned runtime lockfile to rustls-webpki 0.103.16, webpki-roots 1.0.10 and ctutils 0.4.4 for RustSec advisories 2026-0382, 2026-0381 and 2026-0385. |
 | telegram-startup.patch | Retry only explicit Telegram command-menu size rejections with a shrinking menu; bound polling requests and report transport categories without secret URLs or raw error bodies. |
 | private-telegram.patch | Reject non-private Telegram updates before callback/media processing, in addition to account allowlisting. Reject non-private media groups in key extraction and album parsing before buffering, downloading or dispatching turns. |
 | http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |

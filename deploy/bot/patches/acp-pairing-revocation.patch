@@ -1,113 +1,8 @@
---- a/crates/zeroclaw-config/src/pairing.rs
-+++ b/crates/zeroclaw-config/src/pairing.rs
-@@ -364,6 +364,8 @@
-     /// (see [`PairingGuard::hold_paired_tokens`]) delays only pairing and
-     /// revocation, not other liveness checks.
-     paired_tokens: Arc<RwLock<HashSet<String>>>,
-+    /// Wakes established transports when live pairing membership is revoked.
-+    revocations: tokio::sync::watch::Sender<()>,
-     /// Brute-force protection: per-client failed attempt state + last sweep timestamp.
-     failed_attempts: Arc<Mutex<(HashMap<String, FailedAttemptState>, Instant)>>,
-     /// The admin token this gateway run accepts on the pairing-code admin
-@@ -448,6 +450,7 @@
-             require_pairing,
-             pairing_code: Arc::new(Mutex::new(code)),
-             paired_tokens: Arc::new(RwLock::new(tokens)),
-+            revocations: tokio::sync::watch::channel(()).0,
-             failed_attempts: Arc::new(Mutex::new((HashMap::new(), Instant::now()))),
-             admin_token: Arc::new(Mutex::new(None)),
-         }
-@@ -719,22 +722,38 @@
-         tokens.iter().cloned().collect()
-     }
-
-+    /// Wait for this identity to leave the live paired-token set. Subscribe
-+    /// before checking membership so revocation cannot be lost during upgrade.
-+    pub async fn wait_token_revoked(&self, token_hash: &str) {
-+        let mut changes = self.revocations.subscribe();
-+        while self.token_hash_is_paired(token_hash) {
-+            if changes.changed().await.is_err() {
-+                return;
-+            }
-+        }
-+    }
-+
-     pub fn revoke_token(&self, token: &str) -> bool {
--        let hashed = hash_token(token);
--        let mut tokens = self.paired_tokens.write();
--        tokens.remove(&hashed)
-+        self.revoke_token_hash(&hash_token(token))
-     }
-
-     /// Revoke a paired token by its SHA-256 hash. Returns true if removed.
-     pub fn revoke_token_hash(&self, token_hash: &str) -> bool {
-         let mut tokens = self.paired_tokens.write();
--        tokens.remove(token_hash)
-+        let removed = tokens.remove(token_hash);
-+        if removed {
-+            self.revocations.send_replace(());
-+        }
-+        removed
-     }
-
-     pub fn revoke_all_tokens(&self) -> usize {
-         let mut tokens = self.paired_tokens.write();
-         let count = tokens.len();
-         tokens.clear();
-+        if count > 0 {
-+            self.revocations.send_replace(());
-+        }
-         count
-     }
-
-@@ -916,6 +935,44 @@
- mod tests {
-     use super::*;
-     use tokio::test;
-+
-+    #[test]
-+    async fn heimdall_acp_revocation_watch_tracks_only_its_identity() {
-+        for revoke_method in 0..3 {
-+            let guard = new_guard(true, &["fixture-target".into(), "fixture-other".into()]);
-+            let target = PairingGuard::token_hash("fixture-target");
-+            let mut revoked = Box::pin(guard.wait_token_revoked(&target));
-+            std::future::poll_fn(|cx| {
-+                assert!(revoked.as_mut().poll(cx).is_pending());
-+                std::task::Poll::Ready(())
-+            })
-+            .await;
-+            assert!(guard.revoke_token("fixture-other"));
-+            std::future::poll_fn(|cx| {
-+                assert!(revoked.as_mut().poll(cx).is_pending());
-+                std::task::Poll::Ready(())
-+            })
-+            .await;
-+            match revoke_method {
-+                0 => assert!(guard.revoke_token("fixture-target")),
-+                1 => assert!(guard.revoke_token_hash(&target)),
-+                _ => assert_eq!(guard.revoke_all_tokens(), 1),
-+            }
-+            // Both an existing subscription and a late subscription must see
-+            // revocation, including between upgrade auth and the socket task.
-+            std::future::poll_fn(|cx| {
-+                assert!(revoked.as_mut().poll(cx).is_ready());
-+                std::task::Poll::Ready(())
-+            })
-+            .await;
-+            let mut late = Box::pin(guard.wait_token_revoked(&target));
-+            std::future::poll_fn(|cx| {
-+                assert!(late.as_mut().poll(cx).is_ready());
-+                std::task::Poll::Ready(())
-+            })
-+            .await;
-+        }
-+    }
-
-     /// Serializes the tests that either emit or assert-the-absence-of the
-     /// clamp WARN. The log broadcast is process-global, so two overlapping
+diff --git a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
+index 3d62fd9..dffb4ba 100644
 --- a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 +++ b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
-@@ -125,7 +125,70 @@
+@@ -125,7 +125,70 @@ enum ConfigSource {
      Live(zeroclaw_config::live::LiveConfigHandle),
  }
 
@@ -178,7 +73,7 @@
      /// The sole authority for `Config`-backed settings. Managed stdio and
      /// gateway ACP resolve their shared authority's config.
      config_source: ConfigSource,
-@@ -297,6 +360,7 @@
+@@ -297,6 +360,7 @@ impl AcpServer {
          store: Option<Arc<AcpSessionStore>>,
      ) -> Self {
          Self {
@@ -186,12 +81,10 @@
              config_source,
              agent_lifecycle,
              acp_config,
-@@ -313,6 +377,19 @@
-             connection_default_agent: None,
-             client_elicitation_caps: std::sync::RwLock::new(ElicitationCapabilities::default()),
+@@ -315,6 +379,19 @@ impl AcpServer {
          }
-+    }
-+
+     }
+
 +    /// Bind only the authenticated digest; never retain the bearer token.
 +    pub fn with_connection_pairing(
 +        mut self,
@@ -203,10 +96,12 @@
 +            token_hash,
 +        });
 +        self
-     }
-
++    }
++
      fn config_snapshot(&self) -> Config {
-@@ -583,6 +660,9 @@
+         match &self.config_source {
+             ConfigSource::Standalone(config) => config.as_ref().clone(),
+@@ -583,6 +660,9 @@ impl AcpServer {
              "ACP server starting (WebSocket/framed mode)"
          );
          while let Some(line) = input_rx.recv().await {
@@ -216,7 +111,7 @@
              let trimmed = line.trim();
              if trimmed.is_empty() {
                  continue;
-@@ -594,6 +674,9 @@
+@@ -594,6 +674,9 @@ impl AcpServer {
      }
 
      async fn process_line(self: &Arc<Self>, trimmed: &str) {
@@ -226,7 +121,7 @@
          // First, peek at whether this is a response (has `result` or
          // `error`) to a request *we* sent. Inbound requests/notifications
          // fall through to the JsonRpcRequest path.
-@@ -646,6 +729,13 @@
+@@ -646,6 +729,13 @@ impl AcpServer {
      async fn handle_request(&self, request: JsonRpcRequest) {
          let id = request.id.clone().unwrap_or(Value::Null);
          let is_notification = request.id.is_none();
@@ -240,7 +135,7 @@
 
          let result = match request.method.as_str() {
              "initialize" => self.handle_initialize(&request.params),
-@@ -971,6 +1061,7 @@
+@@ -971,6 +1061,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -248,7 +143,7 @@
              loading.insert(session_id.clone());
          }
 
-@@ -1065,9 +1156,13 @@
+@@ -1065,9 +1156,13 @@ impl AcpServer {
              // authenticated gateway principal, so these sessions are stamped
              // with a NULL owner -- visible only to unscoped connections, never
              // to a scoped gateway principal (RFC 7141 F2).
@@ -265,7 +160,7 @@
              let error = match created {
                  Ok(Ok(_)) => None,
                  Ok(Err(e)) => Some(e.to_string()),
-@@ -1101,6 +1196,7 @@
+@@ -1101,6 +1196,7 @@ impl AcpServer {
              let mut sessions = self.sessions.lock().await;
              let mut loading = self.loading_sessions.lock().await;
              loading.remove(&session_id);
@@ -273,7 +168,7 @@
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1178,6 +1274,7 @@
+@@ -1178,6 +1274,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -281,7 +176,7 @@
 
          // Atomically check and reserve the session slot
          {
-@@ -1223,6 +1320,7 @@
+@@ -1223,6 +1320,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -289,7 +184,7 @@
              loading.insert(session_id.clone());
          }
 
-@@ -1408,14 +1506,12 @@
+@@ -1408,14 +1506,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -305,17 +200,17 @@
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1435,6 +1531,9 @@
-                 })),
+@@ -1436,6 +1532,9 @@ impl AcpServer {
              );
          }
-+
+
 +        // Successful publication transfers gate cleanup to `session/close`.
 +        restore_gate.disarm();
-
++
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
-@@ -1515,6 +1614,7 @@
+         {
+@@ -1515,6 +1614,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -323,7 +218,7 @@
 
          // Atomically check and reserve the session slot
          {
-@@ -1560,6 +1660,7 @@
+@@ -1560,6 +1660,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -331,7 +226,7 @@
              loading.insert(session_id.clone());
          }
 
-@@ -1701,14 +1802,12 @@
+@@ -1701,14 +1802,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -347,17 +242,17 @@
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1728,6 +1827,9 @@
-                 })),
+@@ -1729,6 +1828,9 @@ impl AcpServer {
              );
          }
-+
+
 +        // Successful publication transfers gate cleanup to `session/close`.
 +        restore_gate.disarm();
-
++
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
-@@ -1963,14 +2065,18 @@
+         {
+@@ -1963,14 +2065,18 @@ impl AcpServer {
              }
          }
 
@@ -384,7 +279,7 @@
              Ok(prompt) => prompt,
              Err(e) => {
                  // Release the reservation we just took so a bad attachment doesn't
-@@ -2023,6 +2129,7 @@
+@@ -2023,6 +2129,7 @@ impl AcpServer {
          let session_id_for_task = session_id.clone();
          let persist_store = self.store.clone();
          let persist_session_id = session_id.clone();
@@ -392,7 +287,7 @@
          let turn_handle = zeroclaw_spawn::spawn!(async move {
              let mut session = session_arc.lock().await;
              let (turn_alias, turn_provider, turn_model) = session.agent.attribution_fields();
-@@ -2048,7 +2155,7 @@
+@@ -2048,7 +2155,7 @@ impl AcpServer {
                      model = %turn_model,
                      channel = "acp",
                  );
@@ -401,7 +296,7 @@
                      Some(session_id_for_task),
                      zeroclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                          cost_context,
-@@ -2057,13 +2164,26 @@
+@@ -2057,13 +2164,26 @@ impl AcpServer {
                              .turn_streamed_with_steering_state(
                                  &prompt,
                                  event_tx,
@@ -431,7 +326,7 @@
              };
              session.last_active = Instant::now();
 
-@@ -3846,6 +3966,322 @@
+@@ -3846,6 +3966,322 @@ mod tests {
      use super::*;
      use async_trait::async_trait;
 
@@ -754,9 +649,120 @@
      fn valid_1x1_png() -> Vec<u8> {
          let mut bytes = std::io::Cursor::new(Vec::new());
          image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+diff --git a/crates/zeroclaw-config/src/pairing.rs b/crates/zeroclaw-config/src/pairing.rs
+index 46c735a..7bf9dfc 100644
+--- a/crates/zeroclaw-config/src/pairing.rs
++++ b/crates/zeroclaw-config/src/pairing.rs
+@@ -364,6 +364,8 @@ pub struct PairingGuard {
+     /// (see [`PairingGuard::hold_paired_tokens`]) delays only pairing and
+     /// revocation, not other liveness checks.
+     paired_tokens: Arc<RwLock<HashSet<String>>>,
++    /// Wakes established transports when live pairing membership is revoked.
++    revocations: tokio::sync::watch::Sender<()>,
+     /// Brute-force protection: per-client failed attempt state + last sweep timestamp.
+     failed_attempts: Arc<Mutex<(HashMap<String, FailedAttemptState>, Instant)>>,
+     /// The admin token this gateway run accepts on the pairing-code admin
+@@ -448,6 +450,7 @@ impl PairingGuard {
+             require_pairing,
+             pairing_code: Arc::new(Mutex::new(code)),
+             paired_tokens: Arc::new(RwLock::new(tokens)),
++            revocations: tokio::sync::watch::channel(()).0,
+             failed_attempts: Arc::new(Mutex::new((HashMap::new(), Instant::now()))),
+             admin_token: Arc::new(Mutex::new(None)),
+         }
+@@ -719,22 +722,38 @@ impl PairingGuard {
+         tokens.iter().cloned().collect()
+     }
+
++    /// Wait for this identity to leave the live paired-token set. Subscribe
++    /// before checking membership so revocation cannot be lost during upgrade.
++    pub async fn wait_token_revoked(&self, token_hash: &str) {
++        let mut changes = self.revocations.subscribe();
++        while self.token_hash_is_paired(token_hash) {
++            if changes.changed().await.is_err() {
++                return;
++            }
++        }
++    }
++
+     pub fn revoke_token(&self, token: &str) -> bool {
+-        let hashed = hash_token(token);
+-        let mut tokens = self.paired_tokens.write();
+-        tokens.remove(&hashed)
++        self.revoke_token_hash(&hash_token(token))
+     }
+
+     /// Revoke a paired token by its SHA-256 hash. Returns true if removed.
+     pub fn revoke_token_hash(&self, token_hash: &str) -> bool {
+         let mut tokens = self.paired_tokens.write();
+-        tokens.remove(token_hash)
++        let removed = tokens.remove(token_hash);
++        if removed {
++            self.revocations.send_replace(());
++        }
++        removed
+     }
+
+     pub fn revoke_all_tokens(&self) -> usize {
+         let mut tokens = self.paired_tokens.write();
+         let count = tokens.len();
+         tokens.clear();
++        if count > 0 {
++            self.revocations.send_replace(());
++        }
+         count
+     }
+
+@@ -917,6 +936,44 @@ mod tests {
+     use super::*;
+     use tokio::test;
+
++    #[test]
++    async fn heimdall_acp_revocation_watch_tracks_only_its_identity() {
++        for revoke_method in 0..3 {
++            let guard = new_guard(true, &["fixture-target".into(), "fixture-other".into()]);
++            let target = PairingGuard::token_hash("fixture-target");
++            let mut revoked = Box::pin(guard.wait_token_revoked(&target));
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_pending());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            assert!(guard.revoke_token("fixture-other"));
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_pending());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            match revoke_method {
++                0 => assert!(guard.revoke_token("fixture-target")),
++                1 => assert!(guard.revoke_token_hash(&target)),
++                _ => assert_eq!(guard.revoke_all_tokens(), 1),
++            }
++            // Both an existing subscription and a late subscription must see
++            // revocation, including between upgrade auth and the socket task.
++            std::future::poll_fn(|cx| {
++                assert!(revoked.as_mut().poll(cx).is_ready());
++                std::task::Poll::Ready(())
++            })
++            .await;
++            let mut late = Box::pin(guard.wait_token_revoked(&target));
++            std::future::poll_fn(|cx| {
++                assert!(late.as_mut().poll(cx).is_ready());
++                std::task::Poll::Ready(())
++            })
++            .await;
++        }
++    }
++
+     /// Serializes the tests that either emit or assert-the-absence-of the
+     /// clamp WARN. The log broadcast is process-global, so two overlapping
+     /// capture windows would let one test see the other's warning.
+diff --git a/crates/zeroclaw-gateway/src/acp.rs b/crates/zeroclaw-gateway/src/acp.rs
+index 8ccbefa..d73fab2 100644
 --- a/crates/zeroclaw-gateway/src/acp.rs
 +++ b/crates/zeroclaw-gateway/src/acp.rs
-@@ -34,16 +34,21 @@
+@@ -34,16 +34,21 @@ pub async fn handle_ws_acp(
      headers: HeaderMap,
      ws: WebSocketUpgrade,
  ) -> impl IntoResponse {
@@ -769,8 +775,6 @@
 -                "Unauthorized - provide Authorization header, Sec-WebSocket-Protocol bearer, or ?token= query param",
 -            )
 -                .into_response();
--        }
--    }
 +        match state.pairing.authenticate_and_hash(token) {
 +            Some(hash) => Some(hash),
 +            None => {
@@ -780,14 +784,15 @@
 +                )
 +                    .into_response();
 +            }
-+        }
+         }
+-    }
 +    } else {
 +        None
 +    };
 
      let ws = if headers
          .get("sec-websocket-protocol")
-@@ -55,11 +60,16 @@
+@@ -55,11 +60,16 @@ pub async fn handle_ws_acp(
          ws
      };
 
@@ -806,7 +811,7 @@
      let (mut sender, mut receiver) = socket.split();
      let (input_tx, input_rx) = mpsc::channel::<String>(256);
      let (output_tx, mut output_rx) = mpsc::channel::<String>(256);
-@@ -93,7 +103,8 @@
+@@ -93,7 +103,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option
              )
              .with_canvas_store(canvas_store)
              .with_sop_engine(state.sop_engine.clone(), state.sop_audit.clone())
@@ -816,7 +821,7 @@
          )
      } else {
          Arc::new(
-@@ -105,67 +116,108 @@
+@@ -105,67 +116,108 @@ async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option
              )
              .with_canvas_store(canvas_store)
              .with_sop_engine(state.sop_engine.clone(), state.sop_audit.clone())
@@ -850,6 +855,7 @@
 -            Ok(Message::Binary(bytes)) => match String::from_utf8(bytes.to_vec()) {
 -                Ok(text) => {
 -                    if input_tx.send(text).await.is_err() {
+-                        break;
 +        };
 +
 +        let input = async {
@@ -859,7 +865,32 @@
 +                        if input_tx.send(text.to_string()).await.is_err() {
 +                            break;
 +                        }
-+                    }
+                     }
+-                }
+-                Err(e) => ::zeroclaw_log::record!(
+-                    WARN,
+-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+-                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+-                    "ACP WebSocket received non-UTF-8 binary frame"
+-                ),
+-            },
+-            Ok(Message::Close(_)) => break,
+-            Ok(Message::Ping(_) | Message::Pong(_)) => {}
+-            Err(e) => {
+-                let msg = e.to_string();
+-                if msg.contains("Connection reset without closing handshake")
+-                    || msg.contains("Connection closed normally")
+-                {
+-                    ::zeroclaw_log::record!(
+-                        DEBUG,
+-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+-                        "ACP WebSocket closed without handshake"
+-                    );
+-                } else {
+-                    ::zeroclaw_log::record!(
+-                        WARN,
+-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
 +                    Ok(Message::Binary(bytes)) => match String::from_utf8(bytes.to_vec()) {
 +                        Ok(text) => {
 +                            if input_tx.send(text).await.is_err() {
@@ -872,8 +903,10 @@
 +                                module_path!(),
 +                                ::zeroclaw_log::Action::Note
 +                            )
-+                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-+                            .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+                             .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                             .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+-                        "ACP WebSocket receive error"
+-                    );
 +                            "ACP WebSocket received non-UTF-8 binary frame"
 +                        ),
 +                    },
@@ -904,42 +937,11 @@
 +                                "ACP WebSocket receive error"
 +                            );
 +                        }
-                         break;
-                     }
++                        break;
++                    }
                  }
--                Err(e) => ::zeroclaw_log::record!(
--                    WARN,
--                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
--                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
--                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
--                    "ACP WebSocket received non-UTF-8 binary frame"
--                ),
--            },
--            Ok(Message::Close(_)) => break,
--            Ok(Message::Ping(_) | Message::Pong(_)) => {}
--            Err(e) => {
--                let msg = e.to_string();
--                if msg.contains("Connection reset without closing handshake")
--                    || msg.contains("Connection closed normally")
--                {
--                    ::zeroclaw_log::record!(
--                        DEBUG,
--                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
--                        "ACP WebSocket closed without handshake"
--                    );
--                } else {
--                    ::zeroclaw_log::record!(
--                        WARN,
--                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
--                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
--                            .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
--                        "ACP WebSocket receive error"
--                    );
--                }
 -                break;
--            }
--        }
-+            }
+             }
 +        };
 +        let revocation = async {
 +            if let Some(hash) = token_hash.as_deref() {
@@ -953,7 +955,7 @@
 +            _ = revocation => true,
 +            _ = input => false,
 +            _ = output => false,
-+        }
+         }
 +    };
 +    if revoked {
 +        // The peer may have stopped reading. Bound the close handshake; dropping
@@ -974,7 +976,7 @@
      drop(input_tx);
 
      if let Err(e) = server_task.await {
-@@ -177,7 +229,6 @@
+@@ -177,7 +229,6 @@ async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option
              "ACP WebSocket server task panicked"
          );
      }
@@ -982,7 +984,7 @@
      ::zeroclaw_log::record!(
          DEBUG,
          ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
-@@ -377,4 +428,226 @@
+@@ -377,4 +428,226 @@ mod tests {
               return the per-agent workspace, not the daemon CWD"
          );
      }
@@ -1209,13 +1211,14 @@
 +        assert!(server.await.unwrap_err().is_cancelled());
 +    }
  }
+diff --git a/crates/zeroclaw-gateway/src/ws.rs b/crates/zeroclaw-gateway/src/ws.rs
+index 66c51f7..96a9a07 100644
 --- a/crates/zeroclaw-gateway/src/ws.rs
 +++ b/crates/zeroclaw-gateway/src/ws.rs
-@@ -499,6 +499,22 @@ async fn handle_socket(
-
-     loop {
-         let first = tokio::select! {
-+            biased;
+@@ -586,6 +586,21 @@ async fn handle_socket(
+             // A frame that has already arrived is answered before the socket
+             // is closed for a stop.
+             biased;
 +            _ = async {
 +                if let Some(ref hash) = auth_subject {
 +                    state.pairing.wait_token_revoked(hash).await;
@@ -1232,13 +1235,12 @@
 +                return;
 +            }
              first = receiver.next() => first,
-             _ = tick_websocket_ping(&mut ping_interval) => {
-                 if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
-@@ -799,6 +815,23 @@ async fn handle_socket(
-
-     loop {
-         tokio::select! {
-+            biased;
+             _ = gateway_stop_signal(&mut gateway_stopping) => {
+                 close_for_reconnect(&mut sender, &mut receiver, "gateway restarting").await;
+@@ -896,6 +911,21 @@ async fn handle_socket(
+             // the wire when the close goes out is not, and the client finds
+             // that out by reconnecting.
+             biased;
 +            _ = async {
 +                if let Some(ref hash) = auth_subject {
 +                    state.pairing.wait_token_revoked(hash).await;
@@ -1254,11 +1256,10 @@
 +                let _ = sender.send(Message::Text(err.to_string().into())).await;
 +                break;
 +            }
-+
+
              // ── Keepalive ─────────────────────────────────────────────
              _ = tick_websocket_ping(&mut ping_interval) => {
-                 if sender.send(Message::Ping(Vec::new().into())).await.is_err() {
-@@ -834,6 +867,18 @@ async fn handle_socket(
+@@ -932,6 +962,18 @@ async fn handle_socket(
                      }
                  };
 
@@ -1277,7 +1278,7 @@
                  let msg_type = parsed["type"].as_str().unwrap_or("");
 
                  // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-@@ -1873,9 +1918,33 @@ async fn process_chat_message(
+@@ -1979,9 +2021,33 @@ async fn process_chat_message(
      let forward_fut = async {
          let mut cancel_drained = false;
          let mut client_gone = false;
@@ -1311,7 +1312,7 @@
                              _ = cancel_token.cancelled(), if !cancel_drained => {
                                  let drained: Vec<_> = pending_approvals.lock().drain().collect();
                                  drop(drained);
-@@ -1911,6 +1980,26 @@ async fn process_chat_message(
+@@ -2017,6 +2083,26 @@ async fn process_chat_message(
                                      let _ = sender.send(Message::Text(err.to_string().into())).await;
                                      continue;
                                  };
@@ -1338,7 +1339,7 @@
                                  match parsed["type"].as_str() {
                                      Some("approval_response") => {
                                          // A SOP-kind frame is a gate resolution (keyed by run_id),
-@@ -2090,7 +2179,33 @@ async fn process_chat_message(
+@@ -2196,7 +2282,33 @@ async fn process_chat_message(
                                  if client_gone {
                                      continue;
                                  }
@@ -1373,7 +1374,7 @@
                                      detach_mid_turn(session_key, &turn_id, pending_approvals);
                                      client_gone = true;
                                  }
-@@ -3043,6 +3158,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3149,6 +3261,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
      impl ParkedTurnFixture {
          async fn spawn() -> Self {
@@ -1384,7 +1385,7 @@
              let (request_seen_tx, request_seen) =
                  tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
              let (released, released_rx) = tokio::sync::watch::channel(0usize);
-@@ -3132,10 +3251,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3238,10 +3354,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
              let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
                  .expect("sqlite session backend");
@@ -1408,7 +1409,7 @@
              let gateway_app = Router::new()
                  .route("/ws/chat", get(handle_ws_chat))
                  .with_state(state.clone());
-@@ -3149,15 +3280,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3255,15 +3383,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                      .expect("local WebSocket gateway serves");
              });
 
@@ -1436,7 +1437,7 @@
          }
 
          /// Open a chat socket on `session_id` and return it with the
-@@ -4802,6 +4936,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -5124,6 +5255,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
          );
      }
 

@@ -64,5 +64,5 @@ workload fits 1 GB RAM, 1 GB ephemeral storage or 500 MB persistent storage.
 - [Trusted users](operations.md#trusted-telegram-users)
 - [Recovery](operations.md#authentication-and-storage-recovery)
 - [Narrow subprocess profiles](operations.md#narrow-subprocess-profiles)
-- [Runtime upgrade](operations.md#upgrading-to-zeroclaw-v086)
+- [Runtime upgrade](operations.md#upgrading-to-zeroclaw-v087)
 - [Context budgets](operations.md#context-budgets-and-long-tasks)

@@ -67,6 +67,6 @@ AgentMail must target `/agentmail/events`, where its signature, sender/content r
 - [Adapter source](../launcher/src/agentmail.rs) and [tests](../launcher/src/agentmail/tests.rs): signature admission, dispatch shape, safe results, persistence, diagnostics and replay suppression.
 - [Configuration](../deploy/bot/config.template.toml): SOP subsystem and gateway pairing policy.
 - [Build recipe](../deploy/bot/Dockerfile): pinned runtime and remaining patches.
-- [Native upstream SOP fan-in](https://github.com/zeroclaw-labs/zeroclaw/blob/c473221313341a853e04122f93bb9bd26b5e6c47/docs/book/src/sop/fan-in/webhook.md): exact trigger/auth semantics for this pinned source.
+- [Native upstream SOP fan-in](https://github.com/zeroclaw-labs/zeroclaw/blob/99bd353c756f4e64f381cfe9c3002ebff32f3055/docs/book/src/sop/fan-in/webhook.md): exact trigger/auth semantics for this pinned source.
 
 Local HTTP fixtures establish the adapter contract, not live SOP execution. Native Linux build validation and a synthetic deployed event with the migrated SOP are still required before claiming end-to-end compatibility. This local work does not change installed SOP definitions, replay events or deploy an image.

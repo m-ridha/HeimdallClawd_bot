@@ -1,6 +1,6 @@
 # Operations
 
-HeimdallClawd uses pinned ZeroClaw 0.8.6 with a Rust launcher in a single networked service. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
+HeimdallClawd uses pinned ZeroClaw 0.8.7 with a Rust launcher in a single networked service. The runtime revision and source archive checksum are in `deploy/bot/runtime.lock.json`. The deployment image applies the private-Telegram gate documented in `deploy/bot/NOTICE.md`.
 
 ## Railway services
 
@@ -428,15 +428,15 @@ Chromium still runs with container-compatible service flags;
 this is not a secure browser sandbox. Keep pairing, Telegram authorization and
 signed admission intact. Never run untrusted repository scripts without review.
 
-## Upgrading to ZeroClaw v0.8.6
+## Upgrading to ZeroClaw v0.8.7
 
-The runtime is pinned to the immutable v0.8.6 commit and archive checksum in `deploy/bot/runtime.lock.json`. The single-service configuration retains existing provider variables, subscription sign-in and persistent agent volume paths. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
+The runtime is pinned to the immutable v0.8.7 commit and archive checksum in `deploy/bot/runtime.lock.json`. The single-service configuration retains existing provider variables, subscription sign-in and persistent agent volume paths. No new secret or service is required. Take an operator-controlled backup of persistent state before publishing the upgrade; volumes are not backups. Do not copy authentication files or conversation databases into Git or build artifacts.
 
-The upstream runtime now supplies typed Telegram transcription initialization and crate-local WASM interface paths. The current local patch purposes are documented in [NOTICE](../deploy/bot/NOTICE.md), and the exact zero-fuzz application order lives in [the Dockerfile](../deploy/bot/Dockerfile). They also cover SOP-authoring guidance, Responses history repair; do not treat the original upgrade patch count as current. `tools-external` and `tool-project-intel` are explicit build features because v0.8.6 no longer includes these adapters through `agent-runtime` alone.
+The upstream runtime now supplies typed Telegram transcription initialization, crate-local WASM interface paths, and fixes for Wasmtime and TLS/crypto advisories (retiring the former `security-dependencies` patch). The current local patch purposes are documented in [NOTICE](../deploy/bot/NOTICE.md), and the exact zero-fuzz application order lives in [the Dockerfile](../deploy/bot/Dockerfile). They also cover SOP-authoring guidance, Responses history repair; do not treat the original upgrade patch count as current. `tools-external` and `tool-project-intel` are explicit build features because v0.8.7 no longer includes these adapters through `agent-runtime` alone.
 
 `[tools].optional = ["*"]` preserves full built-in availability; it does not grant execution. The primary profile grants `tool_search` for deferred built-in schemas. Native memory reranking uses MMR and deduplication with a two-times candidate pool, without a new API call; previous documentation incorrectly described the available stage as unimplemented. MCP remains eager for the retained integration servers; skills execute locally. The launcher regenerates managed settings at startup; extra native skill-bundle definitions are deliberately preserved. Use Railway overrides or a reviewed template change for other durable configuration.
 
-Before rollout, confirm existing memory, response-cache and audit SQLite files (including WAL/SHM companions) are regular, singly linked, owned by the service user and inaccessible to group/others. v0.8.6 rejects unsafe files. If startup reports this condition, enter recovery mode, stop database writers, back up state and correct the specific file's ownership/mode after checking it is not a symlink or hardlink. Do not recursively change permissions or delete databases to make startup pass.
+Before rollout, confirm existing memory, response-cache and audit SQLite files (including WAL/SHM companions) are regular, singly linked, owned by the service user and inaccessible to group/others. v0.8.7 rejects unsafe files. If startup reports this condition, enter recovery mode, stop database writers, back up state and correct the specific file's ownership/mode after checking it is not a symlink or hardlink. Do not recursively change permissions or delete databases to make startup pass.
 
 After deployment, verify private text and voice messages, model switching, a GitHub read through the `github` alias, web search, text browsing, tool discovery, native skill execution and workspace write/read/command tools. Check that group messages are rejected and native/root commands work only through authenticated entry points. Review scheduled-task and heartbeat delivery after restart. None of these live checks is implied by a successful source build.
 
