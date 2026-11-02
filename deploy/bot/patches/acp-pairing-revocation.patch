@@ -1229,10 +1229,10 @@ index 8ccbefa..d73fab2 100644
 +    }
  }
 diff --git a/crates/zeroclaw-gateway/src/ws.rs b/crates/zeroclaw-gateway/src/ws.rs
-index 66c51f7..96a9a07 100644
+index 66c51f7..8cf7d79 100644
 --- a/crates/zeroclaw-gateway/src/ws.rs
 +++ b/crates/zeroclaw-gateway/src/ws.rs
-@@ -586,6 +586,21 @@ async fn handle_socket(
+@@ -586,6 +586,24 @@ async fn handle_socket(
              // A frame that has already arrived is answered before the socket
              // is closed for a stop.
              biased;
@@ -1248,13 +1248,16 @@ index 66c51f7..96a9a07 100644
 +                    "message": "Session pairing was revoked",
 +                    "code": "AUTH_REQUIRED"
 +                });
-+                let _ = sender.send(Message::Text(err.to_string().into())).await;
++                let _ = tokio::time::timeout(
++                    std::time::Duration::from_secs(1),
++                    sender.send(Message::Text(err.to_string().into())),
++                ).await;
 +                return;
 +            }
              first = receiver.next() => first,
              _ = gateway_stop_signal(&mut gateway_stopping) => {
                  close_for_reconnect(&mut sender, &mut receiver, "gateway restarting").await;
-@@ -896,6 +911,21 @@ async fn handle_socket(
+@@ -896,6 +914,24 @@ async fn handle_socket(
              // the wire when the close goes out is not, and the client finds
              // that out by reconnecting.
              biased;
@@ -1270,13 +1273,16 @@ index 66c51f7..96a9a07 100644
 +                    "message": "Session pairing was revoked",
 +                    "code": "AUTH_REQUIRED"
 +                });
-+                let _ = sender.send(Message::Text(err.to_string().into())).await;
++                let _ = tokio::time::timeout(
++                    std::time::Duration::from_secs(1),
++                    sender.send(Message::Text(err.to_string().into())),
++                ).await;
 +                break;
 +            }
 
              // ── Keepalive ─────────────────────────────────────────────
              _ = tick_websocket_ping(&mut ping_interval) => {
-@@ -932,6 +962,18 @@ async fn handle_socket(
+@@ -932,6 +968,18 @@ async fn handle_socket(
                      }
                  };
 
@@ -1295,7 +1301,29 @@ index 66c51f7..96a9a07 100644
                  let msg_type = parsed["type"].as_str().unwrap_or("");
 
                  // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-@@ -1979,9 +2021,33 @@ async fn process_chat_message(
+@@ -1040,6 +1088,21 @@ async fn handle_socket(
+                     }
+                 };
+
++                if let Some(ref hash) = auth_subject {
++                    if !state.pairing.token_hash_is_paired(hash) {
++                        let err = serde_json::json!({
++                            "type": "error",
++                            "message": "Session pairing was revoked",
++                            "code": "AUTH_REQUIRED"
++                        });
++                        let _ = tokio::time::timeout(
++                            std::time::Duration::from_secs(1),
++                            sender.send(Message::Text(err.to_string().into())),
++                        ).await;
++                        break;
++                    }
++                }
++
+                 let client_gone = process_chat_message(
+                     &state,
+                     &mut agent,
+@@ -1979,9 +2042,33 @@ async fn process_chat_message(
      let forward_fut = async {
          let mut cancel_drained = false;
          let mut client_gone = false;
@@ -1329,7 +1357,7 @@ index 66c51f7..96a9a07 100644
                              _ = cancel_token.cancelled(), if !cancel_drained => {
                                  let drained: Vec<_> = pending_approvals.lock().drain().collect();
                                  drop(drained);
-@@ -2017,6 +2083,26 @@ async fn process_chat_message(
+@@ -2017,6 +2104,26 @@ async fn process_chat_message(
                                      let _ = sender.send(Message::Text(err.to_string().into())).await;
                                      continue;
                                  };
@@ -1356,7 +1384,7 @@ index 66c51f7..96a9a07 100644
                                  match parsed["type"].as_str() {
                                      Some("approval_response") => {
                                          // A SOP-kind frame is a gate resolution (keyed by run_id),
-@@ -2196,7 +2282,33 @@ async fn process_chat_message(
+@@ -2196,7 +2303,33 @@ async fn process_chat_message(
                                  if client_gone {
                                      continue;
                                  }
@@ -1391,7 +1419,7 @@ index 66c51f7..96a9a07 100644
                                      detach_mid_turn(session_key, &turn_id, pending_approvals);
                                      client_gone = true;
                                  }
-@@ -3149,6 +3261,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3149,6 +3282,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
      impl ParkedTurnFixture {
          async fn spawn() -> Self {
@@ -1402,7 +1430,7 @@ index 66c51f7..96a9a07 100644
              let (request_seen_tx, request_seen) =
                  tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
              let (released, released_rx) = tokio::sync::watch::channel(0usize);
-@@ -3238,10 +3354,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3238,10 +3375,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
              let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
                  .expect("sqlite session backend");
@@ -1426,7 +1454,7 @@ index 66c51f7..96a9a07 100644
              let gateway_app = Router::new()
                  .route("/ws/chat", get(handle_ws_chat))
                  .with_state(state.clone());
-@@ -3255,15 +3383,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3255,15 +3404,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                      .expect("local WebSocket gateway serves");
              });
 
@@ -1454,7 +1482,7 @@ index 66c51f7..96a9a07 100644
          }
 
          /// Open a chat socket on `session_id` and return it with the
-@@ -5124,6 +5255,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -5124,6 +5276,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
          );
      }
 
