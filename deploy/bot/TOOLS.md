@@ -10,7 +10,7 @@ logs, messages, command arguments or tool results. Installing a binary does not
 prove a task succeeded: report actual commands, exit statuses and verification.
 
 The image includes Bash, Git, gh, SSH, Python 3, curl, jq, ripgrep, Node/npm,
-Rust 1.99, Cargo, rustfmt, Clippy and GCC. Verify deployed versions. Dependencies
+Rust 1.99, Cargo, rustfmt, Clippy, Go 1.27 and GCC. Verify deployed versions. Dependencies
 can be downloaded. Use python3 -B for scripts and jq for JSON. Install tools into
 persistent user directories when possible; system changes made with sudo survive
 only the current container, so durable system dependencies belong in the image.

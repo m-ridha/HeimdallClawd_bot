@@ -118,7 +118,7 @@ all-command admission and delegation are intentional operator decisions. There i
 no credential-isolated command boundary: root can access sign-in, integration
 credentials, messages and persistent state, and can stop the service.
 
-Git, gh, Bash, Python 3, curl, jq, Node/npm, SSH, Rust 1.99/Cargo/rustfmt/Clippy,
+Git, gh, Bash, Python 3, curl, jq, Node/npm, SSH, Go 1.27, Rust 1.99/Cargo/rustfmt/Clippy,
 GCC and Chromium are installed in the final image. Native shell has a 300-second
 timeout and upstream output bounds; large builds may exceed container resources.
 Telegram transfer helpers preserve relative-path, symlink, size and recipient
