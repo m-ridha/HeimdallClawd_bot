@@ -39,6 +39,7 @@ class PackageTests(unittest.TestCase):
             self.assertIn('visudo -cf /etc/sudoers.d/heimdall', dockerfile)
             self.assertIn('test "$(gosu heimdall id -u)" = 1000', dockerfile)
             self.assertIn('go version', dockerfile)
+            self.assertIn('slop-chop --version', dockerfile)
             self.assertNotIn('gosu heimdall sudo', dockerfile)
             workflow = (ROOT / '.github/workflows/build.yml').read_text()
             self.assertIn('gosu heimdall sudo -n cargo --version', workflow)

@@ -6,7 +6,7 @@ service runs native tools with internet and passwordless sudo root access.
 | Capability | Configuration and prerequisites |
 | --- | --- |
 | Shell, filesystem and Git | Native shell/read/write/edit/search/Git; full autonomy and command admission, 300-second shell timeout. Root can access credentials and change the bot. |
-| Development toolkit | Final image includes gh, Git, Bash, Python 3, curl, jq, Node/npm, SSH, ripgrep, GCC, Go 1.27 and pinned Rust/Cargo/rustfmt/Clippy. Dependencies can be downloaded. Large builds may exceed Trial resources. |
+| Development toolkit | Final image includes gh, Git, Bash, Python 3, curl, jq, Node/npm, SSH, ripgrep, GCC, Go 1.27, slop-chop and pinned Rust/Cargo/rustfmt/Clippy. Dependencies can be downloaded. Large builds may exceed Trial resources. |
 | Scheduling | Agent cron tools plus native shell schedule; Telegram delivery requires explicit recipient and a known timezone. |
 | Delegation | Native spawn_subagent/delegate granted; reachable targets and recursion limits remain upstream policy. Work shares credentials/resources. |
 | Parallel tools, pipelines, SOPs | Enabled; pipeline remains explicitly scoped and capped at twelve steps. SOP definitions/approval/state persist. |
@@ -43,7 +43,7 @@ nothing. Keep secrets in Railway native environment overrides, never TOML.
 
 ## Live verification after publishing a release
 
-1. Verify versions for gh, Go, Python, jq, curl, Node/npm, Cargo, rustc, rustfmt and
+1. Verify versions for gh, Go, slop-chop, Python, jq, curl, Node/npm, Cargo, rustc, rustfmt and
    cargo clippy; run sudo -n id -u and confirm root access.
 2. Clone an authorized test repository, edit/test on a feature branch and create
    a PR only when instructed; verify actual results and remote state.
