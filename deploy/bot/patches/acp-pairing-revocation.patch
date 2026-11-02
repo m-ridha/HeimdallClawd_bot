@@ -1,5 +1,5 @@
 diff --git a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
-index 3d62fd9..2ace22f 100644
+index 3d62fd9..4a2eac1 100644
 --- a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 +++ b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 @@ -125,7 +125,70 @@ enum ConfigSource {
@@ -160,7 +160,17 @@ index 3d62fd9..2ace22f 100644
              let error = match created {
                  Ok(Ok(_)) => None,
                  Ok(Err(e)) => Some(e.to_string()),
-@@ -1097,9 +1192,35 @@ impl AcpServer {
+@@ -1075,6 +1170,9 @@ impl AcpServer {
+             };
+             if let Some(detail) = error {
+                 self.loading_sessions.lock().await.remove(&session_id);
++                if let Err(pairing_err) = hold_connection_pairing(self.connection_pairing.as_ref()) {
++                    return Err(pairing_err);
++                }
+                 return Err(RpcError {
+                     code: INTERNAL_ERROR,
+                     message: format!("Failed to persist session: {detail}"),
+@@ -1097,9 +1195,35 @@ impl AcpServer {
          };
          let now = Instant::now();
          // Atomically insert and release the reservation.
@@ -196,7 +206,7 @@ index 3d62fd9..2ace22f 100644
              loading.remove(&session_id);
              sessions.insert(
                  session_id.clone(),
-@@ -1178,6 +1299,7 @@ impl AcpServer {
+@@ -1178,6 +1302,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -204,7 +214,7 @@ index 3d62fd9..2ace22f 100644
 
          // Atomically check and reserve the session slot
          {
-@@ -1223,6 +1345,7 @@ impl AcpServer {
+@@ -1223,6 +1348,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -212,7 +222,7 @@ index 3d62fd9..2ace22f 100644
              loading.insert(session_id.clone());
          }
 
-@@ -1408,14 +1531,12 @@ impl AcpServer {
+@@ -1408,14 +1534,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -228,7 +238,7 @@ index 3d62fd9..2ace22f 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1436,6 +1557,9 @@ impl AcpServer {
+@@ -1436,6 +1560,9 @@ impl AcpServer {
              );
          }
 
@@ -238,7 +248,7 @@ index 3d62fd9..2ace22f 100644
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1515,6 +1639,7 @@ impl AcpServer {
+@@ -1515,6 +1642,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
@@ -246,7 +256,7 @@ index 3d62fd9..2ace22f 100644
 
          // Atomically check and reserve the session slot
          {
-@@ -1560,6 +1685,7 @@ impl AcpServer {
+@@ -1560,6 +1688,7 @@ impl AcpServer {
                      data: None,
                  });
              }
@@ -254,7 +264,7 @@ index 3d62fd9..2ace22f 100644
              loading.insert(session_id.clone());
          }
 
-@@ -1701,14 +1827,12 @@ impl AcpServer {
+@@ -1701,14 +1830,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -270,7 +280,7 @@ index 3d62fd9..2ace22f 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1729,6 +1853,9 @@ impl AcpServer {
+@@ -1729,6 +1856,9 @@ impl AcpServer {
              );
          }
 
@@ -280,7 +290,7 @@ index 3d62fd9..2ace22f 100644
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1963,14 +2090,18 @@ impl AcpServer {
+@@ -1963,14 +2093,18 @@ impl AcpServer {
              }
          }
 
@@ -307,7 +317,7 @@ index 3d62fd9..2ace22f 100644
              Ok(prompt) => prompt,
              Err(e) => {
                  // Release the reservation we just took so a bad attachment doesn't
-@@ -2023,6 +2154,7 @@ impl AcpServer {
+@@ -2023,6 +2157,7 @@ impl AcpServer {
          let session_id_for_task = session_id.clone();
          let persist_store = self.store.clone();
          let persist_session_id = session_id.clone();
@@ -315,7 +325,7 @@ index 3d62fd9..2ace22f 100644
          let turn_handle = zeroclaw_spawn::spawn!(async move {
              let mut session = session_arc.lock().await;
              let (turn_alias, turn_provider, turn_model) = session.agent.attribution_fields();
-@@ -2048,7 +2180,7 @@ impl AcpServer {
+@@ -2048,7 +2183,7 @@ impl AcpServer {
                      model = %turn_model,
                      channel = "acp",
                  );
@@ -324,7 +334,7 @@ index 3d62fd9..2ace22f 100644
                      Some(session_id_for_task),
                      zeroclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                          cost_context,
-@@ -2057,13 +2189,26 @@ impl AcpServer {
+@@ -2057,13 +2192,26 @@ impl AcpServer {
                              .turn_streamed_with_steering_state(
                                  &prompt,
                                  event_tx,
@@ -354,7 +364,7 @@ index 3d62fd9..2ace22f 100644
              };
              session.last_active = Instant::now();
 
-@@ -3846,6 +3991,322 @@ mod tests {
+@@ -3846,6 +3994,322 @@ mod tests {
      use super::*;
      use async_trait::async_trait;
 
@@ -662,12 +672,12 @@ index 3d62fd9..2ace22f 100644
 +            pairing.revoke_all_tokens();
 +            release.send(()).unwrap();
 +            blocker.await.unwrap();
-+            assert!(
-+                tokio::time::timeout(Duration::from_secs(5), creation)
-+                    .await
-+                    .unwrap()
-+                    .is_err()
-+            );
++            let creation_err = tokio::time::timeout(Duration::from_secs(5), creation)
++                .await
++                .unwrap()
++                .unwrap_err();
++            assert_eq!(creation_err.code, AUTH_REQUIRED);
++            assert_eq!(creation_err.message, "ACP pairing was revoked");
 +            assert!(store.list_sessions().unwrap().is_empty());
 +            assert!(server.sessions.lock().await.is_empty());
 +            assert!(server.loading_sessions.lock().await.is_empty());
@@ -1240,7 +1250,7 @@ index 8ccbefa..d73fab2 100644
 +    }
  }
 diff --git a/crates/zeroclaw-gateway/src/ws.rs b/crates/zeroclaw-gateway/src/ws.rs
-index 66c51f7..8cf7d79 100644
+index 66c51f7..b9eb3f2 100644
 --- a/crates/zeroclaw-gateway/src/ws.rs
 +++ b/crates/zeroclaw-gateway/src/ws.rs
 @@ -586,6 +586,24 @@ async fn handle_socket(
@@ -1430,7 +1440,20 @@ index 66c51f7..8cf7d79 100644
                                      detach_mid_turn(session_key, &turn_id, pending_approvals);
                                      client_gone = true;
                                  }
-@@ -3149,6 +3282,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -2264,8 +2397,10 @@ async fn process_chat_message(
+         }
+
+         // Inform the client the turn was aborted
+-        let aborted = serde_json::json!({ "type": "aborted" });
+-        let _ = sender.send(Message::Text(aborted.to_string().into())).await;
++        if !client_gone {
++            let aborted = serde_json::json!({ "type": "aborted" });
++            let _ = sender.send(Message::Text(aborted.to_string().into())).await;
++        }
+
+         if let Some(ref backend) = state.session_backend
+             && backend.session_exists(session_key)
+@@ -3149,6 +3284,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
      impl ParkedTurnFixture {
          async fn spawn() -> Self {
@@ -1441,7 +1464,7 @@ index 66c51f7..8cf7d79 100644
              let (request_seen_tx, request_seen) =
                  tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
              let (released, released_rx) = tokio::sync::watch::channel(0usize);
-@@ -3238,10 +3375,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3238,10 +3377,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
 
              let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
                  .expect("sqlite session backend");
@@ -1465,7 +1488,7 @@ index 66c51f7..8cf7d79 100644
              let gateway_app = Router::new()
                  .route("/ws/chat", get(handle_ws_chat))
                  .with_state(state.clone());
-@@ -3255,15 +3404,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -3255,15 +3406,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
                      .expect("local WebSocket gateway serves");
              });
 
@@ -1493,7 +1516,7 @@ index 66c51f7..8cf7d79 100644
          }
 
          /// Open a chat socket on `session_id` and return it with the
-@@ -5124,6 +5276,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+@@ -5124,6 +5278,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
          );
      }
 
