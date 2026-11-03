@@ -3,7 +3,9 @@ import io
 import importlib.util
 import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -78,6 +80,72 @@ class DeploymentHealthTests(unittest.TestCase):
                 {'deploymentId': DEPLOYMENT},
                 [{'id': OTHER, 'status': 'SUCCESS'}, {'id': DEPLOYMENT, 'status': 'FAILED'}],
             ])
+
+    def test_workflow_ancestry_check_uses_fully_qualified_remote_tracking_ref(self):
+        build_workflow = (pathlib.Path(__file__).parents[2] / '.github/workflows/build.yml').read_text()
+        self.assertNotIn('git merge-base --is-ancestor HEAD origin/main', build_workflow)
+        ancestry_steps = [
+            line.strip()
+            for line in build_workflow.splitlines()
+            if 'git merge-base --is-ancestor' in line
+        ]
+        self.assertEqual(len(ancestry_steps), 2)
+        for step in ancestry_steps:
+            self.assertEqual(step, 'run: git merge-base --is-ancestor HEAD refs/remotes/origin/main')
+
+    def test_ancestry_check_rejects_tag_collision_for_unrelated_release_commit(self):
+        with tempfile.TemporaryDirectory() as upstream_dir, tempfile.TemporaryDirectory() as client_dir:
+            upstream = pathlib.Path(upstream_dir)
+            client = pathlib.Path(client_dir)
+
+            def git(args, cwd):
+                return subprocess.run(
+                    ['git', *args],
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+            # Initialize upstream with main branch
+            git(['init', '-q'], cwd=upstream)
+            git(['config', 'user.name', 'test'], cwd=upstream)
+            git(['config', 'user.email', 'test@example.com'], cwd=upstream)
+            (upstream / 'file.txt').write_text('main\n')
+            git(['add', 'file.txt'], cwd=upstream)
+            git(['commit', '-m', 'main commit'], cwd=upstream)
+            git(['branch', '-M', 'main'], cwd=upstream)
+
+            # Clone into client
+            git(['clone', '-q', str(upstream), str(client)], cwd=client.parent)
+
+            # Upstream creates an unrelated commit and a tag named origin/main
+            git(['checkout', '-q', '--orphan', 'unrelated'], cwd=upstream)
+            (upstream / 'unrelated.txt').write_text('unrelated\n')
+            git(['add', 'unrelated.txt'], cwd=upstream)
+            git(['commit', '-m', 'unrelated commit'], cwd=upstream)
+            unrelated_sha = git(['rev-parse', 'HEAD'], cwd=upstream).stdout.strip()
+            git(['tag', 'origin/main', unrelated_sha], cwd=upstream)
+
+            # Client fetches all tags and checks out the unrelated commit
+            git(['fetch', '-q', '--tags', 'origin'], cwd=client)
+            git(['checkout', '-q', unrelated_sha], cwd=client)
+
+            # Ambiguous ref `origin/main` would resolve to the tag and succeed (vulnerability)
+            ambiguous = subprocess.run(
+                ['git', 'merge-base', '--is-ancestor', 'HEAD', 'origin/main'],
+                cwd=client,
+                capture_output=True,
+            )
+            self.assertEqual(ambiguous.returncode, 0)
+
+            # Fully-qualified ref `refs/remotes/origin/main` correctly rejects the unrelated commit
+            mitigated = subprocess.run(
+                ['git', 'merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'],
+                cwd=client,
+                capture_output=True,
+            )
+            self.assertNotEqual(mitigated.returncode, 0)
 
 if __name__ == '__main__':
     unittest.main()
