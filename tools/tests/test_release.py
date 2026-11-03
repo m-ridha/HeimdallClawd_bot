@@ -98,10 +98,26 @@ class DeploymentHealthTests(unittest.TestCase):
             upstream = pathlib.Path(upstream_dir)
             client = pathlib.Path(client_dir)
 
+            git_env = {
+                **os.environ,
+                'GIT_CONFIG_NOSYSTEM': '1',
+                'GIT_CONFIG_GLOBAL': os.devnull,
+                'GIT_AUTHOR_NAME': 'test',
+                'GIT_AUTHOR_EMAIL': 'test@example.com',
+                'GIT_COMMITTER_NAME': 'test',
+                'GIT_COMMITTER_EMAIL': 'test@example.com',
+            }
+
             def git(args, cwd):
                 return subprocess.run(
-                    ['git', *args],
+                    [
+                        'git',
+                        '-c', 'commit.gpgSign=false',
+                        '-c', 'tag.gpgSign=false',
+                        *args,
+                    ],
                     cwd=cwd,
+                    env=git_env,
                     capture_output=True,
                     text=True,
                     check=True,
