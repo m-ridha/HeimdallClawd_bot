@@ -352,3 +352,30 @@ same 403 as a policy denial. The classification test is therefore the
 deterministic regression. The Linux Chromium contract test compiles against the
 new constructor but was not executed here; live browser behavior and the NAT64
 network path remain unverified locally.
+
+## Deep-scan finding reconciliation — 2026-11-03
+
+A CodeRabbit deep scan listed four findings as open against `main`. Their
+provenance revisions (`5395665`, `cd47a40`) and `lastSeenAt` times all precede
+the fixes, and every sink they cite is a line in a patch file or the pinned
+runtime as it was before the patch chain, not the patched source. No tracked
+code changed in response; the fixes below were already merged.
+
+| Finding | Fix | Regression evidence |
+| --- | --- | --- |
+| Telegram group albums bypass the private-chat check | `private-telegram.patch` rejects non-private chats in `extract_media_group_key` and the album anchor parser, so an album cannot enter the queue; ordinary updates are rejected before side effects ([#56](https://github.com/m-ridha/HeimdallClawd_bot/pull/56)) | `heimdall_group_media_groups_are_not_grouped_or_admitted` |
+| `/ws/chat` keeps working after pairing revocation | `acp-pairing-revocation.patch` closes chat sockets on revocation, including detached turns ([#56](https://github.com/m-ridha/HeimdallClawd_bot/pull/56)) | `zeroclaw-gateway` `heimdall` tests |
+| ACP sockets keep working after pairing revocation | same patch binds ACP connections to the token hash and rechecks membership before sessions and turns ([#54](https://github.com/m-ridha/HeimdallClawd_bot/pull/54)) | six `heimdall_acp_revocation_*` tests |
+| Browser proxy ignores NAT64 prefixes | `browser-navigation.patch` parses `security.nat64_prefixes` and passes them to `ResolvedDestination::new` ([#53](https://github.com/m-ridha/HeimdallClawd_bot/pull/53)) | `heimdall_proxy_denies_requests_behind_configured_nat64_prefixes`, `heimdall_browser_retains_configured_nat64_prefixes_for_the_native_proxy` |
+
+Against a fresh extraction of the pinned `99bd353…` source (SHA-256 `b483927c…`
+verified), all eleven patches in Dockerfile order applied with
+`patch --fuzz=0 -p1`. On macOS the sixteen `heimdall` tests in
+`zeroclaw-channels` (`channel-telegram,channel-acp-server`), four in
+`zeroclaw-gateway` and nine in `zeroclaw-tools` (`browser-native`) passed.
+Native Linux execution of the full patch chain passed in the release build of
+commit `5a69dda`
+([run 41467777567](https://github.com/m-ridha/HeimdallClawd_bot/actions/runs/41467777567)).
+Live Telegram albums, deployed revocation and a routed NAT64 path remain unverified here.
+The scanner tracks findings by fingerprint, so these entries may stay open until
+it is rescanned against the patched source or they are dismissed in its UI.
