@@ -98,15 +98,27 @@ class DeploymentHealthTests(unittest.TestCase):
             upstream = pathlib.Path(upstream_dir)
             client = pathlib.Path(client_dir)
 
+            git_location_variables = {
+                'GIT_DIR',
+                'GIT_WORK_TREE',
+                'GIT_INDEX_FILE',
+                'GIT_OBJECT_DIRECTORY',
+                'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+                'GIT_COMMON_DIR',
+            }
             git_env = {
-                **os.environ,
+                key: value
+                for key, value in os.environ.items()
+                if key not in git_location_variables
+            }
+            git_env.update({
                 'GIT_CONFIG_NOSYSTEM': '1',
                 'GIT_CONFIG_GLOBAL': os.devnull,
                 'GIT_AUTHOR_NAME': 'test',
                 'GIT_AUTHOR_EMAIL': 'test@example.com',
                 'GIT_COMMITTER_NAME': 'test',
                 'GIT_COMMITTER_EMAIL': 'test@example.com',
-            }
+            })
 
             def git(args, cwd):
                 return subprocess.run(
@@ -151,6 +163,7 @@ class DeploymentHealthTests(unittest.TestCase):
             ambiguous = subprocess.run(
                 ['git', 'merge-base', '--is-ancestor', 'HEAD', 'origin/main'],
                 cwd=client,
+                env=git_env,
                 capture_output=True,
             )
             self.assertEqual(ambiguous.returncode, 0)
@@ -159,6 +172,7 @@ class DeploymentHealthTests(unittest.TestCase):
             mitigated = subprocess.run(
                 ['git', 'merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'],
                 cwd=client,
+                env=git_env,
                 capture_output=True,
             )
             self.assertNotEqual(mitigated.returncode, 0)
