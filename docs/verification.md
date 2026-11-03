@@ -365,8 +365,8 @@ code changed in response; the fixes below were already merged.
 | --- | --- | --- |
 | Telegram group albums bypass the private-chat check | `private-telegram.patch` rejects non-private chats in `extract_media_group_key` and the album anchor parser, so an album cannot enter the queue; ordinary updates are rejected before side effects (v0.6.6) | `heimdall_group_media_groups_are_not_grouped_or_admitted` |
 | `/ws/chat` keeps working after pairing revocation | `acp-pairing-revocation.patch` closes chat sockets on revocation, including detached turns (v0.6.6) | `zeroclaw-gateway` `heimdall` tests |
-| ACP sockets keep working after pairing revocation | same patch binds ACP connections to the token hash and rechecks membership before sessions and turns (v0.6.4) | six `heimdall_acp_revocation_*` tests |
-| Browser proxy ignores NAT64 prefixes | `browser-navigation.patch` parses `security.nat64_prefixes` and passes them to `ResolvedDestination::new` (v0.6.3) | `heimdall_proxy_denies_requests_behind_configured_nat64_prefixes`, `heimdall_browser_retains_configured_nat64_prefixes_for_the_native_proxy` |
+| ACP sockets keep working after pairing revocation | same patch binds ACP connections to the token hash and rechecks membership before sessions and turns (v0.6.6) | six `heimdall_acp_revocation_*` tests |
+| Browser proxy ignores NAT64 prefixes | `browser-navigation.patch` parses `security.nat64_prefixes` and passes them to `ResolvedDestination::new` (v0.6.6) | `heimdall_proxy_denies_requests_behind_configured_nat64_prefixes`, `heimdall_browser_retains_configured_nat64_prefixes_for_the_native_proxy` |
 
 Against a fresh extraction of the pinned `99bd353…` source (SHA-256 `b483927c…`
 verified), all eleven patches in Dockerfile order applied with
