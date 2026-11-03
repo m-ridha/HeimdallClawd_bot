@@ -168,6 +168,23 @@ class DeploymentHealthTests(unittest.TestCase):
             )
             self.assertEqual(ambiguous.returncode, 0)
 
+            # Confirm refs/remotes/origin/main exists and resolves to the expected main branch commit
+            remote_main = subprocess.run(
+                ['git', 'rev-parse', '--verify', 'refs/remotes/origin/main'],
+                cwd=client,
+                env=git_env,
+                capture_output=True,
+            )
+            expected_main = subprocess.run(
+                ['git', 'rev-parse', '--verify', 'refs/heads/main'],
+                cwd=client,
+                env=git_env,
+                capture_output=True,
+            )
+            self.assertEqual(remote_main.returncode, 0)
+            self.assertEqual(expected_main.returncode, 0)
+            self.assertEqual(remote_main.stdout, expected_main.stdout)
+
             # Fully-qualified ref `refs/remotes/origin/main` correctly rejects the unrelated commit
             mitigated = subprocess.run(
                 ['git', 'merge-base', '--is-ancestor', 'HEAD', 'refs/remotes/origin/main'],
