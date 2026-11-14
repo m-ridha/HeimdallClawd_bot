@@ -1,11 +1,11 @@
 diff --git a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
-index 3d62fd9..4a2eac1 100644
+index 9f2023d..b54fc0d 100644
 --- a/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 +++ b/crates/zeroclaw-channels/src/orchestrator/acp_server.rs
 @@ -125,7 +125,70 @@ enum ConfigSource {
      Live(zeroclaw_config::live::LiveConfigHandle),
  }
-
+ 
 +/// Non-secret identity retained by a paired gateway connection. Stdio and
 +/// explicitly unpaired transports retain their existing trusted behavior.
 +#[derive(Clone)]
@@ -84,7 +84,7 @@ index 3d62fd9..4a2eac1 100644
 @@ -315,6 +379,19 @@ impl AcpServer {
          }
      }
-
+ 
 +    /// Bind only the authenticated digest; never retain the bearer token.
 +    pub fn with_connection_pairing(
 +        mut self,
@@ -113,7 +113,7 @@ index 3d62fd9..4a2eac1 100644
                  continue;
 @@ -594,6 +674,9 @@ impl AcpServer {
      }
-
+ 
      async fn process_line(self: &Arc<Self>, trimmed: &str) {
 +        if hold_connection_pairing(self.connection_pairing.as_ref()).is_err() {
 +            return;
@@ -132,7 +132,7 @@ index 3d62fd9..4a2eac1 100644
 +            }
 +            return;
 +        }
-
+ 
          let result = match request.method.as_str() {
              "initialize" => self.handle_initialize(&request.params),
 @@ -971,6 +1061,7 @@ impl AcpServer {
@@ -142,7 +142,7 @@ index 3d62fd9..4a2eac1 100644
 +            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
              loading.insert(session_id.clone());
          }
-
+ 
 @@ -1065,9 +1156,13 @@ impl AcpServer {
              // authenticated gateway principal, so these sessions are stamped
              // with a NULL owner -- visible only to unscoped connections, never
@@ -211,7 +211,7 @@ index 3d62fd9..4a2eac1 100644
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
 +        drop(hold_connection_pairing(self.connection_pairing.as_ref())?);
-
+ 
          // Atomically check and reserve the session slot
          {
 @@ -1223,6 +1348,7 @@ impl AcpServer {
@@ -221,7 +221,7 @@ index 3d62fd9..4a2eac1 100644
 +            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
              loading.insert(session_id.clone());
          }
-
+ 
 @@ -1408,14 +1534,12 @@ impl AcpServer {
              }
          };
@@ -241,30 +241,30 @@ index 3d62fd9..4a2eac1 100644
 @@ -1436,6 +1560,9 @@ impl AcpServer {
              );
          }
-
+ 
 +        // Successful publication transfers gate cleanup to `session/close`.
 +        restore_gate.disarm();
 +
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1515,6 +1642,7 @@ impl AcpServer {
+@@ -1518,6 +1645,7 @@ impl AcpServer {
          let mut restore_gate = self.restore_gate(&session_id);
          let finalize_gate = self.session_gate(&session_id);
          let _finalize_guard = finalize_gate.lock().await;
 +        drop(hold_connection_pairing(self.connection_pairing.as_ref())?);
-
+ 
          // Atomically check and reserve the session slot
          {
-@@ -1560,6 +1688,7 @@ impl AcpServer {
+@@ -1563,6 +1691,7 @@ impl AcpServer {
                      data: None,
                  });
              }
 +            let _held = hold_connection_pairing(self.connection_pairing.as_ref())?;
              loading.insert(session_id.clone());
          }
-
-@@ -1701,14 +1830,12 @@ impl AcpServer {
+ 
+@@ -1704,14 +1833,12 @@ impl AcpServer {
              }
          };
          let now = Instant::now();
@@ -280,20 +280,20 @@ index 3d62fd9..4a2eac1 100644
              sessions.insert(
                  session_id.clone(),
                  Arc::new(Mutex::new(Session {
-@@ -1729,6 +1856,9 @@ impl AcpServer {
+@@ -1732,6 +1859,9 @@ impl AcpServer {
              );
          }
-
+ 
 +        // Successful publication transfers gate cleanup to `session/close`.
 +        restore_gate.disarm();
 +
          if let Some(event) = restore_trim_event
              && let Some(notification) = notification_for_turn_event(&session_id, &event)
          {
-@@ -1963,14 +2093,18 @@ impl AcpServer {
+@@ -1966,14 +2096,18 @@ impl AcpServer {
              }
          }
-
+ 
 -        let prompt = match Self::materialize_prompt(
 -            params,
 -            if workspace_dir.is_empty() {
@@ -317,7 +317,7 @@ index 3d62fd9..4a2eac1 100644
              Ok(prompt) => prompt,
              Err(e) => {
                  // Release the reservation we just took so a bad attachment doesn't
-@@ -2023,6 +2157,7 @@ impl AcpServer {
+@@ -2026,6 +2160,7 @@ impl AcpServer {
          let session_id_for_task = session_id.clone();
          let persist_store = self.store.clone();
          let persist_session_id = session_id.clone();
@@ -325,7 +325,7 @@ index 3d62fd9..4a2eac1 100644
          let turn_handle = zeroclaw_spawn::spawn!(async move {
              let mut session = session_arc.lock().await;
              let (turn_alias, turn_provider, turn_model) = session.agent.attribution_fields();
-@@ -2048,7 +2183,7 @@ impl AcpServer {
+@@ -2051,7 +2186,7 @@ impl AcpServer {
                      model = %turn_model,
                      channel = "acp",
                  );
@@ -334,7 +334,7 @@ index 3d62fd9..4a2eac1 100644
                      Some(session_id_for_task),
                      zeroclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                          cost_context,
-@@ -2057,13 +2192,26 @@ impl AcpServer {
+@@ -2060,13 +2195,26 @@ impl AcpServer {
                              .turn_streamed_with_steering_state(
                                  &prompt,
                                  event_tx,
@@ -363,11 +363,11 @@ index 3d62fd9..4a2eac1 100644
 +                }
              };
              session.last_active = Instant::now();
-
-@@ -3846,6 +3994,322 @@ mod tests {
+ 
+@@ -3922,6 +4070,322 @@ mod tests {
      use super::*;
      use async_trait::async_trait;
-
+ 
 +    fn heimdall_paired_server(
 +        cwd: &std::path::Path,
 +    ) -> (
@@ -688,10 +688,10 @@ index 3d62fd9..4a2eac1 100644
          let mut bytes = std::io::Cursor::new(Vec::new());
          image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
 diff --git a/crates/zeroclaw-config/src/pairing.rs b/crates/zeroclaw-config/src/pairing.rs
-index 46c735a..7bf9dfc 100644
+index af85ff2..98c63f6 100644
 --- a/crates/zeroclaw-config/src/pairing.rs
 +++ b/crates/zeroclaw-config/src/pairing.rs
-@@ -364,6 +364,8 @@ pub struct PairingGuard {
+@@ -479,6 +479,8 @@ pub struct PairingGuard {
      /// (see [`PairingGuard::hold_paired_tokens`]) delays only pairing and
      /// revocation, not other liveness checks.
      paired_tokens: Arc<RwLock<HashSet<String>>>,
@@ -700,18 +700,18 @@ index 46c735a..7bf9dfc 100644
      /// Brute-force protection: per-client failed attempt state + last sweep timestamp.
      failed_attempts: Arc<Mutex<(HashMap<String, FailedAttemptState>, Instant)>>,
      /// The admin token this gateway run accepts on the pairing-code admin
-@@ -448,6 +450,7 @@ impl PairingGuard {
-             require_pairing,
+@@ -630,6 +632,7 @@ impl PairingGuard {
              pairing_code: Arc::new(Mutex::new(code)),
+             enrollment_code: Arc::new(Mutex::new(None)),
              paired_tokens: Arc::new(RwLock::new(tokens)),
 +            revocations: tokio::sync::watch::channel(()).0,
              failed_attempts: Arc::new(Mutex::new((HashMap::new(), Instant::now()))),
              admin_token: Arc::new(Mutex::new(None)),
-         }
-@@ -719,22 +722,38 @@ impl PairingGuard {
+             limits: LimitsResolver::default(),
+@@ -1013,22 +1016,38 @@ impl PairingGuard {
          tokens.iter().cloned().collect()
      }
-
+ 
 +    /// Wait for this identity to leave the live paired-token set. Subscribe
 +    /// before checking membership so revocation cannot be lost during upgrade.
 +    pub async fn wait_token_revoked(&self, token_hash: &str) {
@@ -729,7 +729,7 @@ index 46c735a..7bf9dfc 100644
 -        tokens.remove(&hashed)
 +        self.revoke_token_hash(&hash_token(token))
      }
-
+ 
      /// Revoke a paired token by its SHA-256 hash. Returns true if removed.
      pub fn revoke_token_hash(&self, token_hash: &str) -> bool {
          let mut tokens = self.paired_tokens.write();
@@ -740,7 +740,7 @@ index 46c735a..7bf9dfc 100644
 +        }
 +        removed
      }
-
+ 
      pub fn revoke_all_tokens(&self) -> usize {
          let mut tokens = self.paired_tokens.write();
          let count = tokens.len();
@@ -750,11 +750,11 @@ index 46c735a..7bf9dfc 100644
 +        }
          count
      }
-
-@@ -917,6 +936,44 @@ mod tests {
+ 
+@@ -1285,6 +1304,44 @@ mod tests {
      use super::*;
      use tokio::test;
-
+ 
 +    #[test]
 +    async fn heimdall_acp_revocation_watch_tracks_only_its_identity() {
 +        for revoke_method in 0..3 {
@@ -827,18 +827,18 @@ index 8ccbefa..d73fab2 100644
 +    } else {
 +        None
 +    };
-
+ 
      let ws = if headers
          .get("sec-websocket-protocol")
 @@ -55,11 +60,16 @@ pub async fn handle_ws_acp(
          ws
      };
-
+ 
 -    ws.on_upgrade(move |socket| handle_socket(socket, state, params.agent))
 +    ws.on_upgrade(move |socket| handle_socket(socket, state, params.agent, token_hash))
          .into_response()
  }
-
+ 
 -async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option<String>) {
 +async fn handle_socket(
 +    socket: WebSocket,
@@ -868,9 +868,9 @@ index 8ccbefa..d73fab2 100644
 +            .with_connection_pairing(state.pairing.clone(), token_hash.clone()),
          )
      };
-
+ 
      let server_task = zeroclaw_spawn::spawn!(Arc::clone(&server).run_messages(input_rx));
-
+ 
 -    let output_task = zeroclaw_spawn::spawn!(async move {
 -        while let Some(line) = output_rx.recv().await {
 -            if sender.send(Message::Text(line.into())).await.is_err() {
@@ -1012,7 +1012,7 @@ index 8ccbefa..d73fab2 100644
 +    drop(receiver);
 +    drop(output_rx);
      drop(input_tx);
-
+ 
      if let Err(e) = server_task.await {
 @@ -177,7 +229,6 @@ async fn handle_socket(socket: WebSocket, state: AppState, default_agent: Option
              "ACP WebSocket server task panicked"
@@ -1250,10 +1250,10 @@ index 8ccbefa..d73fab2 100644
 +    }
  }
 diff --git a/crates/zeroclaw-gateway/src/ws.rs b/crates/zeroclaw-gateway/src/ws.rs
-index 66c51f7..b9eb3f2 100644
+index a198715..a98bac7 100644
 --- a/crates/zeroclaw-gateway/src/ws.rs
 +++ b/crates/zeroclaw-gateway/src/ws.rs
-@@ -586,6 +586,24 @@ async fn handle_socket(
+@@ -708,6 +708,24 @@ async fn handle_socket(
              // A frame that has already arrived is answered before the socket
              // is closed for a stop.
              biased;
@@ -1278,7 +1278,7 @@ index 66c51f7..b9eb3f2 100644
              first = receiver.next() => first,
              _ = gateway_stop_signal(&mut gateway_stopping) => {
                  close_for_reconnect(&mut sender, &mut receiver, "gateway restarting").await;
-@@ -896,6 +914,24 @@ async fn handle_socket(
+@@ -1039,6 +1057,24 @@ async fn handle_socket(
              // the wire when the close goes out is not, and the client finds
              // that out by reconnecting.
              biased;
@@ -1300,13 +1300,13 @@ index 66c51f7..b9eb3f2 100644
 +                ).await;
 +                break;
 +            }
-
+ 
              // ── Keepalive ─────────────────────────────────────────────
              _ = tick_websocket_ping(&mut ping_interval) => {
-@@ -932,6 +968,18 @@ async fn handle_socket(
+@@ -1090,6 +1126,18 @@ async fn handle_socket(
                      }
                  };
-
+ 
 +                if let Some(ref hash) = auth_subject {
 +                    if !state.pairing.token_hash_is_paired(hash) {
 +                        let err = serde_json::json!({
@@ -1320,12 +1320,12 @@ index 66c51f7..b9eb3f2 100644
 +                }
 +
                  let msg_type = parsed["type"].as_str().unwrap_or("");
-
+ 
                  // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-@@ -1040,6 +1088,21 @@ async fn handle_socket(
+@@ -1207,6 +1255,21 @@ async fn handle_socket(
                      }
                  };
-
+ 
 +                if let Some(ref hash) = auth_subject {
 +                    if !state.pairing.token_hash_is_paired(hash) {
 +                        let err = serde_json::json!({
@@ -1344,11 +1344,15 @@ index 66c51f7..b9eb3f2 100644
                  let client_gone = process_chat_message(
                      &state,
                      &mut agent,
-@@ -1979,9 +2042,33 @@ async fn process_chat_message(
+@@ -2198,6 +2261,7 @@ async fn process_chat_message(
      let forward_fut = async {
          let mut cancel_drained = false;
          let mut client_gone = false;
 +        let mut revocation_handled = false;
+         // Every write to the viewer races the session ending: a viewer that
+         // stops reading stalls the write, and the session's loss must not
+         // wait behind it. Either way the viewer is detached and its session
+@@ -2229,6 +2293,29 @@ async fn process_chat_message(
          loop {
              tokio::select! {
                              biased;
@@ -1378,8 +1382,8 @@ index 66c51f7..b9eb3f2 100644
                              _ = cancel_token.cancelled(), if !cancel_drained => {
                                  let drained: Vec<_> = pending_approvals.lock().drain().collect();
                                  drop(drained);
-@@ -2017,6 +2104,26 @@ async fn process_chat_message(
-                                     let _ = sender.send(Message::Text(err.to_string().into())).await;
+@@ -2281,6 +2368,26 @@ async fn process_chat_message(
+                                     send_to_viewer!(Message::Text(err.to_string().into()));
                                      continue;
                                  };
 +                                if let Some(hash) = auth_subject {
@@ -1405,11 +1409,11 @@ index 66c51f7..b9eb3f2 100644
                                  match parsed["type"].as_str() {
                                      Some("approval_response") => {
                                          // A SOP-kind frame is a gate resolution (keyed by run_id),
-@@ -2196,7 +2303,33 @@ async fn process_chat_message(
+@@ -2454,7 +2561,57 @@ async fn process_chat_message(
                                  if client_gone {
                                      continue;
                                  }
--                                if sender.send(Message::Text(ws_msg.to_string().into())).await.is_err() {
+-                                send_to_viewer!(Message::Text(ws_msg.to_string().into()));
 +                                let send_res = tokio::select! {
 +                                    biased;
 +                                    _ = async {
@@ -1434,15 +1438,39 @@ index 66c51f7..b9eb3f2 100644
 +                                        client_gone = true;
 +                                        continue;
 +                                    }
-+                                    res = sender.send(Message::Text(ws_msg.to_string().into())) => res,
++                                    res = send_unless_lost(
++                                        &mut *sender,
++                                        Message::Text(ws_msg.to_string().into()),
++                                        &mut *session,
++                                        state,
++                                    ) => res,
 +                                };
-+                                if send_res.is_err() {
-                                     detach_mid_turn(session_key, &turn_id, pending_approvals);
-                                     client_gone = true;
-                                 }
-@@ -2264,8 +2397,10 @@ async fn process_chat_message(
++                                match send_res {
++                                    Sent::Delivered => {}
++                                    Sent::PeerGone => {
++                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                        *session = None;
++                                        client_gone = true;
++                                    }
++                                    Sent::SessionLost(code) => {
++                                        detach_mid_turn(session_key, &turn_id, pending_approvals);
++                                        *session = None;
++                                        close_with(
++                                            &mut *sender,
++                                            &mut *receiver,
++                                            code,
++                                            "dashboard session ended",
++                                        )
++                                        .await;
++                                        client_gone = true;
++                                    }
++                                }
+                             }
+                         }
          }
-
+@@ -2519,8 +2676,10 @@ async fn process_chat_message(
+         }
+ 
          // Inform the client the turn was aborted
 -        let aborted = serde_json::json!({ "type": "aborted" });
 -        let _ = sender.send(Message::Text(aborted.to_string().into())).await;
@@ -1450,78 +1478,50 @@ index 66c51f7..b9eb3f2 100644
 +            let aborted = serde_json::json!({ "type": "aborted" });
 +            let _ = sender.send(Message::Text(aborted.to_string().into())).await;
 +        }
-
+ 
          if let Some(ref backend) = state.session_backend
              && backend.session_exists(session_key)
-@@ -3149,6 +3284,10 @@ data: {{\"type\":\"message_stop\"}}\n\n"
-
-     impl ParkedTurnFixture {
-         async fn spawn() -> Self {
-+            Self::spawn_paired(None).await.0
+@@ -3452,6 +3611,19 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+             Self::spawn_with(None, |_| {}).await
+         }
+ 
++        async fn spawn_paired(paired_token: Option<&str>) -> (Self, Option<String>) {
++            let token_hash =
++                paired_token.map(zeroclaw_config::pairing::PairingGuard::token_hash);
++            let fixture = Self::spawn_with(None, |config| {
++                if let Some(token) = paired_token {
++                    config.gateway.require_pairing = true;
++                    config.gateway.paired_tokens = vec![token.to_string()];
++                }
++            })
++            .await;
++            (fixture, token_hash)
 +        }
 +
-+        async fn spawn_paired(paired_token: Option<&str>) -> (Self, Option<String>) {
-             let (request_seen_tx, request_seen) =
-                 tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
-             let (released, released_rx) = tokio::sync::watch::channel(0usize);
-@@ -3238,10 +3377,22 @@ data: {{\"type\":\"message_stop\"}}\n\n"
-
+         /// The same gateway with dashboard sign-in offering `corp` at
+         /// `issuer`, under the session layer, with `/auth/sign-out` served.
+         async fn spawn_signed_in(issuer: &str) -> Self {
+@@ -3572,8 +3744,14 @@ data: {{\"type\":\"message_stop\"}}\n\n"
              let backend = zeroclaw_infra::make_session_backend(&workspace, "sqlite")
                  .expect("sqlite session backend");
--            let state = AppState {
-+            if paired_token.is_some() {
-+                config.gateway.require_pairing = true;
-+            }
-+            let mut state = AppState {
-                 session_backend: Some(backend.clone()),
-                 ..crate::api::tests::test_state(config)
-             };
-+            let token_hash = paired_token.map(|token| {
-+                let hash = zeroclaw_config::pairing::PairingGuard::token_hash(token);
-+                state.pairing = Arc::new(zeroclaw_config::pairing::PairingGuard::new(
-+                    true,
-+                    &[token.to_string()],
+             if sign_in.is_none() {
++                let pairing = Arc::new(zeroclaw_config::pairing::PairingGuard::new(
++                    config.gateway.require_pairing,
++                    &config.gateway.paired_tokens,
 +                    zeroclaw_config::pairing::PairingCodePolicy::default(),
 +                ));
-+                hash
-+            });
-             let gateway_app = Router::new()
-                 .route("/ws/chat", get(handle_ws_chat))
-                 .with_state(state.clone());
-@@ -3255,15 +3406,18 @@ data: {{\"type\":\"message_stop\"}}\n\n"
-                     .expect("local WebSocket gateway serves");
-             });
-
--            Self {
--                state,
--                backend,
--                gateway_addr,
--                request_seen,
--                released,
--                servers: vec![mock_server, gateway_server],
--                _tmp: tmp,
--            }
-+            (
-+                Self {
-+                    state,
-+                    backend,
-+                    gateway_addr,
-+                    request_seen,
-+                    released,
-+                    servers: vec![mock_server, gateway_server],
-+                    _tmp: tmp,
-+                },
-+                token_hash,
-+            )
-         }
-
-         /// Open a chat socket on `session_id` and return it with the
-@@ -5124,6 +5278,163 @@ data: {{\"type\":\"message_stop\"}}\n\n"
+                 let state = AppState {
+                     session_backend: Some(backend.clone()),
++                    pairing,
+                     ..crate::api::tests::test_state(config)
+                 };
+                 let gateway_app = Router::new()
+@@ -6247,6 +6425,163 @@ data: {\"type\":\"message_stop\"}\n\n",
          );
      }
-
+ 
 +    #[tokio::test]
-+    async fn ws_chat_pairing_revocation_closes_connection_and_rejects_subsequent_turns() {
++    async fn heimdall_ws_chat_pairing_revocation_closes_connection_and_rejects_subsequent_turns() {
 +        use futures_util::StreamExt as _;
 +        use zeroclaw_config::pairing::{PairingCodePolicy, PairingGuard};
 +        let mut config = zeroclaw_config::schema::Config::default();
@@ -1568,7 +1568,7 @@ index 66c51f7..b9eb3f2 100644
 +    }
 +
 +    #[test]
-+    fn ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect() {
++    fn heimdall_ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect() {
 +        run_ws_regression(
 +            "ws-revocation-cancels-detached",
 +            ws_chat_pairing_revocation_cancels_detached_turn_after_client_disconnect_inner,
@@ -1625,7 +1625,7 @@ index 66c51f7..b9eb3f2 100644
 +    }
 +
 +    #[test]
-+    fn ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals() {
++    fn heimdall_ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals() {
 +        run_ws_regression(
 +            "ws-revocation-cancels-turn",
 +            ws_chat_pairing_revocation_cancels_active_turn_and_detaches_approvals_inner,

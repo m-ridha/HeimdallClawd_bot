@@ -379,3 +379,48 @@ commit `5a69dda`
 Live Telegram albums, deployed revocation and a routed NAT64 path remain unverified here.
 The scanner tracks findings by fingerprint, so these entries may stay open until
 it is rescanned against the patched source or they are dismissed in its UI.
+
+## ZeroClaw v0.9.0 upgrade and default OpenRouter route — 2026-11-14
+
+The runtime pin advances to ZeroClaw `v0.9.0` (`6c78ba59…`, tarball SHA-256
+`f3a5618a…`), updating `deploy/bot/config.template.toml` to `schema_version = 4`
+and switching `[agents.primary].model_provider` from `"opencode.default"` to
+`"openrouter.default"` (pinned to `nvidia/nemotron-3-ultra-550b-a55b:free` with
+curated `:free` `fallback_models` and `context_window = 200_000`) while retaining
+`opencode.default`, `openrouter.default`, `openai.codex`, `gemini.default` and
+all five `[[model_routes]]` (`opencode`, `opencode-free`, `codex`, `openrouter`,
+`gemini`).
+
+All eleven patches in Dockerfile order apply cleanly with `patch --fuzz=0 -p1`
+against unpatched `v0.9.0` after rebasing `acp-pairing-revocation.patch` onto
+upstream `v0.9.0` `pairing.rs` and `ws.rs` (prefixing its three WebSocket
+revocation unit tests with `heimdall_`). On macOS against the patched `v0.9.0`
+workspace:
+
+- `zeroclaw-config` passed `1` `heimdall` unit test (`schema-export`) and `1`
+  `heimdall_secrets` test against rendered `HEIMDALL_TEST_CONFIG`.
+- `zeroclaw-log` passed `3` `heimdall_tool_privacy` tests.
+- `zeroclaw-channels` passed `16` `heimdall` unit tests
+  (`channel-telegram,channel-acp-server`), `2` `heimdall_logging` tests and `1`
+  `heimdall_transcription` test.
+- `zeroclaw-providers` passed `4` `heimdall` unit tests.
+- `zeroclaw-gateway` passed `7` `heimdall` unit tests (`--no-default-features`,
+  covering pairing, SOP authorization, ACP revocation and the three
+  `heimdall_ws_chat_pairing_revocation_*` tests).
+- `zeroclaw-runtime` passed `1` `heimdall_otel` test (`observability-otel`), `2`
+  `heimdall_inventory` tests and `1` `heimdall_sop_workshop` test
+  (`tools-external,tool-project-intel,browser-native`).
+- `zeroclaw-tools` (`browser-native`) passed `9` `heimdall` unit tests, `4`
+  `heimdall_http_origins` tests and `1` `heimdall_codespace_stdio` test;
+  `heimdall_skills_stdio` compiled with `--no-run`.
+- Against a locally built patched `zeroclaw` `v0.9.0` binary (built without
+  `embedded-web`), `pinned_runtime_accepts_effective_policy_and_secret_overrides`
+  and `zeroclaw eval run --suite deploy/bot/evals --mode replay` (`1/1` case,
+  `4/4` checks) passed.
+
+On macOS, Linux-only `heimdall_browser_output` and
+`heimdall_browser_navigation` compile as `0` tests, container-path execution of
+`heimdall_skills_stdio`, root `child_policy` isolation tests, Vite
+`embedded-web` bundling and the `.railway` IaC SDK test were not executed, and
+no live Railway deployment was performed. Native Linux validation in `build.yml`
+covers the full container build and native Linux suite.
