@@ -16,8 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /runtime
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=2 \
     CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1
-RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/99bd353c756f4e64f381cfe9c3002ebff32f3055 -o /tmp/runtime.tar.gz \
-    && echo 'b483927ccd2252c9d487aab3c69a80a4f4452ed3ed150b4205bc75cf6d825c6c  /tmp/runtime.tar.gz' | sha256sum -c - \
+RUN curl --fail --location --retry 3 -H 'User-Agent: HeimdallClawd-build' https://api.github.com/repos/zeroclaw-labs/zeroclaw/tarball/6c78ba59bce6a3d5079cf0c0310488770e264ad4 -o /tmp/runtime.tar.gz \
+    && echo 'f3a5618a8f7361444c743e2c96c4691488bce17970b38ac5f691c4dfb668f342  /tmp/runtime.tar.gz' | sha256sum -c - \
     && tar -xzf /tmp/runtime.tar.gz --strip-components=1 -C /runtime && rm /tmp/runtime.tar.gz
 COPY deploy/bot/patches/private-telegram.patch /tmp/private-telegram.patch
 COPY deploy/bot/patches/telegram-startup.patch /tmp/telegram-startup.patch

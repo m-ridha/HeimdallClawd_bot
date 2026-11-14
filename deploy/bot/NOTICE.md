@@ -1,6 +1,6 @@
 # Notice
 
-The build uses ZeroClaw v0.8.7, revision 99bd353c756f4e64f381cfe9c3002ebff32f3055,
+The build uses ZeroClaw v0.9.0, revision 6c78ba59bce6a3d5079cf0c0310488770e264ad4,
 from <https://github.com/zeroclaw-labs/zeroclaw>, distributed under MIT OR
 Apache-2.0. Both upstream license files accompany the deployment recipe and
 release package. The immutable archive checksum and build features live in
@@ -12,7 +12,7 @@ fuzz before compilation.
 Subscription authentication, provider integration, channel routing, SQLite
 sessions, typed transcription, WIT interface paths, MCP, local skill execution,
 Wasmtime/TLS advisory updates and browser automation use upstream features.
-Upstream v0.8.7 resolves the Wasmtime and TLS/crypto advisories (RUSTSEC-2026-0375
+Upstream v0.9.0 retains the Wasmtime and TLS/crypto advisory fixes (RUSTSEC-2026-0375
 through 0379, 0381 through 0383, 0385 and 0386), so the former `security-dependencies`
 patch is retired. The single-service model does not
 need the former remote-skills or native-child patches. General commands have

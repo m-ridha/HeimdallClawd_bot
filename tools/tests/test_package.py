@@ -28,6 +28,13 @@ class PackageTests(unittest.TestCase):
             result, output = self.package(temp)
             self.assertEqual(result.returncode, 0, result.stderr)
             lock = json.loads((output / 'deploy/bot/artifact.lock.json').read_text())
+            runtime_lock = json.loads((ROOT / 'deploy/bot/runtime.lock.json').read_text())
+            self.assertEqual(lock['runtime_revision'], runtime_lock['revision'])
+            self.assertEqual(lock['source_sha256'], runtime_lock['source_sha256'])
+            self.assertEqual(
+                (output / 'deploy/bot/runtime.lock.json').read_bytes(),
+                (ROOT / 'deploy/bot/runtime.lock.json').read_bytes(),
+            )
             for name, field in [('zeroclaw', 'binary_sha256'), ('heimdall-launcher', 'launcher_sha256')]:
                 self.assertEqual(hashlib.sha256((output / 'prebuilt' / name).read_bytes()).hexdigest(), lock[field])
                 self.assertIn(lock[field], (output / 'deploy/bot/runtime.sha256').read_text())
