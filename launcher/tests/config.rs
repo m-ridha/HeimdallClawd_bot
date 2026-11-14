@@ -258,6 +258,48 @@ fn codex_route_tracks_the_configured_model() {
 }
 
 #[test]
+fn schema_four_openrouter_default_is_independent_of_codex_model_overrides() {
+    for model in ["gpt-6.1-sol", "custom-codex-model"] {
+        let rendered = render_config(&["1001".into()], model).unwrap();
+        let cfg: toml::Value = toml::from_str(&rendered).unwrap();
+        assert_eq!(cfg["schema_version"].as_integer(), Some(4));
+        let provider_name = cfg["agents"]["primary"]["model_provider"]
+            .as_str()
+            .unwrap();
+        assert_eq!(provider_name, "openrouter.default");
+        let (provider, alias) = provider_name.split_once('.').unwrap();
+        let active = &cfg["providers"]["models"][provider][alias];
+        assert_eq!(active["model"].as_str(), Some("openrouter/free"));
+        assert_eq!(active["wire_api"].as_str(), Some("chat_completions"));
+        // Codex capacity and subscription authentication must not leak to OpenRouter.
+        for key in ["context_window", "requires_openai_auth", "api_key"] {
+            assert!(active.get(key).is_none(), "unexpected OpenRouter {key}");
+        }
+        let routes = cfg["model_routes"].as_array().unwrap();
+        assert_eq!(routes.len(), 5);
+        for hint in ["opencode", "opencode-free", "codex", "openrouter", "gemini"] {
+            assert_eq!(
+                routes
+                    .iter()
+                    .filter(|route| route["hint"].as_str() == Some(hint))
+                    .count(),
+                1,
+                "route must remain unique: {hint}"
+            );
+        }
+        // Each retained route must still resolve to a configured provider alias.
+        for route in routes {
+            let (provider, alias) = route["model_provider"]
+                .as_str()
+                .unwrap()
+                .split_once('.')
+                .unwrap();
+            assert!(cfg["providers"]["models"][provider][alias].is_table());
+        }
+    }
+}
+
+#[test]
 fn owner_must_be_configured_explicitly() {
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_heimdall-launcher"))
         .arg("--render-config")
