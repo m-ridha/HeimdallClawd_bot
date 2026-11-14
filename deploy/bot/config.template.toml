@@ -15,7 +15,7 @@ wire_api = "responses"
 requires_openai_auth = true
 
 [providers.models.openrouter.default]
-# Conservative floor across the curated free tool-calling chain (>= 192k budget).
+# Conservative capacity for the pinned primary model; fallback_models do not inherit it.
 model = "nvidia/nemotron-3-ultra-550b-a55b:free"
 fallback_models = [
   "cohere/north-mini-code:free",
