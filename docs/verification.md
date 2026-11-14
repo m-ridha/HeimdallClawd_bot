@@ -388,8 +388,8 @@ and switching `[agents.primary].model_provider` from `"opencode.default"` to
 `"openrouter.default"` (pinned to `nvidia/nemotron-3-ultra-550b-a55b:free` with
 curated `:free` `fallback_models` and `context_window = 200_000`) while retaining
 `opencode.default`, `openrouter.default`, `openai.codex`, `gemini.default` and
-all six `[[model_routes]]` (`opencode`, `opencode-free`, `codex`, `openrouter`,
-`openrouter-free`, `gemini`).
+all five `[[model_routes]]` (`opencode`, `opencode-free`, `codex`, `openrouter`,
+`gemini`).
 
 All eleven patches in Dockerfile order apply cleanly with `patch --fuzz=0 -p1`
 against unpatched `v0.9.0` after rebasing `acp-pairing-revocation.patch` onto

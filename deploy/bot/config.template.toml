@@ -53,11 +53,6 @@ model_provider = "openrouter.default"
 model = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 [[model_routes]]
-hint = "openrouter-free"
-model_provider = "openrouter.default"
-model = "nvidia/nemotron-3-ultra-550b-a55b:free"
-
-[[model_routes]]
 hint = "gemini"
 model_provider = "gemini.default"
 model = "gemini-3.5-flash"

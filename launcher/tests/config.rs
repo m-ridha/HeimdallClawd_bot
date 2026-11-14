@@ -259,13 +259,6 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
                 && r["model_provider"].as_str() == Some("openrouter.default")
                 && r["model"].as_str() == Some("nvidia/nemotron-3-ultra-550b-a55b:free"))
     );
-    assert!(
-        routes
-            .iter()
-            .any(|r| r["hint"].as_str() == Some("openrouter-free")
-                && r["model_provider"].as_str() == Some("openrouter.default")
-                && r["model"].as_str() == Some("nvidia/nemotron-3-ultra-550b-a55b:free"))
-    );
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("codex")
         && r["model_provider"].as_str() == Some("openai.codex")));
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("gemini")
@@ -303,14 +296,6 @@ fn codex_route_tracks_the_configured_model() {
         openrouter["model"].as_str(),
         Some("nvidia/nemotron-3-ultra-550b-a55b:free")
     );
-    let openrouter_free = routes
-        .iter()
-        .find(|route| route["hint"].as_str() == Some("openrouter-free"))
-        .unwrap();
-    assert_eq!(
-        openrouter_free["model"].as_str(),
-        Some("nvidia/nemotron-3-ultra-550b-a55b:free")
-    );
     let gemini = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("gemini"))
@@ -339,15 +324,8 @@ fn schema_four_openrouter_default_is_independent_of_codex_model_overrides() {
             assert!(active.get(key).is_none(), "unexpected OpenRouter {key}");
         }
         let routes = cfg["model_routes"].as_array().unwrap();
-        assert_eq!(routes.len(), 6);
-        for hint in [
-            "opencode",
-            "opencode-free",
-            "codex",
-            "openrouter",
-            "openrouter-free",
-            "gemini",
-        ] {
+        assert_eq!(routes.len(), 5);
+        for hint in ["opencode", "opencode-free", "codex", "openrouter", "gemini"] {
             assert_eq!(
                 routes
                     .iter()
@@ -879,7 +857,7 @@ fn openrouter_default_retains_all_explicit_model_routes() {
     let config: toml::Value =
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     let routes = config["model_routes"].as_array().unwrap();
-    assert_eq!(routes.len(), 6);
+    assert_eq!(routes.len(), 5);
     for (hint, provider, model) in [
         ("opencode", "opencode.default", "deepseek-v4.1-flash"),
         (
@@ -890,11 +868,6 @@ fn openrouter_default_retains_all_explicit_model_routes() {
         ("codex", "openai.codex", "gpt-6.1-sol"),
         (
             "openrouter",
-            "openrouter.default",
-            "nvidia/nemotron-3-ultra-550b-a55b:free",
-        ),
-        (
-            "openrouter-free",
             "openrouter.default",
             "nvidia/nemotron-3-ultra-550b-a55b:free",
         ),

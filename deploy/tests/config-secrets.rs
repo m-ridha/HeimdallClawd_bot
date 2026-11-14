@@ -107,11 +107,16 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
             "openrouter/free",
         ]
     );
-    for hint in ["openrouter", "openrouter-free"] {
-        let route = config.model_routes.iter().find(|r| r.hint == hint).unwrap();
-        assert_eq!(route.model_provider, "openrouter.default");
-        assert_eq!(route.model, "nvidia/nemotron-3-ultra-550b-a55b:free");
-    }
+    let openrouter_route = config
+        .model_routes
+        .iter()
+        .find(|r| r.hint == "openrouter")
+        .unwrap();
+    assert_eq!(openrouter_route.model_provider, "openrouter.default");
+    assert_eq!(
+        openrouter_route.model,
+        "nvidia/nemotron-3-ultra-550b-a55b:free"
+    );
     let gemini = &config.providers.models.gemini["default"];
     assert_eq!(gemini.base.model.as_deref(), Some("gemini-3.5-flash"));
     assert_eq!(gemini.auth_mode, None);
