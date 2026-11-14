@@ -87,25 +87,31 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .unwrap();
     assert_eq!(opencode_free_route.model_provider, "opencode.default");
     assert_eq!(opencode_free_route.model, "deepseek-v4.1-flash-free");
+    let openrouter = config
+        .providers
+        .models
+        .find("openrouter", "default")
+        .unwrap();
+    assert_eq!(openrouter.api_key.as_deref(), Some(openrouter_key));
     assert_eq!(
-        config
-            .providers
-            .models
-            .find("openrouter", "default")
-            .unwrap()
-            .api_key
-            .as_deref(),
-        Some(openrouter_key)
+        openrouter.model.as_deref(),
+        Some("nvidia/nemotron-3-ultra-550b-a55b:free")
     );
+    assert_eq!(openrouter.context_window, Some(200_000));
     assert_eq!(
-        config
-            .model_routes
-            .iter()
-            .find(|r| r.hint == "openrouter")
-            .unwrap()
-            .model_provider,
-        "openrouter.default"
+        openrouter.fallback_models,
+        vec![
+            "cohere/north-mini-code:free",
+            "inclusionai/ling-3.2-flash:free",
+            "google/gemma-4-31b-it:free",
+            "openrouter/free",
+        ]
     );
+    for hint in ["openrouter", "openrouter-free"] {
+        let route = config.model_routes.iter().find(|r| r.hint == hint).unwrap();
+        assert_eq!(route.model_provider, "openrouter.default");
+        assert_eq!(route.model, "nvidia/nemotron-3-ultra-550b-a55b:free");
+    }
     let gemini = &config.providers.models.gemini["default"];
     assert_eq!(gemini.base.model.as_deref(), Some("gemini-3.5-flash"));
     assert_eq!(gemini.auth_mode, None);
@@ -158,10 +164,21 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         None,
         "OpenCode must not inherit the Codex capacity",
     );
+    let openrouter_limits = config.resolved_context_limits_for_route(
+        "primary",
+        "openrouter.default",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+    );
+    assert_eq!(openrouter_limits.model_context_window, 200_000);
+    assert_eq!(openrouter_limits.context_token_budget, 192_000);
+    assert_eq!(
+        openrouter_limits.model_context_window_source,
+        zeroclaw_config::schema::ModelContextWindowSource::Configured,
+    );
     assert_eq!(
         config.model_provider_context_window_opt("openrouter.default", "openrouter/free"),
         None,
-        "The router must not inherit the Codex capacity",
+        "Same-alias fallback models must not borrow the primary configured capacity",
     );
     assert_eq!(
         config.model_provider_context_window_opt("gemini.default", "gemini-3.5-flash"),

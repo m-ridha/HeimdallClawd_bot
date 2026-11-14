@@ -7,7 +7,7 @@ These capabilities describe repository configuration; the deployed release can d
 ## Features
 
 - Private Telegram chats only. The owner (`TELEGRAM_OWNER_ID`) is always allowed; add more users with `TELEGRAM_ALLOWED_USER_IDS`. Additional permitted users are fully trusted operators: they share the workspace, accessible memory/sessions and configured credentialed tools. See the [privilege model](docs/operations.md#trusted-telegram-users) before adding anyone.
-- OpenRouter (`openrouter/free` on `openrouter.default`) is the initial model provider in the config template, with OpenCode (`deepseek-v4.1-flash` and `deepseek-v4.1-flash-free` on `opencode.default`), ChatGPT subscription sign-in (`gpt-6.1-sol` on `openai.codex`), and Gemini (`gemini-3.5-flash` on `gemini.default`) routes. Switch in Telegram with `/model openrouter`, `/model opencode`, `/model opencode-free`, `/model codex` and `/model gemini`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
+- OpenRouter (`nvidia/nemotron-3-ultra-550b-a55b:free` with curated `:free` fallback models on `openrouter.default`) is the initial model provider in the config template, with OpenCode (`deepseek-v4.1-flash` and `deepseek-v4.1-flash-free` on `opencode.default`), ChatGPT subscription sign-in (`gpt-6.1-sol` on `openai.codex`), and Gemini (`gemini-3.5-flash` on `gemini.default`) routes. Switch in Telegram with `/model openrouter`, `/model openrouter-free`, `/model opencode`, `/model opencode-free`, `/model codex` and `/model gemini`. Other providers are added with native `ZEROCLAW_...` environment overrides and are not enabled by default.
 - Native shell/filesystem/Git, internet access, and passwordless sudo root execution. The main image includes gh, Python 3, curl, jq, Node/npm, Bash, SSH, and pinned Rust/Cargo/rustfmt/Clippy.
 - Tavily web search, bounded web fetch and HTTP requests, and a Lynx text browser. Tavily is search, not an interactive browser.
 - Scheduled agent tasks (reminders, recurring reports), SOPs and permitted multi-step pipelines.
@@ -81,7 +81,7 @@ Deployment-specific values and secrets live in Railway variables. Shared non-sec
 | heimdallclawd | `TELEGRAM_ALLOWED_USER_IDS` | Optional comma-separated positive IDs; blank means owner only |
 | heimdallclawd | `PORT` | Set explicitly (3888); Railway's injected port overrides Docker's default |
 | heimdallclawd | `ZEROCLAW_web_search__tavily_api_key` | Optional Tavily key |
-| heimdallclawd | `ZEROCLAW_providers__models__openrouter__default__api_key` | API key for the initial `openrouter.default` (`openrouter/free`) route |
+| heimdallclawd | `ZEROCLAW_providers__models__openrouter__default__api_key` | API key for the initial `openrouter.default` (`nvidia/nemotron-3-ultra-550b-a55b:free` + `:free` fallback chain) route |
 | heimdallclawd | `ZEROCLAW_providers__models__opencode__default__api_key` | Optional key for the `opencode.default` (`deepseek-v4.1-flash` and `deepseek-v4.1-flash-free`) routes |
 | heimdallclawd | `GITHUB_TOKEN` | Optional raw GitHub token for native gh/Git, HTTP requests and Codespaces; no `Bearer` prefix |
 | heimdallclawd | `HEIMDALL_CODESPACE_REPOS` | Comma-separated `owner/repo` list, or standalone `*` for GitHub-authorized repositories; see [GitHub setup](docs/operations.md#github-access) |

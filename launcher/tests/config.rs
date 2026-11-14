@@ -43,9 +43,28 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
         Some(true)
     );
     assert!(!text.contains("api_key"));
-    assert!(!text.contains("fallback"));
+    assert!(!text.contains("fallback_providers"));
     assert!(!text.contains("Bearer"));
     assert!(!text.contains("bot_token"));
+    assert!(cfg.get("reliability").is_none());
+    for (vendor, aliases) in cfg["providers"]["models"].as_table().unwrap() {
+        for (alias, entry) in aliases.as_table().unwrap() {
+            assert!(
+                entry.get("fallback").is_none(),
+                "cross-provider fallback must not be configured on {vendor}.{alias}"
+            );
+            if let Some(models) = entry.get("fallback_models") {
+                assert_eq!((vendor.as_str(), alias.as_str()), ("openrouter", "default"));
+                for model in models.as_array().unwrap() {
+                    let id = model.as_str().unwrap();
+                    assert!(
+                        id == "openrouter/free" || id.ends_with(":free"),
+                        "fallback_models must remain free-tier only: {id}"
+                    );
+                }
+            }
+        }
+    }
     assert!(render_config(&[], "gpt-6.1-sol").is_err());
     assert!(render_config(&ids, "").is_err());
 }
@@ -98,7 +117,11 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ),
         (
             "providers.models.openrouter.default.model",
-            "openrouter/free",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+        ),
+        (
+            "providers.models.openrouter.default.context-window",
+            "200000",
         ),
         ("providers.models.gemini.default.model", "gemini-3.5-flash"),
         ("agents.primary.model-provider", "openrouter.default"),
@@ -182,7 +205,27 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
     );
     assert_eq!(
         cfg["providers"]["models"]["openrouter"]["default"]["model"].as_str(),
-        Some("openrouter/free")
+        Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+    );
+    assert_eq!(
+        cfg["providers"]["models"]["openrouter"]["default"]["context_window"].as_integer(),
+        Some(200_000)
+    );
+    let openrouter_fallbacks: Vec<&str> =
+        cfg["providers"]["models"]["openrouter"]["default"]["fallback_models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+    assert_eq!(
+        openrouter_fallbacks,
+        vec![
+            "cohere/north-mini-code:free",
+            "inclusionai/ling-3.2-flash:free",
+            "google/gemma-4-31b-it:free",
+            "openrouter/free",
+        ]
     );
     assert_eq!(
         cfg["providers"]["models"]["gemini"]["default"]["model"].as_str(),
@@ -214,7 +257,14 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
             .iter()
             .any(|r| r["hint"].as_str() == Some("openrouter")
                 && r["model_provider"].as_str() == Some("openrouter.default")
-                && r["model"].as_str() == Some("openrouter/free"))
+                && r["model"].as_str() == Some("nvidia/nemotron-3-ultra-550b-a55b:free"))
+    );
+    assert!(
+        routes
+            .iter()
+            .any(|r| r["hint"].as_str() == Some("openrouter-free")
+                && r["model_provider"].as_str() == Some("openrouter.default")
+                && r["model"].as_str() == Some("nvidia/nemotron-3-ultra-550b-a55b:free"))
     );
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("codex")
         && r["model_provider"].as_str() == Some("openai.codex")));
@@ -249,7 +299,18 @@ fn codex_route_tracks_the_configured_model() {
         .iter()
         .find(|route| route["hint"].as_str() == Some("openrouter"))
         .unwrap();
-    assert_eq!(openrouter["model"].as_str(), Some("openrouter/free"));
+    assert_eq!(
+        openrouter["model"].as_str(),
+        Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+    );
+    let openrouter_free = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("openrouter-free"))
+        .unwrap();
+    assert_eq!(
+        openrouter_free["model"].as_str(),
+        Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+    );
     let gemini = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("gemini"))
@@ -263,21 +324,30 @@ fn schema_four_openrouter_default_is_independent_of_codex_model_overrides() {
         let rendered = render_config(&["1001".into()], model).unwrap();
         let cfg: toml::Value = toml::from_str(&rendered).unwrap();
         assert_eq!(cfg["schema_version"].as_integer(), Some(4));
-        let provider_name = cfg["agents"]["primary"]["model_provider"]
-            .as_str()
-            .unwrap();
+        let provider_name = cfg["agents"]["primary"]["model_provider"].as_str().unwrap();
         assert_eq!(provider_name, "openrouter.default");
         let (provider, alias) = provider_name.split_once('.').unwrap();
         let active = &cfg["providers"]["models"][provider][alias];
-        assert_eq!(active["model"].as_str(), Some("openrouter/free"));
+        assert_eq!(
+            active["model"].as_str(),
+            Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+        );
+        assert_eq!(active["context_window"].as_integer(), Some(200_000));
         assert_eq!(active["wire_api"].as_str(), Some("chat_completions"));
-        // Codex capacity and subscription authentication must not leak to OpenRouter.
-        for key in ["context_window", "requires_openai_auth", "api_key"] {
+        // Codex capacity (475k) and subscription authentication must not leak to OpenRouter.
+        for key in ["requires_openai_auth", "api_key"] {
             assert!(active.get(key).is_none(), "unexpected OpenRouter {key}");
         }
         let routes = cfg["model_routes"].as_array().unwrap();
-        assert_eq!(routes.len(), 5);
-        for hint in ["opencode", "opencode-free", "codex", "openrouter", "gemini"] {
+        assert_eq!(routes.len(), 6);
+        for hint in [
+            "opencode",
+            "opencode-free",
+            "codex",
+            "openrouter",
+            "openrouter-free",
+            "gemini",
+        ] {
             assert_eq!(
                 routes
                     .iter()
@@ -778,16 +848,29 @@ fn runtime_upgrade_preserves_schema_and_openrouter_default_after_rendering() {
             config["agents"]["primary"]["model_provider"].as_str(),
             Some("openrouter.default")
         );
+        let openrouter = &config["providers"]["models"]["openrouter"]["default"];
         assert_eq!(
-            config["providers"]["models"]["openrouter"]["default"]["model"].as_str(),
-            Some("openrouter/free")
+            openrouter["model"].as_str(),
+            Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+        );
+        assert_eq!(openrouter["context_window"].as_integer(), Some(200_000));
+        let fallbacks: Vec<&str> = openrouter["fallback_models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            fallbacks,
+            vec![
+                "cohere/north-mini-code:free",
+                "inclusionai/ling-3.2-flash:free",
+                "google/gemma-4-31b-it:free",
+                "openrouter/free",
+            ]
         );
         // The default needs only the operator's environment override for its key.
-        assert!(
-            config["providers"]["models"]["openrouter"]["default"]
-                .get("api_key")
-                .is_none()
-        );
+        assert!(openrouter.get("api_key").is_none());
     }
 }
 
@@ -796,12 +879,25 @@ fn openrouter_default_retains_all_explicit_model_routes() {
     let config: toml::Value =
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     let routes = config["model_routes"].as_array().unwrap();
-    assert_eq!(routes.len(), 5);
+    assert_eq!(routes.len(), 6);
     for (hint, provider, model) in [
         ("opencode", "opencode.default", "deepseek-v4.1-flash"),
-        ("opencode-free", "opencode.default", "deepseek-v4.1-flash-free"),
+        (
+            "opencode-free",
+            "opencode.default",
+            "deepseek-v4.1-flash-free",
+        ),
         ("codex", "openai.codex", "gpt-6.1-sol"),
-        ("openrouter", "openrouter.default", "openrouter/free"),
+        (
+            "openrouter",
+            "openrouter.default",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+        ),
+        (
+            "openrouter-free",
+            "openrouter.default",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
+        ),
         ("gemini", "gemini.default", "gemini-3.5-flash"),
     ] {
         let matching: Vec<_> = routes
@@ -828,8 +924,7 @@ fn codex_override_cannot_replace_openrouter_default_or_other_provider_routes() {
     );
     for vendor in ["openrouter", "opencode", "gemini"] {
         assert_eq!(
-            alternate["providers"]["models"][vendor],
-            original["providers"]["models"][vendor],
+            alternate["providers"]["models"][vendor], original["providers"]["models"][vendor],
             "Codex override changed {vendor}"
         );
     }
