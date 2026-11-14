@@ -30,6 +30,11 @@ model_provider = "opencode.default"
 model = "deepseek-v4.1-flash"
 
 [[model_routes]]
+hint = "opencode-free"
+model_provider = "opencode.default"
+model = "deepseek-v4.1-flash-free"
+
+[[model_routes]]
 hint = "codex"
 model_provider = "openai.codex"
 model = "gpt-6.1-sol"

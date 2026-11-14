@@ -80,6 +80,13 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .unwrap();
     assert_eq!(opencode_route.model_provider, "opencode.default");
     assert_eq!(opencode_route.model, "deepseek-v4.1-flash");
+    let opencode_free_route = config
+        .model_routes
+        .iter()
+        .find(|r| r.hint == "opencode-free")
+        .unwrap();
+    assert_eq!(opencode_free_route.model_provider, "opencode.default");
+    assert_eq!(opencode_free_route.model, "deepseek-v4.1-flash-free");
     assert_eq!(
         config
             .providers

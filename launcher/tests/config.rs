@@ -205,6 +205,13 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
     assert!(
         routes
             .iter()
+            .any(|r| r["hint"].as_str() == Some("opencode-free")
+                && r["model_provider"].as_str() == Some("opencode.default")
+                && r["model"].as_str() == Some("deepseek-v4.1-flash-free"))
+    );
+    assert!(
+        routes
+            .iter()
             .any(|r| r["hint"].as_str() == Some("openrouter")
                 && r["model_provider"].as_str() == Some("openrouter.default")
                 && r["model"].as_str() == Some("openrouter/free"))
@@ -225,6 +232,14 @@ fn codex_route_tracks_the_configured_model() {
         .find(|route| route["hint"].as_str() == Some("opencode"))
         .unwrap();
     assert_eq!(opencode["model"].as_str(), Some("deepseek-v4.1-flash"));
+    let opencode_free = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("opencode-free"))
+        .unwrap();
+    assert_eq!(
+        opencode_free["model"].as_str(),
+        Some("deepseek-v4.1-flash-free")
+    );
     let codex = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("codex"))
