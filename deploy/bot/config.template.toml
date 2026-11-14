@@ -14,12 +14,25 @@ context_window = 475_000
 wire_api = "responses"
 requires_openai_auth = true
 
-[providers.models.openrouter.free]
+[providers.models.openrouter.default]
 model = "openrouter/free"
 wire_api = "chat_completions"
 
+[providers.models.opencode.default]
+model = "deepseek-v4.1-flash"
+
 [providers.models.gemini.default]
 model = "gemini-3.5-flash"
+
+[[model_routes]]
+hint = "opencode"
+model_provider = "opencode.default"
+model = "deepseek-v4.1-flash"
+
+[[model_routes]]
+hint = "opencode-free"
+model_provider = "opencode.default"
+model = "deepseek-v4.1-flash-free"
 
 [[model_routes]]
 hint = "codex"
@@ -27,8 +40,8 @@ model_provider = "openai.codex"
 model = "gpt-6.1-sol"
 
 [[model_routes]]
-hint = "free"
-model_provider = "openrouter.free"
+hint = "openrouter"
+model_provider = "openrouter.default"
 model = "openrouter/free"
 
 [[model_routes]]
@@ -42,7 +55,7 @@ model = "nova-3"
 [agents.primary]
 enabled = true
 channels = ["telegram.home"]
-model_provider = "openai.codex"
+model_provider = "opencode.default"
 transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
