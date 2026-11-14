@@ -723,3 +723,83 @@ fn sqlite_storage_is_explicit_and_unavailable_bulk_sync_is_disabled() {
         Some(false)
     );
 }
+
+#[test]
+fn runtime_upgrade_preserves_schema_and_openrouter_default_after_rendering() {
+    let template: toml::Value =
+        toml::from_str(include_str!("../../deploy/bot/config.template.toml")).unwrap();
+    let rendered: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    for config in [&template, &rendered] {
+        assert_eq!(config["schema_version"].as_integer(), Some(4));
+        assert_eq!(
+            config["agents"]["primary"]["model_provider"].as_str(),
+            Some("openrouter.default")
+        );
+        assert_eq!(
+            config["providers"]["models"]["openrouter"]["default"]["model"].as_str(),
+            Some("openrouter/free")
+        );
+        // The default needs only the operator's environment override for its key.
+        assert!(
+            config["providers"]["models"]["openrouter"]["default"]
+                .get("api_key")
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn openrouter_default_retains_all_explicit_model_routes() {
+    let config: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    let routes = config["model_routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 5);
+    for (hint, provider, model) in [
+        ("opencode", "opencode.default", "deepseek-v4.1-flash"),
+        ("opencode-free", "opencode.default", "deepseek-v4.1-flash-free"),
+        ("codex", "openai.codex", "gpt-6.1-sol"),
+        ("openrouter", "openrouter.default", "openrouter/free"),
+        ("gemini", "gemini.default", "gemini-3.5-flash"),
+    ] {
+        let matching: Vec<_> = routes
+            .iter()
+            .filter(|route| route["hint"].as_str() == Some(hint))
+            .collect();
+        assert_eq!(matching.len(), 1, "route {hint} must be unique");
+        assert_eq!(matching[0]["model_provider"].as_str(), Some(provider));
+        assert_eq!(matching[0]["model"].as_str(), Some(model));
+        let (vendor, alias) = provider.split_once('.').unwrap();
+        assert!(config["providers"]["models"][vendor][alias].is_table());
+    }
+}
+
+#[test]
+fn codex_override_cannot_replace_openrouter_default_or_other_provider_routes() {
+    let original: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    let alternate: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "fixture-other-model").unwrap()).unwrap();
+    assert_eq!(
+        alternate["agents"]["primary"]["model_provider"].as_str(),
+        Some("openrouter.default")
+    );
+    for vendor in ["openrouter", "opencode", "gemini"] {
+        assert_eq!(
+            alternate["providers"]["models"][vendor],
+            original["providers"]["models"][vendor],
+            "Codex override changed {vendor}"
+        );
+    }
+    let original_routes = original["model_routes"].as_array().unwrap();
+    let alternate_routes = alternate["model_routes"].as_array().unwrap();
+    assert_eq!(alternate_routes.len(), original_routes.len());
+    for (before, after) in original_routes.iter().zip(alternate_routes) {
+        if before["hint"].as_str() == Some("codex") {
+            assert_eq!(after["model"].as_str(), Some("fixture-other-model"));
+            assert_eq!(after["model_provider"].as_str(), Some("openai.codex"));
+        } else {
+            assert_eq!(before, after);
+        }
+    }
+}
