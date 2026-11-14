@@ -101,7 +101,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "openrouter/free",
         ),
         ("providers.models.gemini.default.model", "gemini-3.5-flash"),
-        ("agents.primary.model-provider", "opencode.default"),
+        ("agents.primary.model-provider", "openrouter.default"),
         ("heartbeat.enabled", "true"),
         ("heartbeat.to", "1001"),
         ("media_pipeline.enabled", "true"),
@@ -169,7 +169,7 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     assert_eq!(
         cfg["agents"]["primary"]["model_provider"].as_str(),
-        Some("opencode.default")
+        Some("openrouter.default")
     );
     assert_eq!(
         cfg["providers"]["models"]["opencode"]["default"]["model"].as_str(),

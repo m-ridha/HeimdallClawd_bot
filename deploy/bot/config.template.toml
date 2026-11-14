@@ -1,4 +1,4 @@
-schema_version = 3
+schema_version = 4
 
 [gateway]
 host = "0.0.0.0"
@@ -55,7 +55,7 @@ model = "nova-3"
 [agents.primary]
 enabled = true
 channels = ["telegram.home"]
-model_provider = "opencode.default"
+model_provider = "openrouter.default"
 transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
