@@ -4,6 +4,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     let template = std::fs::read_to_string(std::env::var("HEIMDALL_TEST_CONFIG").unwrap()).unwrap();
     std::fs::write(temp.path().join("config.toml"), template).unwrap();
     let token = "123456:TEST_token_abcdefghijklmnop";
+    let opencode_key = concat!("sk-opencode-", "placeholder_secret_abcdef");
     let openrouter_key = concat!("sk-or-v1-", "placeholder_secret_abcdef");
     let tavily_key = concat!("tvly-test-", "placeholder_secret_abcdef");
     let deepgram_key = "fixture_deepgram_private_value";
@@ -26,7 +27,11 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
             "sk-ant-fixture-private",
         );
         std::env::set_var(
-            "ZEROCLAW_providers__models__openrouter__free__api_key",
+            "ZEROCLAW_providers__models__opencode__default__api_key",
+            opencode_key,
+        );
+        std::env::set_var(
+            "ZEROCLAW_providers__models__openrouter__default__api_key",
             openrouter_key,
         );
         std::env::set_var("ZEROCLAW_channels__telegram__home__bot_token", token);
@@ -62,10 +67,24 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert_eq!(config.mcp_servers_for_agent("primary").len(), 4);
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(
+        config.agents["primary"].model_provider.as_str(),
+        "opencode.default"
+    );
+    let opencode = config.providers.models.find("opencode", "default").unwrap();
+    assert_eq!(opencode.api_key.as_deref(), Some(opencode_key));
+    assert_eq!(opencode.model.as_deref(), Some("deepseek-v4.1-flash"));
+    let opencode_route = config
+        .model_routes
+        .iter()
+        .find(|r| r.hint == "opencode")
+        .unwrap();
+    assert_eq!(opencode_route.model_provider, "opencode.default");
+    assert_eq!(opencode_route.model, "deepseek-v4.1-flash");
+    assert_eq!(
         config
             .providers
             .models
-            .find("openrouter", "free")
+            .find("openrouter", "default")
             .unwrap()
             .api_key
             .as_deref(),
@@ -75,10 +94,10 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         config
             .model_routes
             .iter()
-            .find(|r| r.hint == "free")
+            .find(|r| r.hint == "openrouter")
             .unwrap()
             .model_provider,
-        "openrouter.free"
+        "openrouter.default"
     );
     let gemini = &config.providers.models.gemini["default"];
     assert_eq!(gemini.base.model.as_deref(), Some("gemini-3.5-flash"));
@@ -128,7 +147,12 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         None,
     );
     assert_eq!(
-        config.model_provider_context_window_opt("openrouter.free", "openrouter/free"),
+        config.model_provider_context_window_opt("opencode.default", "deepseek-v4.1-flash"),
+        None,
+        "OpenCode must not inherit the Codex capacity",
+    );
+    assert_eq!(
+        config.model_provider_context_window_opt("openrouter.default", "openrouter/free"),
         None,
         "The router must not inherit the Codex capacity",
     );
@@ -140,6 +164,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     config.save().await.unwrap();
     let saved = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(!saved.contains("sk-ant-fixture-private"));
+    assert!(!saved.contains(opencode_key));
     assert!(!saved.contains(openrouter_key));
     assert!(!saved.contains(tavily_key));
     assert!(!saved.contains(deepgram_key));

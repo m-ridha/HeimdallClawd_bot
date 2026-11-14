@@ -92,7 +92,16 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "[\"1001\", \"1002\"]",
         ),
         ("providers.models.openai.codex.requires-openai-auth", "true"),
+        (
+            "providers.models.opencode.default.model",
+            "deepseek-v4.1-flash",
+        ),
+        (
+            "providers.models.openrouter.default.model",
+            "openrouter/free",
+        ),
         ("providers.models.gemini.default.model", "gemini-3.5-flash"),
+        ("agents.primary.model-provider", "opencode.default"),
         ("heartbeat.enabled", "true"),
         ("heartbeat.to", "1001"),
         ("media_pipeline.enabled", "true"),
@@ -160,10 +169,19 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     assert_eq!(
         cfg["agents"]["primary"]["model_provider"].as_str(),
-        Some("openai.codex")
+        Some("opencode.default")
     );
     assert_eq!(
-        cfg["providers"]["models"]["openrouter"]["free"]["model"].as_str(),
+        cfg["providers"]["models"]["opencode"]["default"]["model"].as_str(),
+        Some("deepseek-v4.1-flash")
+    );
+    assert!(
+        cfg["providers"]["models"]["opencode"]["default"]
+            .get("context_window")
+            .is_none()
+    );
+    assert_eq!(
+        cfg["providers"]["models"]["openrouter"]["default"]["model"].as_str(),
         Some("openrouter/free")
     );
     assert_eq!(
@@ -181,8 +199,16 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
             .is_none()
     );
     let routes = cfg["model_routes"].as_array().unwrap();
-    assert!(routes.iter().any(|r| r["hint"].as_str() == Some("free")
-        && r["model_provider"].as_str() == Some("openrouter.free")));
+    assert!(routes.iter().any(|r| r["hint"].as_str() == Some("opencode")
+        && r["model_provider"].as_str() == Some("opencode.default")
+        && r["model"].as_str() == Some("deepseek-v4.1-flash")));
+    assert!(
+        routes
+            .iter()
+            .any(|r| r["hint"].as_str() == Some("openrouter")
+                && r["model_provider"].as_str() == Some("openrouter.default")
+                && r["model"].as_str() == Some("openrouter/free"))
+    );
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("codex")
         && r["model_provider"].as_str() == Some("openai.codex")));
     assert!(routes.iter().any(|r| r["hint"].as_str() == Some("gemini")
@@ -194,16 +220,21 @@ fn codex_route_tracks_the_configured_model() {
     let cfg = render_config(&["1001".into()], "custom-codex-model").unwrap();
     let cfg: toml::Value = toml::from_str(&cfg).unwrap();
     let routes = cfg["model_routes"].as_array().unwrap();
+    let opencode = routes
+        .iter()
+        .find(|route| route["hint"].as_str() == Some("opencode"))
+        .unwrap();
+    assert_eq!(opencode["model"].as_str(), Some("deepseek-v4.1-flash"));
     let codex = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("codex"))
         .unwrap();
     assert_eq!(codex["model"].as_str(), Some("custom-codex-model"));
-    let free = routes
+    let openrouter = routes
         .iter()
-        .find(|route| route["hint"].as_str() == Some("free"))
+        .find(|route| route["hint"].as_str() == Some("openrouter"))
         .unwrap();
-    assert_eq!(free["model"].as_str(), Some("openrouter/free"));
+    assert_eq!(openrouter["model"].as_str(), Some("openrouter/free"));
     let gemini = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("gemini"))
