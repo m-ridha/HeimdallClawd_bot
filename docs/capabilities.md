@@ -55,7 +55,7 @@ nothing. Keep secrets in Railway native environment overrides, never TOML.
 6. Check signed email admission and diagnostics without replaying old events.
 
 Monitor resource use: tool availability does not mean every Rust build or browser
-workload fits 1 GB RAM, 1 GB ephemeral storage or 500 MB persistent storage.
+workload fits 8 GB RAM, 1 GB ephemeral storage or 5000 MB persistent storage.
 
 ## Boundaries and further reading
 

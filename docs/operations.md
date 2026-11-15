@@ -5,8 +5,8 @@ HeimdallClawd uses pinned ZeroClaw 0.9.0 with a Rust launcher in a single networ
 ## Railway services
 
 The main service listens on 3888, with one replica and sleeping disabled.
-IaC configures a ceiling of 2 shared vCPU and 1 GB RAM; the agent
-volume remains 500 MB at /data. Limits are ceilings, not reserved capacity.
+IaC configures a ceiling of 8 vCPU and 8 GB RAM; the agent
+volume is 5000 MB at /data. Limits are ceilings, not reserved capacity.
 After Trial, Free has lower CPU/RAM limits. See [migration](single-service-migration.md)
 for storage preservation and the distinction between Trial and Full Trial network access.
 

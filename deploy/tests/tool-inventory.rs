@@ -194,6 +194,7 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             "file_read",
             "file_write",
             "git_operations",
+            "read_skill",
             "delegate",
             "schedule",
         ] {
