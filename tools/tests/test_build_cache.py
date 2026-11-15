@@ -35,3 +35,16 @@ class NativeTestCacheTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         self.assertIn('no-cache-filters: runtime-build', workflow)
         self.assertNotIn('no-cache: true', workflow)
+
+    def test_eager_skill_patch_is_applied_before_native_contract_compilation(self):
+        dockerfile = (ROOT / 'deploy/bot/Dockerfile').read_text()
+        # Inspect runtime-source explicitly: applying a patch in a later stage
+        # would leave the cached native test binaries testing unpatched code.
+        source = dockerfile.split(' AS runtime-source\n', 1)[1].split('\nFROM ', 1)[0]
+        copy = 'COPY deploy/bot/patches/eager-read-skill.patch /tmp/eager-read-skill.patch'
+        apply = 'patch --fuzz=0 -p1 < /tmp/eager-read-skill.patch'
+        self.assertEqual(source.count(copy), 1)
+        self.assertEqual(source.count(apply), 1)
+        self.assertLess(source.index(copy), source.index(apply))
+        self.assertIn('FROM runtime-source AS native-test-compile', dockerfile)
+        self.assertIn('eager-read-skill.patch', (ROOT / 'deploy/bot/NOTICE.md').read_text())

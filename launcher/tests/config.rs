@@ -913,3 +913,40 @@ fn codex_override_cannot_replace_openrouter_default_or_other_provider_routes() {
         }
     }
 }
+
+#[test]
+fn compact_skill_loading_remains_authorized_with_deferred_builtins() {
+    let config: toml::Value =
+        toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
+    assert_eq!(
+        config["skills"]["prompt_injection_mode"].as_str(),
+        Some("compact")
+    );
+    assert_eq!(
+        config["runtime_profiles"]["primary"]["deferred_builtin_tools"].as_bool(),
+        Some(true)
+    );
+    for field in ["allowed_tools", "auto_approve"] {
+        let names = tool_names(&config["risk_profiles"]["primary"], field);
+        assert!(names.contains(&"read_skill"), "missing {field}: read_skill");
+        assert!(names.contains(&"tool_search"), "missing {field}: tool_search");
+    }
+}
+
+#[test]
+fn openrouter_capacity_leaves_headroom_without_expanding_the_working_budget() {
+    // Changing the subscription model must not affect the OpenRouter route's budget.
+    for model in ["gpt-6.1-sol", "fixture-other-model"] {
+        let config: toml::Value =
+            toml::from_str(&render_config(&["1001".into()], model).unwrap()).unwrap();
+        let capacity = config["providers"]["models"]["openrouter"]["default"]["context_window"]
+            .as_integer()
+            .unwrap();
+        let profile = &config["runtime_profiles"]["primary"];
+        let budget = profile["max_context_tokens"].as_integer().unwrap();
+        assert_eq!(capacity, 256_000);
+        assert_eq!(budget, 192_000);
+        assert_eq!(capacity - budget, 64_000);
+        assert_eq!(profile["compact_context"].as_bool(), Some(false));
+    }
+}

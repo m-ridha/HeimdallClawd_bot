@@ -225,6 +225,41 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             !hidden.contains("read_skill"),
             "read_skill must stay eager for compact skill loading, ACP={acp}"
         );
+        // Exercise the original failure: a registered but hidden loader caused
+        // compact mode to inline the entire skill body into the system prompt.
+        for always in [false, true] {
+            let skill = serde_json::from_value(serde_json::json!({
+                "name": "compact-regression-fixture",
+                "description": "Synthetic compact loading regression",
+                "version": "1.0.0",
+                "prompts": ["SYNTHETIC_SKILL_BODY_MUST_LOAD_ON_DEMAND"],
+                "always": always
+            }))
+            .unwrap();
+            let prompt = zeroclaw_runtime::agent::system_prompt::build_system_prompt_with_mode_and_effective_tools(
+                &workspace,
+                "fixture-model",
+                &[("read_skill", "Load skills")],
+                |name| names.contains(name) && !hidden.contains(name),
+                &[skill],
+                None,
+                None,
+                Some(config.risk_profile_for_agent("primary").unwrap()),
+                true,
+                config.effective_skills_prompt_mode("primary"),
+                false,
+                config.effective_max_system_prompt_chars("primary"),
+                true,
+                false,
+                None,
+            );
+            assert!(prompt.contains("compact-regression-fixture"));
+            assert_eq!(
+                prompt.contains("SYNTHETIC_SKILL_BODY_MUST_LOAD_ON_DEMAND"),
+                always,
+                "compact mode must respect always-inline skills, ACP={acp}, always={always}"
+            );
+        }
         assert!(
             hidden.contains("git_operations"),
             "Git schema must start deferred, ACP={acp}"
