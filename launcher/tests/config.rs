@@ -124,7 +124,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
             "256000",
         ),
         ("providers.models.gemini.default.model", "gemini-3.5-flash"),
-        ("agents.primary.model-provider", "openrouter.default"),
+        ("agents.primary.model-provider", "opencode.default"),
         ("heartbeat.enabled", "true"),
         ("heartbeat.to", "1001"),
         ("media_pipeline.enabled", "true"),
@@ -192,7 +192,11 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     assert_eq!(
         cfg["agents"]["primary"]["model_provider"].as_str(),
-        Some("openrouter.default")
+        Some("opencode.default")
+    );
+    assert_eq!(
+        cfg["providers"]["models"]["opencode"]["default"]["uri"].as_str(),
+        Some("https://opencode.ai/inference/go/v1")
     );
     assert_eq!(
         cfg["providers"]["models"]["opencode"]["default"]["model"].as_str(),
@@ -246,11 +250,9 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
         && r["model_provider"].as_str() == Some("opencode.default")
         && r["model"].as_str() == Some("deepseek-v4.1-flash")));
     assert!(
-        routes
+        !routes
             .iter()
-            .any(|r| r["hint"].as_str() == Some("opencode-free")
-                && r["model_provider"].as_str() == Some("opencode.default")
-                && r["model"].as_str() == Some("deepseek-v4.1-flash-free"))
+            .any(|r| r["hint"].as_str() == Some("opencode-free"))
     );
     assert!(
         routes
@@ -275,14 +277,6 @@ fn codex_route_tracks_the_configured_model() {
         .find(|route| route["hint"].as_str() == Some("opencode"))
         .unwrap();
     assert_eq!(opencode["model"].as_str(), Some("deepseek-v4.1-flash"));
-    let opencode_free = routes
-        .iter()
-        .find(|route| route["hint"].as_str() == Some("opencode-free"))
-        .unwrap();
-    assert_eq!(
-        opencode_free["model"].as_str(),
-        Some("deepseek-v4.1-flash-free")
-    );
     let codex = routes
         .iter()
         .find(|route| route["hint"].as_str() == Some("codex"))
@@ -310,22 +304,21 @@ fn schema_four_openrouter_default_is_independent_of_codex_model_overrides() {
         let cfg: toml::Value = toml::from_str(&rendered).unwrap();
         assert_eq!(cfg["schema_version"].as_integer(), Some(4));
         let provider_name = cfg["agents"]["primary"]["model_provider"].as_str().unwrap();
-        assert_eq!(provider_name, "openrouter.default");
+        assert_eq!(provider_name, "opencode.default");
         let (provider, alias) = provider_name.split_once('.').unwrap();
         let active = &cfg["providers"]["models"][provider][alias];
         assert_eq!(
-            active["model"].as_str(),
-            Some("nvidia/nemotron-3-ultra-550b-a55b:free")
+            active["uri"].as_str(),
+            Some("https://opencode.ai/inference/go/v1")
         );
-        assert_eq!(active["context_window"].as_integer(), Some(256_000));
-        assert_eq!(active["wire_api"].as_str(), Some("chat_completions"));
-        // Codex capacity (475k) and subscription authentication must not leak to OpenRouter.
-        for key in ["requires_openai_auth", "api_key"] {
-            assert!(active.get(key).is_none(), "unexpected OpenRouter {key}");
+        assert_eq!(active["model"].as_str(), Some("deepseek-v4.1-flash"));
+        // Codex capacity (475k) and subscription authentication must not leak to OpenCode.
+        for key in ["requires_openai_auth", "api_key", "context_window"] {
+            assert!(active.get(key).is_none(), "unexpected OpenCode {key}");
         }
         let routes = cfg["model_routes"].as_array().unwrap();
-        assert_eq!(routes.len(), 5);
-        for hint in ["opencode", "opencode-free", "codex", "openrouter", "gemini"] {
+        assert_eq!(routes.len(), 4);
+        for hint in ["opencode", "codex", "openrouter", "gemini"] {
             assert_eq!(
                 routes
                     .iter()
@@ -824,7 +817,7 @@ fn runtime_upgrade_preserves_schema_and_openrouter_default_after_rendering() {
         assert_eq!(config["schema_version"].as_integer(), Some(4));
         assert_eq!(
             config["agents"]["primary"]["model_provider"].as_str(),
-            Some("openrouter.default")
+            Some("opencode.default")
         );
         let openrouter = &config["providers"]["models"]["openrouter"]["default"];
         assert_eq!(
@@ -857,14 +850,9 @@ fn openrouter_default_retains_all_explicit_model_routes() {
     let config: toml::Value =
         toml::from_str(&render_config(&["1001".into()], "gpt-6.1-sol").unwrap()).unwrap();
     let routes = config["model_routes"].as_array().unwrap();
-    assert_eq!(routes.len(), 5);
+    assert_eq!(routes.len(), 4);
     for (hint, provider, model) in [
         ("opencode", "opencode.default", "deepseek-v4.1-flash"),
-        (
-            "opencode-free",
-            "opencode.default",
-            "deepseek-v4.1-flash-free",
-        ),
         ("codex", "openai.codex", "gpt-6.1-sol"),
         (
             "openrouter",
@@ -893,7 +881,7 @@ fn codex_override_cannot_replace_openrouter_default_or_other_provider_routes() {
         toml::from_str(&render_config(&["1001".into()], "fixture-other-model").unwrap()).unwrap();
     assert_eq!(
         alternate["agents"]["primary"]["model_provider"].as_str(),
-        Some("openrouter.default")
+        Some("opencode.default")
     );
     for vendor in ["openrouter", "opencode", "gemini"] {
         assert_eq!(

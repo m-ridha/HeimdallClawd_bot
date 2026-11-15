@@ -68,10 +68,14 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(
         config.agents["primary"].model_provider.as_str(),
-        "openrouter.default"
+        "opencode.default"
     );
     let opencode = config.providers.models.find("opencode", "default").unwrap();
     assert_eq!(opencode.api_key.as_deref(), Some(opencode_key));
+    assert_eq!(
+        opencode.uri.as_deref(),
+        Some("https://opencode.ai/inference/go/v1")
+    );
     assert_eq!(opencode.model.as_deref(), Some("deepseek-v4.1-flash"));
     let opencode_route = config
         .model_routes
@@ -80,13 +84,12 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .unwrap();
     assert_eq!(opencode_route.model_provider, "opencode.default");
     assert_eq!(opencode_route.model, "deepseek-v4.1-flash");
-    let opencode_free_route = config
-        .model_routes
-        .iter()
-        .find(|r| r.hint == "opencode-free")
-        .unwrap();
-    assert_eq!(opencode_free_route.model_provider, "opencode.default");
-    assert_eq!(opencode_free_route.model, "deepseek-v4.1-flash-free");
+    assert!(
+        config
+            .model_routes
+            .iter()
+            .all(|r| r.hint != "opencode-free")
+    );
     let openrouter = config
         .providers
         .models
