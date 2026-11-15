@@ -6,7 +6,7 @@ use zeroclaw_config::{policy::SecurityPolicy, schema::Config};
 use zeroclaw_memory::sqlite::SqliteMemory;
 use zeroclaw_runtime::{platform, tools};
 
-const ADDED: [&str; 15] = [
+const ADDED: [&str; 19] = [
     "tool_search",
     "image_info",
     "sessions_current",
@@ -22,6 +22,10 @@ const ADDED: [&str; 15] = [
     "memory_store",
     "memory_recall",
     "memory_forget",
+    "a2a_discover",
+    "a2a_send",
+    "a2a_get_task",
+    "a2a_cancel",
 ];
 
 #[tokio::test]
@@ -299,6 +303,8 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
         for name in ["file_upload", "file_upload_bundle", "file_download"] {
             assert!(!names.contains(name), "unconfigured endpoint: {name}");
         }
+        assert!(security.is_tool_allowed("mcp_resources"));
+        assert!(security.is_tool_allowed("mcp_prompts"));
     }
 }
 

@@ -32,7 +32,7 @@ fn config_grants_workspace_and_search_tools_without_secrets_or_fallback() {
             .as_array()
             .unwrap()
             .len(),
-        80
+        86
     );
     assert_eq!(
         cfg["risk_profiles"]["primary"]["allowed_tools"][0].as_str(),
@@ -139,6 +139,13 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ("storage.sqlite.default.open-timeout-secs", "30"),
         ("memory.embedding-dimensions", "2048"),
         ("knowledge.enabled", "true"),
+        ("knowledge.auto-capture", "true"),
+        ("runtime_profiles.primary.tool-receipts.enabled", "true"),
+        (
+            "runtime_profiles.primary.tool-receipts.show-in-response",
+            "false",
+        ),
+        ("a2a.client.enabled", "true"),
         ("memory.consolidation-extract-facts", "true"),
         ("memory.snapshot-enabled", "true"),
         ("memory.rerank-enabled", "true"),
@@ -593,6 +600,12 @@ fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
         "memory_store",
         "memory_recall",
         "memory_forget",
+        "mcp_resources",
+        "mcp_prompts",
+        "a2a_discover",
+        "a2a_send",
+        "a2a_get_task",
+        "a2a_cancel",
     ] {
         assert!(allowed.contains(&name), "{name}");
     }
@@ -603,6 +616,24 @@ fn native_capabilities_have_explicit_grants_and_bounded_private_defaults() {
         Some(120)
     );
     assert_eq!(cfg["knowledge"]["max_nodes"].as_integer(), Some(10_000));
+    assert_eq!(cfg["knowledge"]["auto_capture"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["tool_receipts"]["enabled"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["tool_receipts"]["show_in_response"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        cfg["runtime_profiles"]["primary"]["tool_receipts"]["inject_system_prompt"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(cfg["a2a"]["client"]["enabled"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["a2a"]["client"]["allow_private_hosts"].as_bool(),
+        Some(false)
+    );
     assert_eq!(
         cfg["observability"]["log_persistence_retention_max_files"].as_integer(),
         Some(3)

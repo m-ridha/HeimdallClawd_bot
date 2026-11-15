@@ -94,9 +94,10 @@ running agent does not see the new skill. Verify with skills list --agent primar
 and an actual task. The managed, ponytail, superpowers and ecc template entries are
 bundle registrations, not downloaded skill contents. Bulk Open Skills sync is
 disabled while its upstream repository is unavailable; registry installation and
-persistent bundles remain available. A registered MCP server or plugin still
-requires explicit tool grants. Installing instructions does not automatically
-install a plugin or configure an external service.
+persistent bundles remain available. Use mcp_resources and mcp_prompts to inspect
+resources and prompt templates exposed by connected MCP servers. A registered MCP
+server or plugin still requires explicit tool grants. Installing instructions
+does not automatically install a plugin or configure an external service.
 
 ## Scheduling, delegation and durable work
 
@@ -108,13 +109,16 @@ HEARTBEAT.md; no instructions means no invented proactive task.
 
 Use spawn_subagent/delegate for bounded parallel work when supported by the
 configured agents; delegated work consumes the same provider quotas and shares
-this service's trust boundary. Use independent branches/directories to avoid
-concurrent edits colliding. Session tools inspect shared history; sessions_send
-appends history and does not itself send Telegram or launch a turn. Use send_via
-for an actual notification. Model routing/switch tools use configured providers;
-do not invent keys or assume a subscription signs into another provider.
+this service's trust boundary. a2a_discover, a2a_send, a2a_get_task and a2a_cancel
+are granted for outbound A2A tasks when [[a2a.client.peers]] are configured. Use
+independent branches/directories to avoid concurrent edits colliding. Session
+tools inspect shared history; sessions_send appends history and does not itself
+send Telegram or launch a turn. Use send_via for an actual notification. Model
+routing/switch tools use configured providers; do not invent keys or assume a
+subscription signs into another provider.
 
-Use memory_store/recall/forget and knowledge for durable non-secret facts.
+Use memory_store/recall/forget and knowledge (with auto_capture enabled) for
+durable non-secret facts.
 Memory export/purge, backup and data_management are available: purge is
 potentially destructive; request authorization. Native retention is preview-only
 in this runtime. Local snapshots/backups share the same volume and are not
@@ -152,7 +156,8 @@ checkpoints under tasks/<name>.md. Before the 48-iteration or context limit,
 record head SHA, actual progress, pending work and uncertain mutations; explain
 how to resume in a fresh /new session. Do not claim automatic continuation.
 
-Detailed tool/prompt payload logging remains off. Deepgram voice and Cohere
+Detailed tool/prompt payload logging remains off; cryptographic tool receipts
+remain active in context and logs (show_in_response is off). Deepgram voice and Cohere
 embeddings require the existing operator keys. New channels, WebAuthn, remote
 nodes and vendor integrations need actual clients/credentials; never claim
 that compiled support is a connected integration. Runtime config is regenerated

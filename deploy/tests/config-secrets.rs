@@ -156,6 +156,13 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     );
     assert_eq!(config.memory.embedding_model, "embed-v5.0-fast");
     assert_eq!(config.memory.embedding_dimensions, 2048);
+    assert!(config.knowledge.auto_capture);
+    assert!(config.a2a.client.enabled);
+    assert!(!config.a2a.client.allow_private_hosts);
+    let receipts = &config.runtime_profiles["primary"].tool_receipts;
+    assert!(receipts.enabled);
+    assert!(!receipts.show_in_response);
+    assert!(!receipts.inject_system_prompt);
     let limits = config.resolved_context_limits_for_route("primary", "openai.codex", "gpt-6.1-sol");
     assert_eq!(limits.model_context_window, 475_000);
     assert_eq!(limits.context_token_budget, 192_000);
