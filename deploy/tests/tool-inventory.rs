@@ -221,6 +221,10 @@ async fn heimdall_native_inventory_survives_production_scope_for_telegram_and_ac
             "shell must stay eager, ACP={acp}"
         );
         assert!(
+            !hidden.contains("read_skill"),
+            "read_skill must stay eager for compact skill loading, ACP={acp}"
+        );
+        assert!(
             hidden.contains("git_operations"),
             "Git schema must start deferred, ACP={acp}"
         );

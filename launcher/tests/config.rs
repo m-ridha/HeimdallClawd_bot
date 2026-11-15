@@ -121,7 +121,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ),
         (
             "providers.models.openrouter.default.context-window",
-            "200000",
+            "256000",
         ),
         ("providers.models.gemini.default.model", "gemini-3.5-flash"),
         ("agents.primary.model-provider", "openrouter.default"),
@@ -209,7 +209,7 @@ fn model_choices_preserve_codex_default_and_share_tool_boundary() {
     );
     assert_eq!(
         cfg["providers"]["models"]["openrouter"]["default"]["context_window"].as_integer(),
-        Some(200_000)
+        Some(256_000)
     );
     let openrouter_fallbacks: Vec<&str> =
         cfg["providers"]["models"]["openrouter"]["default"]["fallback_models"]
@@ -317,7 +317,7 @@ fn schema_four_openrouter_default_is_independent_of_codex_model_overrides() {
             active["model"].as_str(),
             Some("nvidia/nemotron-3-ultra-550b-a55b:free")
         );
-        assert_eq!(active["context_window"].as_integer(), Some(200_000));
+        assert_eq!(active["context_window"].as_integer(), Some(256_000));
         assert_eq!(active["wire_api"].as_str(), Some("chat_completions"));
         // Codex capacity (475k) and subscription authentication must not leak to OpenRouter.
         for key in ["requires_openai_auth", "api_key"] {
@@ -831,7 +831,7 @@ fn runtime_upgrade_preserves_schema_and_openrouter_default_after_rendering() {
             openrouter["model"].as_str(),
             Some("nvidia/nemotron-3-ultra-550b-a55b:free")
         );
-        assert_eq!(openrouter["context_window"].as_integer(), Some(200_000));
+        assert_eq!(openrouter["context_window"].as_integer(), Some(256_000));
         let fallbacks: Vec<&str> = openrouter["fallback_models"]
             .as_array()
             .unwrap()

@@ -23,7 +23,7 @@ fallback_models = [
   "google/gemma-4-31b-it:free",
   "openrouter/free",
 ]
-context_window = 200_000
+context_window = 256_000
 wire_api = "chat_completions"
 
 [providers.models.opencode.default]
@@ -68,7 +68,7 @@ transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
 mcp_bundles = ["skills", "transfer", "codespace", "mail"]
-skill_bundles = ["managed", "ponytail", "superpowers", "ecc"]
+skill_bundles = ["managed"]
 cron_jobs = []
 acp_enable_mcp = true
 
@@ -340,15 +340,6 @@ servers = ["codespace"]
 
 [skill_bundles.managed]
 directory = "shared/skills/managed"
-
-[skill_bundles.ponytail]
-directory = "shared/skills/ponytail"
-
-[skill_bundles.superpowers]
-directory = "shared/skills/superpowers"
-
-[skill_bundles.ecc]
-directory = "shared/skills/ecc"
 
 [heartbeat]
 enabled = true

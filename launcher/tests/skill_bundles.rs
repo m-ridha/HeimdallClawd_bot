@@ -47,7 +47,6 @@ fn native_bundle_definitions_survive_refresh_and_fresh_startup_rendering() {
             toml::Value::from("custom-workflow"),
             toml::Value::from("ecc"),
             toml::Value::from("ponytail"),
-            toml::Value::from("superpowers")
         ]
     );
     assert_eq!(
@@ -85,12 +84,7 @@ fn first_boot_and_managed_policy_stay_template_owned() {
         cfg["agents"]["primary"]["skill_bundles"]
             .as_array()
             .unwrap(),
-        &[
-            toml::Value::from("managed"),
-            toml::Value::from("ecc"),
-            toml::Value::from("ponytail"),
-            toml::Value::from("superpowers")
-        ]
+        &[toml::Value::from("managed")]
     );
     let saved = "[skill_bundles.managed]\ndirectory = 'shared/elsewhere'\n";
     let cfg: toml::Value = toml::from_str(&attach(&original, Some(saved)).unwrap()).unwrap();
@@ -103,14 +97,14 @@ fn first_boot_and_managed_policy_stay_template_owned() {
             .as_array()
             .unwrap()
             .len(),
-        4
+        1
     );
 }
 
 #[test]
-fn saved_bundle_without_directory_preserves_template_directory() {
+fn saved_bundle_with_directory_is_imported_and_attached() {
     let original = base();
-    let saved = "[skill_bundles.ecc]\n";
+    let saved = "[skill_bundles.ecc]\ndirectory = 'shared/skills/ecc'\n";
     let cfg: toml::Value = toml::from_str(&attach(&original, Some(saved)).unwrap()).unwrap();
     assert_eq!(
         cfg["skill_bundles"]["ecc"]["directory"].as_str(),
@@ -167,7 +161,11 @@ fn native_runtime_lists_newly_attached_bundle() {
     let skill = dir.path().join("shared/skills/superpowers/bundle-fixture");
     fs::create_dir_all(&skill).unwrap();
     fs::write(skill.join("SKILL.md"), "---\nname: bundle-fixture\ndescription: Synthetic bundle visibility check\n---\n\nSummarize the task clearly.\n").unwrap();
-    let config = attach(&base(), Some("[skill_bundles.superpowers]\n")).unwrap();
+    let config = attach(
+        &base(),
+        Some("[skill_bundles.superpowers]\ndirectory = \"shared/skills/superpowers\"\n"),
+    )
+    .unwrap();
     fs::write(dir.path().join("config.toml"), config).unwrap();
     let output = std::process::Command::new(binary)
         .args(["skills", "list", "--agent", "primary"])

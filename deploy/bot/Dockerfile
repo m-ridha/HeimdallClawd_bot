@@ -30,7 +30,8 @@ COPY deploy/bot/patches/browser-output.patch /tmp/browser-output.patch
 COPY deploy/bot/patches/tool-log-privacy.patch /tmp/tool-log-privacy.patch
 COPY deploy/bot/patches/browser-navigation.patch /tmp/browser-navigation.patch
 COPY deploy/bot/patches/acp-pairing-revocation.patch /tmp/acp-pairing-revocation.patch
-RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/telegram-startup.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch && patch --fuzz=0 -p1 < /tmp/tool-log-privacy.patch && patch --fuzz=0 -p1 < /tmp/browser-navigation.patch && patch --fuzz=0 -p1 < /tmp/acp-pairing-revocation.patch
+COPY deploy/bot/patches/eager-read-skill.patch /tmp/eager-read-skill.patch
+RUN patch --fuzz=0 -p1 < /tmp/http-secret-origins.patch && patch --fuzz=0 -p1 < /tmp/http-diagnostics.patch && patch --fuzz=0 -p1 < /tmp/private-telegram.patch && patch --fuzz=0 -p1 < /tmp/telegram-startup.patch && patch --fuzz=0 -p1 < /tmp/gateway-admin-auth.patch && patch --fuzz=0 -p1 < /tmp/sop-workshop-guidance.patch && patch --fuzz=0 -p1 < /tmp/responses-tool-history.patch && patch --fuzz=0 -p1 < /tmp/browser-output.patch && patch --fuzz=0 -p1 < /tmp/tool-log-privacy.patch && patch --fuzz=0 -p1 < /tmp/browser-navigation.patch && patch --fuzz=0 -p1 < /tmp/acp-pairing-revocation.patch && patch --fuzz=0 -p1 < /tmp/eager-read-skill.patch
 # Build dashboard assets only from the checksum-pinned runtime source.
 FROM node:26-bookworm-slim AS dashboard-node
 FROM runtime-source AS runtime-web
@@ -75,6 +76,7 @@ RUN cargo test --locked -p zeroclaw-log --test heimdall_tool_privacy --no-run \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features browser-native --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --lib heimdall --no-run \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets --no-run \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --lib heimdall_read_skill --no-run \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --test heimdall_inventory --test heimdall_sop_workshop --no-run
 
 FROM native-test-compile AS runtime-build
@@ -96,6 +98,7 @@ RUN cargo test --locked -p zeroclaw-log --test heimdall_tool_privacy \
     && cargo test --locked -p zeroclaw-tools --no-default-features --features browser-native --lib heimdall \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --lib heimdall \
     && cargo test --locked -p zeroclaw-config --no-default-features --features schema-export --test heimdall_secrets \
+    && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --lib heimdall_read_skill \
     && cargo test --locked -p zeroclaw-runtime --no-default-features --features tools-external,tool-project-intel,browser-native --test heimdall_inventory --test heimdall_sop_workshop \
     && /runtime/target/release/zeroclaw eval run --suite /tmp/heimdall-evals --mode replay \
     && touch /contract-passed

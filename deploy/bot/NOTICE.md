@@ -30,6 +30,7 @@ existing Landlock profile.
 | http-secret-origins.patch | Bind each named GitHub/AgentMail credential to its exact HTTPS origin before resolving it. General domain allowlists do not provide per-secret binding. |
 | http-diagnostics.patch | Provide bounded, sanitized actionable HTTP status/category diagnostics without enabling payload logging. |
 | acp-pairing-revocation.patch | Bind ACP and chat WebSockets to the authenticated token hash, close them on device or global revocation, and recheck live membership when dispatching queued requests, publishing sessions and admitting turns. Cancel admitted turns through native transcript persistence. |
+| eager-read-skill.patch | Keep `read_skill` in `EAGER_BUILTINS` when `deferred_builtin_tools` is enabled so `prompt_injection_mode = "compact"` does not fall back to inlining full `SKILL.md` bodies into the system prompt. |
 | gateway-admin-auth.patch | Treat trusted-proxy requests as remote, requiring current paired authentication and remote-admin policy; proxy loopback must not grant local CLI authority. |
 | sop-workshop-guidance.patch | Correct action-specific parameters and required Markdown syntax without echoing rejected procedure content. Native validation and explicit application remain unchanged. |
 | responses-tool-history.patch | Reconcile retained calls/results, supply unknown-outcome errors for missing outputs and avoid retrying rejected history shapes across OpenAI Responses/Codex. Never rerun tools or rewrite stored sessions. |
