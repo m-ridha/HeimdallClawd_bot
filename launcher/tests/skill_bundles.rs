@@ -164,10 +164,16 @@ fn native_runtime_lists_newly_attached_bundle() {
         return;
     };
     let dir = tempfile::tempdir().unwrap();
-    let skill = dir.path().join("shared/skills/superpowers/bundle-fixture");
+    let skill = dir
+        .path()
+        .join("shared/skills/custom-bundle/bundle-fixture");
     fs::create_dir_all(&skill).unwrap();
     fs::write(skill.join("SKILL.md"), "---\nname: bundle-fixture\ndescription: Synthetic bundle visibility check\n---\n\nSummarize the task clearly.\n").unwrap();
-    let config = attach(&base(), Some("[skill_bundles.superpowers]\n")).unwrap();
+    let config = attach(
+        &base(),
+        Some("[skill_bundles.custom-bundle]\ndirectory = \"shared/skills/custom-bundle\"\n"),
+    )
+    .unwrap();
     fs::write(dir.path().join("config.toml"), config).unwrap();
     let output = std::process::Command::new(binary)
         .args(["skills", "list", "--agent", "primary"])

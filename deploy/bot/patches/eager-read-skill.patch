@@ -1,0 +1,38 @@
+diff --git a/crates/zeroclaw-runtime/src/tools/scoped.rs b/crates/zeroclaw-runtime/src/tools/scoped.rs
+index 89a15e7..2055857 100644
+--- a/crates/zeroclaw-runtime/src/tools/scoped.rs
++++ b/crates/zeroclaw-runtime/src/tools/scoped.rs
+@@ -1476,6 +1476,7 @@ impl ScopedToolRegistry {
+             "file_edit",
+             "memory_recall",
+             "memory_store",
++            "read_skill",
+         ];
+         let builtin_deferral = !list_deferred_mcp_specs
+             && config
+@@ -3933,4 +3934,25 @@ mod tests {
+             );
+         }
+     }
++
++    #[tokio::test]
++    async fn heimdall_read_skill_stays_eager_with_deferred_builtins() {
++        let config = builtin_deferral_config(true);
++        let security = Arc::new(SecurityPolicy::default());
++        let calls = Arc::new(AtomicUsize::new(0));
++        let assembled = assemble_builtin_catalog(
++            &config,
++            &security,
++            built_with_counting_tools(
++                Arc::clone(&calls),
++                &["shell", "read_skill", "calendar"],
++            ),
++            None,
++            false,
++        )
++        .await;
++        let hidden = assembled.registry.hidden_builtin_names();
++        assert!(!hidden.contains("read_skill"));
++        assert!(hidden.contains("calendar"));
++    }
+ }

@@ -97,7 +97,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         openrouter.model.as_deref(),
         Some("nvidia/nemotron-3-ultra-550b-a55b:free")
     );
-    assert_eq!(openrouter.context_window, Some(200_000));
+    assert_eq!(openrouter.context_window, Some(256_000));
     assert_eq!(
         openrouter.fallback_models,
         vec![
@@ -174,7 +174,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         "openrouter.default",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
     );
-    assert_eq!(openrouter_limits.model_context_window, 200_000);
+    assert_eq!(openrouter_limits.model_context_window, 256_000);
     assert_eq!(openrouter_limits.context_token_budget, 192_000);
     assert_eq!(
         openrouter_limits.model_context_window_source,
