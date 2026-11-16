@@ -149,6 +149,15 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     let voice = &config.providers.transcription.deepgram["voice"];
     assert_eq!(voice.base.api_key.as_deref(), Some(deepgram_key));
     assert_eq!(voice.model.as_deref(), Some("nova-3"));
+    assert!(config.tts.enabled);
+    assert_eq!(config.tts.default_voice, "en-US-AriaNeural");
+    assert_eq!(
+        config.agents["primary"].tts_provider.as_str(),
+        "edge.default"
+    );
+    let edge_tts = &config.providers.tts.edge["default"];
+    assert_eq!(edge_tts.base.voice.as_deref(), Some("en-US-AriaNeural"));
+    assert_eq!(edge_tts.base.binary_path.as_deref(), Some("edge-tts"));
     assert_eq!(config.memory.embedding_api_key.as_deref(), Some(cohere_key));
     assert_eq!(
         config.memory.embedding_provider,

@@ -131,6 +131,9 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ("transcription.enabled", "true"),
         ("providers.transcription.deepgram.voice.model", "nova-3"),
         ("agents.primary.transcription-provider", "deepgram.voice"),
+        ("tts.enabled", "true"),
+        ("tts.default_voice", "en-US-AriaNeural"),
+        ("agents.primary.tts_provider", "edge.default"),
         (
             "memory.embedding-provider",
             "custom:https://api.cohere.ai/compatibility/v1",
@@ -670,6 +673,23 @@ fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials(
     assert_eq!(
         cfg["providers"]["transcription"]["deepgram"]["voice"]["model"].as_str(),
         Some("nova-3")
+    );
+    assert_eq!(cfg["tts"]["enabled"].as_bool(), Some(true));
+    assert_eq!(
+        cfg["tts"]["default_voice"].as_str(),
+        Some("en-US-AriaNeural")
+    );
+    assert_eq!(
+        cfg["agents"]["primary"]["tts_provider"].as_str(),
+        Some("edge.default")
+    );
+    assert_eq!(
+        cfg["providers"]["tts"]["edge"]["default"]["voice"].as_str(),
+        Some("en-US-AriaNeural")
+    );
+    assert_eq!(
+        cfg["providers"]["tts"]["edge"]["default"]["binary_path"].as_str(),
+        Some("edge-tts")
     );
     assert_eq!(
         cfg["memory"]["embedding_model"].as_str(),
