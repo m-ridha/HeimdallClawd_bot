@@ -57,7 +57,7 @@ model = "gemini-3.5-flash"
 model = "nova-3"
 
 [providers.tts.edge.default]
-voice = "en-US-AriaNeural"
+voice = "en-US-ChristopherNeural"
 binary_path = "edge-tts"
 
 [agents.primary]
@@ -522,7 +522,7 @@ transcribe_non_ptt_audio = true
 
 [tts]
 enabled = true
-default_voice = "en-US-AriaNeural"
+default_voice = "en-US-ChristopherNeural"
 default_format = "mp3"
 max_text_length = 4096
 

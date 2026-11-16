@@ -132,7 +132,7 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ("providers.transcription.deepgram.voice.model", "nova-3"),
         ("agents.primary.transcription-provider", "deepgram.voice"),
         ("tts.enabled", "true"),
-        ("tts.default_voice", "en-US-AriaNeural"),
+        ("tts.default_voice", "en-US-ChristopherNeural"),
         ("agents.primary.tts_provider", "edge.default"),
         (
             "memory.embedding-provider",
@@ -677,7 +677,7 @@ fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials(
     assert_eq!(cfg["tts"]["enabled"].as_bool(), Some(true));
     assert_eq!(
         cfg["tts"]["default_voice"].as_str(),
-        Some("en-US-AriaNeural")
+        Some("en-US-ChristopherNeural")
     );
     assert_eq!(
         cfg["agents"]["primary"]["tts_provider"].as_str(),
@@ -685,7 +685,7 @@ fn voice_and_embeddings_select_explicit_providers_without_persisted_credentials(
     );
     assert_eq!(
         cfg["providers"]["tts"]["edge"]["default"]["voice"].as_str(),
-        Some("en-US-AriaNeural")
+        Some("en-US-ChristopherNeural")
     );
     assert_eq!(
         cfg["providers"]["tts"]["edge"]["default"]["binary_path"].as_str(),
