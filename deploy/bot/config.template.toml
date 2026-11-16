@@ -27,6 +27,7 @@ context_window = 256_000
 wire_api = "chat_completions"
 
 [providers.models.opencode.default]
+uri = "https://opencode.ai/inference/go/v1"
 model = "deepseek-v4.1-flash"
 
 [providers.models.gemini.default]
@@ -36,11 +37,6 @@ model = "gemini-3.5-flash"
 hint = "opencode"
 model_provider = "opencode.default"
 model = "deepseek-v4.1-flash"
-
-[[model_routes]]
-hint = "opencode-free"
-model_provider = "opencode.default"
-model = "deepseek-v4.1-flash-free"
 
 [[model_routes]]
 hint = "codex"
@@ -63,7 +59,7 @@ model = "nova-3"
 [agents.primary]
 enabled = true
 channels = ["telegram.home"]
-model_provider = "openrouter.default"
+model_provider = "opencode.default"
 transcription_provider = "deepgram.voice"
 risk_profile = "primary"
 runtime_profile = "primary"
@@ -185,6 +181,12 @@ allowed_tools = [
 	"memory_forget",
 	"mail__filters",
 	"mail__set_enabled",
+	"mcp_resources",
+	"mcp_prompts",
+	"a2a_discover",
+	"a2a_send",
+	"a2a_get_task",
+	"a2a_cancel",
 ]
 auto_approve = [
 	"shell",
@@ -267,6 +269,12 @@ auto_approve = [
 	"memory_forget",
 	"mail__filters",
 	"mail__set_enabled",
+	"mcp_resources",
+	"mcp_prompts",
+	"a2a_discover",
+	"a2a_send",
+	"a2a_get_task",
+	"a2a_cancel",
 ]
 excluded_tools = []
 # Explicitly expose only the GitHub credential to normal shell children.
@@ -289,6 +297,11 @@ parallel_tools = true
 # Discover built-in schemas on demand; MCP stays eager for remote skill dispatch.
 deferred_builtin_tools = true
 max_tool_result_chars = 70_000
+
+[runtime_profiles.primary.tool_receipts]
+enabled = true
+show_in_response = false
+inject_system_prompt = false
 
 [mcp]
 enabled = true
@@ -536,7 +549,7 @@ search_mode = "hybrid"
 enabled = true
 db_path = "/data/zeroclaw/data/knowledge.db"
 max_nodes = 10_000
-auto_capture = false
+auto_capture = true
 suggest_on_query = true
 
 [project_intel]
@@ -561,6 +574,10 @@ mode = "replay"
 default_agent = "primary"
 max_sessions = 4
 session_timeout_secs = 1800
+
+[a2a.client]
+enabled = true
+allow_private_hosts = false
 
 # Activation requires an owner-configured shared token and remote client.
 [nodes]

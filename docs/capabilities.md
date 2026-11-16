@@ -8,21 +8,21 @@ service runs native tools with internet and passwordless sudo root access.
 | Shell, filesystem and Git | Native shell/read/write/edit/search/Git; full autonomy and command admission, 300-second shell timeout. Root can access credentials and change the bot. |
 | Development toolkit | Final image includes gh, Git, Bash, Python 3, curl, jq, Node/npm, SSH, ripgrep, GCC, Go 1.27, slop-chop and pinned Rust/Cargo/rustfmt/Clippy. Dependencies can be downloaded. Large builds may exceed Trial resources. |
 | Scheduling | Agent cron tools plus native shell schedule; Telegram delivery requires explicit recipient and a known timezone. |
-| Delegation | Native spawn_subagent/delegate granted; reachable targets and recursion limits remain upstream policy. Work shares credentials/resources. |
+| Delegation | Native spawn_subagent/delegate and outbound A2A client tools (a2a_discover, a2a_send, a2a_get_task, a2a_cancel) granted; reachable targets, configured `[[a2a.client.peers]]` and recursion limits remain upstream policy. Work shares credentials/resources. |
 | Parallel tools, pipelines, SOPs | Enabled; pipeline remains explicitly scoped and capped at twelve steps. SOP definitions/approval/state persist. |
 | Skills and hooks | Native skill scripts, registry install/list and lifecycle hooks. Bulk Open Skills sync is disabled while its upstream repository is unavailable; installed bundles remain usable. Files and registered bundle definitions persist on the same /data volume; startup restores assignments. Refresh plus reload is for new bundles without restarting. See [skill persistence](operations.md#operator-installed-skill-bundles). |
 | WASM plugins | Cranelift host enabled with discovery and bounded plugin calls. No plugin bundled; packages need exact tool grants and their own configuration. |
 | Web and browser | Tavily search, fetch, HTTP, Lynx and native local Chromium automation. ChromeDriver is loopback-only; no remote browser account required. Public URL restrictions remain on web tools; shell networking is broader. |
 | Media | image_info; Deepgram voice with existing key; media preprocessing. No desktop screenshot environment; browser screenshots use browser actions. Upstream video summarization is a placeholder. |
 | Messaging | Telegram polls/reactions/notifications and small bounded transfers. Room/delivery/upload tools depend on the active channel or endpoint. No new messaging account is configured. |
-| Memory, sessions, knowledge | SQLite, Cohere semantic retrieval with existing key, graph capture, fact extraction, snapshots, MMR and bounded cache. Session send appends history rather than delivering a notification. |
+| Memory, sessions, knowledge | SQLite, Cohere semantic retrieval with existing key, graph capture (`auto_capture = true`), fact extraction, snapshots, MMR and bounded cache. Session send appends history rather than delivering a notification. |
 | Local utilities | Calculator, weather, canvas, TodoWrite, llm_task, model switch/routing, proxy configuration and peer messaging tools granted. Runtime/provider and peer prerequisites still apply. |
 | Backup and data management | Backup tool retains at most two archives of selected data directories; no automatic schedule. Retention tool is preview-only upstream. Same-volume archives are not independent backups. |
 | Project/cloud/security reports | Enabled advisory tools and report templates; analysis does not establish external remediation. |
 | GitHub | Native Git/gh using GITHUB_TOKEN, exact-origin github HTTP alias and optional Codespaces compute. GitHub permissions/billing remain separate. |
 | Email | Existing signed AgentMail sender/content admission and native SOP dispatch; rule toggles and safe diagnostics. No automatic replay. |
 | Dashboard and ACP | Embedded paired public dashboard, remote reload policy and ACP support. Compatible clients require setup. |
-| Diagnostics and evaluation | Redacted rotating diagnostics; tool/prompt payload capture off. Synthetic replay harness wired in CI; not model-quality evidence. |
+| Diagnostics and evaluation | Redacted rotating diagnostics, cryptographic `HMAC-SHA256` tool receipts (`tool_receipts.enabled = true`, `show_in_response = false`) and replay evaluation; tool/prompt payload capture off. Synthetic replay harness wired in CI; not model-quality evidence. |
 
 ## Configurable native integrations
 
@@ -36,7 +36,7 @@ without prerequisites. See the [patch rationale](../deploy/bot/NOTICE.md).
 
 ## Additional MCP servers and plugins
 
-The retained MCP bundles are skills, transfer, Codespaces and mail. New servers
+The retained MCP bundles are skills, transfer, Codespaces and mail, with `mcp_resources` and `mcp_prompts` discovery granted. New servers
 need transport configuration, an attached bundle and exact prefixed grants in
 allowed_tools/auto_approve; pipeline access is separate. Registration grants
 nothing. Keep secrets in Railway native environment overrides, never TOML.

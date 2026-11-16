@@ -68,10 +68,14 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(
         config.agents["primary"].model_provider.as_str(),
-        "openrouter.default"
+        "opencode.default"
     );
     let opencode = config.providers.models.find("opencode", "default").unwrap();
     assert_eq!(opencode.api_key.as_deref(), Some(opencode_key));
+    assert_eq!(
+        opencode.uri.as_deref(),
+        Some("https://opencode.ai/inference/go/v1")
+    );
     assert_eq!(opencode.model.as_deref(), Some("deepseek-v4.1-flash"));
     let opencode_route = config
         .model_routes
@@ -80,13 +84,12 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
         .unwrap();
     assert_eq!(opencode_route.model_provider, "opencode.default");
     assert_eq!(opencode_route.model, "deepseek-v4.1-flash");
-    let opencode_free_route = config
-        .model_routes
-        .iter()
-        .find(|r| r.hint == "opencode-free")
-        .unwrap();
-    assert_eq!(opencode_free_route.model_provider, "opencode.default");
-    assert_eq!(opencode_free_route.model, "deepseek-v4.1-flash-free");
+    assert!(
+        config
+            .model_routes
+            .iter()
+            .all(|r| r.hint != "opencode-free")
+    );
     let openrouter = config
         .providers
         .models
@@ -153,6 +156,13 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     );
     assert_eq!(config.memory.embedding_model, "embed-v5.0-fast");
     assert_eq!(config.memory.embedding_dimensions, 2048);
+    assert!(config.knowledge.auto_capture);
+    assert!(config.a2a.client.enabled);
+    assert!(!config.a2a.client.allow_private_hosts);
+    let receipts = &config.runtime_profiles["primary"].tool_receipts;
+    assert!(receipts.enabled);
+    assert!(!receipts.show_in_response);
+    assert!(!receipts.inject_system_prompt);
     let limits = config.resolved_context_limits_for_route("primary", "openai.codex", "gpt-6.1-sol");
     assert_eq!(limits.model_context_window, 475_000);
     assert_eq!(limits.context_token_budget, 192_000);
