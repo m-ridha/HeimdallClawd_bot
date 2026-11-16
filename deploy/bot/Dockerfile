@@ -1,4 +1,4 @@
-FROM rust:1.99-slim-bookworm AS launcher-build
+FROM rust:1.100-slim-bookworm AS launcher-build
 WORKDIR /launcher
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
@@ -11,7 +11,7 @@ RUN cargo test --locked --lib --test config --test skills_mcp --test startup --t
 FROM scratch AS support-binaries
 COPY --from=launcher-build /launcher/target/release/heimdall-launcher /heimdall-launcher
 
-FROM rust:1.99-slim-bookworm AS runtime-source
+FROM rust:1.100-slim-bookworm AS runtime-source
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates patch pkg-config g++ libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /runtime
 ENV CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_BUILD_JOBS=2 \
