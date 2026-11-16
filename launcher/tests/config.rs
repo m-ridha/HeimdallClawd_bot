@@ -140,9 +140,9 @@ fn pinned_runtime_accepts_effective_policy_and_secret_overrides() {
         ("memory.embedding-dimensions", "2048"),
         ("knowledge.enabled", "true"),
         ("knowledge.auto-capture", "true"),
-        ("runtime_profiles.primary.tool-receipts.enabled", "true"),
+        ("runtime_profiles.primary.tool_receipts.enabled", "true"),
         (
-            "runtime_profiles.primary.tool-receipts.show-in-response",
+            "runtime_profiles.primary.tool_receipts.show_in_response",
             "false",
         ),
         ("a2a.client.enabled", "true"),
