@@ -80,7 +80,7 @@ async fn typed_only_provider_delivers_transcribed_voice() {
 
 #[tokio::test]
 async fn tts_voice_reply_delivers_synthesized_audio_to_telegram() {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use tokio::sync::Notify;
     use zeroclaw_api::channel::SendMessage;
 
@@ -145,9 +145,18 @@ async fn tts_voice_reply_delivers_synthesized_audio_to_telegram() {
 
     let voice_delivered = Arc::new(Notify::new());
     let voice_delivered_signal = voice_delivered.clone();
+    let captured_voice_request: Arc<Mutex<Option<(String, Vec<u8>)>>> = Arc::new(Mutex::new(None));
+    let captured_voice_sink = captured_voice_request.clone();
     Mock::given(method("POST"))
         .and(path(format!("/bot{token}/sendVoice")))
-        .respond_with(move |_: &wiremock::Request| {
+        .respond_with(move |req: &wiremock::Request| {
+            let content_type = req
+                .headers
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            *captured_voice_sink.lock().unwrap() = Some((content_type, req.body.clone()));
             voice_delivered_signal.notify_one();
             ResponseTemplate::new(200).set_body_json(json!({"ok":true,"result":{"message_id":11}}))
         })
@@ -198,5 +207,23 @@ async fn tts_voice_reply_delivers_synthesized_audio_to_telegram() {
     tokio::time::timeout(Duration::from_secs(3), voice_delivered.notified())
         .await
         .expect("Telegram sendVoice reply did not fire");
+    let (content_type, body) = captured_voice_request
+        .lock()
+        .unwrap()
+        .take()
+        .expect("sendVoice request body was not captured");
+    assert!(
+        content_type.starts_with("multipart/form-data"),
+        "expected multipart/form-data, got: {content_type}"
+    );
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(
+        body_text.contains("name=\"chat_id\"") && body_text.contains("1001"),
+        "sendVoice payload missing chat_id=1001: {body_text}"
+    );
+    assert!(
+        body_text.contains("name=\"voice\"") && body_text.contains("OggS-synthetic-opus-audio"),
+        "sendVoice payload missing voice fixture audio: {body_text}"
+    );
     endpoint.verify().await;
 }
