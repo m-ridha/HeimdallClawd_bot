@@ -216,14 +216,57 @@ async fn tts_voice_reply_delivers_synthesized_audio_to_telegram() {
         content_type.starts_with("multipart/form-data"),
         "expected multipart/form-data, got: {content_type}"
     );
-    let body_text = String::from_utf8_lossy(&body);
-    assert!(
-        body_text.contains("name=\"chat_id\"") && body_text.contains("1001"),
-        "sendVoice payload missing chat_id=1001: {body_text}"
+    let boundary = content_type
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("boundary="))
+        .map(|value| value.trim_matches('"'))
+        .expect("multipart/form-data header missing boundary");
+    let delimiter = format!("--{boundary}").into_bytes();
+    let mut chat_id_value = None;
+    let mut voice_value = None;
+    let mut offset = 0;
+    while let Some(pos) = body[offset..]
+        .windows(delimiter.len())
+        .position(|window| window == delimiter.as_slice())
+    {
+        let part_start = offset + pos + delimiter.len();
+        if body[part_start..].starts_with(b"--") {
+            break;
+        }
+        let content_start = if body[part_start..].starts_with(b"\r\n") {
+            part_start + 2
+        } else {
+            part_start
+        };
+        let next_pos = body[content_start..]
+            .windows(delimiter.len())
+            .position(|window| window == delimiter.as_slice())
+            .expect("multipart part missing closing boundary");
+        let part = &body[content_start..content_start + next_pos];
+        let part = part.strip_suffix(b"\r\n").unwrap_or(part);
+        let header_end = part
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("multipart part missing header terminator");
+        let headers = String::from_utf8_lossy(&part[..header_end]);
+        let value = &part[header_end + 4..];
+        if headers.contains("name=\"chat_id\"") {
+            chat_id_value = Some(value.to_vec());
+        } else if headers.contains("name=\"voice\"") {
+            voice_value = Some(value.to_vec());
+        }
+        offset = content_start + next_pos;
+    }
+    assert_eq!(
+        chat_id_value.as_deref(),
+        Some(b"1001".as_slice()),
+        "sendVoice chat_id field must be exactly 1001"
     );
-    assert!(
-        body_text.contains("name=\"voice\"") && body_text.contains("OggS-synthetic-opus-audio"),
-        "sendVoice payload missing voice fixture audio: {body_text}"
+    assert_eq!(
+        voice_value.as_deref(),
+        Some(b"OggS-synthetic-opus-audio".as_slice()),
+        "sendVoice voice field must contain the exact fixture bytes"
     );
     endpoint.verify().await;
 }
