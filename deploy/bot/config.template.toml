@@ -56,11 +56,16 @@ model = "gemini-3.5-flash"
 [providers.transcription.deepgram.voice]
 model = "nova-3"
 
+[providers.tts.edge.default]
+voice = "en-US-ChristopherNeural"
+binary_path = "edge-tts"
+
 [agents.primary]
 enabled = true
 channels = ["telegram.home"]
 model_provider = "opencode.default"
 transcription_provider = "deepgram.voice"
+tts_provider = "edge.default"
 risk_profile = "primary"
 runtime_profile = "primary"
 mcp_bundles = ["skills", "transfer", "codespace", "mail"]
@@ -514,6 +519,12 @@ enabled = true
 max_audio_bytes = 8_388_608
 max_duration_secs = 120
 transcribe_non_ptt_audio = true
+
+[tts]
+enabled = true
+default_voice = "en-US-ChristopherNeural"
+default_format = "mp3"
+max_text_length = 4096
 
 [media_pipeline]
 enabled = true

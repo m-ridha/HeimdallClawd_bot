@@ -119,7 +119,7 @@ no credential-isolated command boundary: root can access sign-in, integration
 credentials, messages and persistent state, and can stop the service.
 
 Git, gh, Bash, Python 3, curl, jq, Node/npm, SSH, Go 1.27, slop-chop, Rust 1.99/Cargo/rustfmt/Clippy,
-GCC and Chromium are installed in the final image. Native shell has a 300-second
+GCC, ffmpeg, edge-tts and Chromium are installed in the final image. Native shell has a 300-second
 timeout and upstream output bounds; large builds may exceed container resources.
 Telegram transfer helpers preserve relative-path, symlink, size and recipient
 checks. Other native tools have their own upstream policy and prerequisites.
