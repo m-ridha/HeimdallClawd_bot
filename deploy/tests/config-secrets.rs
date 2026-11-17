@@ -68,7 +68,7 @@ async fn heimdall_secret_overrides_reach_native_config_without_persistence() {
     assert!(config.mcp_servers_for_agent("unknown").is_empty());
     assert_eq!(
         config.agents["primary"].model_provider.as_str(),
-        "opencode.default"
+        "openrouter.default"
     );
     let opencode = config.providers.models.find("opencode", "default").unwrap();
     assert_eq!(opencode.api_key.as_deref(), Some(opencode_key));
