@@ -352,5 +352,9 @@ fn managed_github_guide_is_visible_with_production_prompt_budget() {
     );
     assert!(prompt.contains("force=false"));
     assert!(prompt.contains("A GitHub skill is optional guidance"));
+    assert!(prompt.contains("https://api.agentmail.to/v0/inboxes"));
+    assert!(prompt.contains("https://api.agentmail.to/v0/inboxes/<inbox_id>/messages/send"));
+    assert!(prompt.contains(r#"auth_secret="agentmail""#));
+    assert!(prompt.contains("omitted from shell_env_passthrough"));
     assert!(!prompt.contains("[System prompt truncated"));
 }

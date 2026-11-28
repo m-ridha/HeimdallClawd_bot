@@ -63,7 +63,7 @@ lock = json.loads((out / 'deploy/bot/runtime.lock.json').read_text())
 provenance = {
     'release': tag, 'project_commit': commit,
     'runtime_revision': lock['revision'], 'source_sha256': lock['source_sha256'],
-    'builder': 'rust:1.99-slim-bookworm, native Linux x86_64',
+    'builder': 'rust:1.100-slim-bookworm, native Linux x86_64',
     'binary_sha256': digest, 'launcher_sha256': launcher_digest,
     'features': ','.join(lock['features']),
     'profile': 'release: opt-level=1, lto=off, codegen-units=16',
@@ -80,6 +80,7 @@ patch_files = {
     'browser_output_patch_sha256': 'browser-output.patch',
     'private_telegram_patch_sha256': 'private-telegram.patch',
     'telegram_startup_patch_sha256': 'telegram-startup.patch',
+    'eager_read_skill_patch_sha256': 'eager-read-skill.patch',
 }
 provenance.update({
     field: hashlib.sha256(source_file(root, f'deploy/bot/patches/{filename}').read_bytes()).hexdigest()

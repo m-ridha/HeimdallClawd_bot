@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu git lynx openssh-client bash python3 python3-pip python3-venv curl jq sudo build-essential pkg-config libssl-dev ripgrep chromium chromium-driver ffmpeg tini && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages edge-tts \
+    && pip3 install --no-cache-dir --break-system-packages edge-tts==7.3.1 \
     && groupadd --gid 1000 heimdall && useradd --uid 1000 --gid 1000 --no-create-home heimdall
 COPY --from=gh-download /usr/local/bin/gh /usr/local/bin/gh
 COPY --from=go-download /usr/local/go /usr/local/go
