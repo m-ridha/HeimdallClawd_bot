@@ -41,7 +41,7 @@ The launcher regenerates managed `config.toml` settings on every start. API/bot 
 
 ## Prerequisites
 
-Install the Rust toolchain at **1.99** (edition 2024), Git and Python **3.10+** (CI uses 3.12). Docker with a running daemon is needed to reproduce native Linux builds. ZeroClaw and the launcher run as Rust binaries. The main image also includes Node/npm for agent tasks; Node 26 builds the dashboard and supplies that toolkit, while CI uses Node 24 to install the Railway CLI. Host Node is not required for the portable checks. Infrastructure work additionally needs Railway CLI **5.68.0** and the pinned Python SDK:
+Install the Rust toolchain at **1.100** (edition 2024), Git and Python **3.10+** (CI uses 3.12). Docker with a running daemon is needed to reproduce native Linux builds. ZeroClaw and the launcher run as Rust binaries. The main image also includes Node/npm for agent tasks; Node 26 builds the dashboard and supplies that toolkit, while CI uses Node 24 to install the Railway CLI. Host Node is not required for the portable checks. Infrastructure work additionally needs Railway CLI **5.68.0** and the pinned Python SDK:
 
 ```sh
 python3 -m venv /tmp/heimdall-iac

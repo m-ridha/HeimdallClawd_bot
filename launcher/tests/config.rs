@@ -968,7 +968,10 @@ fn compact_skill_loading_remains_authorized_with_deferred_builtins() {
     for field in ["allowed_tools", "auto_approve"] {
         let names = tool_names(&config["risk_profiles"]["primary"], field);
         assert!(names.contains(&"read_skill"), "missing {field}: read_skill");
-        assert!(names.contains(&"tool_search"), "missing {field}: tool_search");
+        assert!(
+            names.contains(&"tool_search"),
+            "missing {field}: tool_search"
+        );
     }
 }
 

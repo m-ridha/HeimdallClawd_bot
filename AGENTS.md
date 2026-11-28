@@ -27,7 +27,7 @@ A model claiming success is not evidence a tool ran; a build is not deployment.
 
 ## Setup and checks
 
-The launcher is one Rust crate (edition 2024, Rust 1.99), with its own Cargo.lock.
+The launcher is one Rust crate (edition 2024, Rust 1.100), with its own Cargo.lock.
 Python tools use the standard library and Python 3.10+. Use the [README setup](README.md#prerequisites);
 no `.env` or real credentials are required for portable tests. Do not silently
 upgrade dependencies, base images, the runtime, SDK or CLI pins.
