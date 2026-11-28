@@ -47,18 +47,24 @@ class PackageTests(unittest.TestCase):
             self.assertIn('test "$(gosu heimdall id -u)" = 1000', dockerfile)
             self.assertIn('go version', dockerfile)
             self.assertIn('slop-chop --version', dockerfile)
+            self.assertIn('edge-tts==7.3.1', dockerfile)
             self.assertNotIn('gosu heimdall sudo', dockerfile)
             workflow = (ROOT / '.github/workflows/build.yml').read_text()
             self.assertIn('gosu heimdall sudo -n cargo --version', workflow)
             self.assertIn('gosu heimdall sudo -n go version', workflow)
 
-            self.assertEqual({key for key in lock if key.endswith('_patch_sha256')}, {
+            recorded_patches = {key for key in lock if key.endswith('_patch_sha256')}
+            self.assertEqual(recorded_patches, {
                 'responses_tool_history_patch_sha256', 'sop_workshop_guidance_patch_sha256',
                 'gateway_admin_auth_patch_sha256', 'http_diagnostics_patch_sha256',
                 'http_secret_origins_patch_sha256', 'browser_output_patch_sha256',
                 'private_telegram_patch_sha256', 'telegram_startup_patch_sha256',
                 'tool_log_privacy_patch_sha256', 'browser_navigation_patch_sha256',
-                'acp_pairing_revocation_patch_sha256',
+                'acp_pairing_revocation_patch_sha256', 'eager_read_skill_patch_sha256',
+            })
+            self.assertEqual(recorded_patches, {
+                p.stem.replace('-', '_') + '_patch_sha256'
+                for p in (ROOT / 'deploy/bot/patches').glob('*.patch')
             })
             self.assertEqual(lock['browser_output_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/browser-output.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['responses_tool_history_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/responses-tool-history.patch').read_bytes()).hexdigest())
@@ -79,7 +85,7 @@ class PackageTests(unittest.TestCase):
             self.assertNotIn('executor_sha256', lock)
             self.assertNotIn('native_child_patch_sha256', lock)
             self.assertNotIn('remote_skills_patch_sha256', lock)
-            for name in ['tool-log-privacy', 'browser-navigation', 'acp-pairing-revocation']:
+            for name in ['tool-log-privacy', 'browser-navigation', 'acp-pairing-revocation', 'eager-read-skill']:
                 field = name.replace('-', '_') + '_patch_sha256'
                 self.assertEqual(lock[field], hashlib.sha256((ROOT / f'deploy/bot/patches/{name}.patch').read_bytes()).hexdigest())
             self.assertEqual(lock['telegram_startup_patch_sha256'], hashlib.sha256((ROOT / 'deploy/bot/patches/telegram-startup.patch').read_bytes()).hexdigest())
